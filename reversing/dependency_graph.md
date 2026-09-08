@@ -547,15 +547,42 @@ PTR_DAT_004e06e0 (3-pointer array: group0/1/2 state tables)
                  table drives)
 
 state 33 ("Dark Reign shoot", group0) -> HandleDarkReignAttackState
-  -> depends on: HasDamageAuthority, deathmatch team array (DAT_005db650)
-  -> depends on (NOT YET IN DB): FUN_00401cb0 (target scan),
-                 FUN_00402660 (fire/effect trigger)
+  -> depends on: HasDamageAuthority, deathmatch team array (DAT_005db650),
+                 ScanForTargetCandidate, QueueAiEvent
   <- confirms user-supplied claim: this is a deathmatch superweapon
                  attack state, tied to the "Deathmatch Dark Reign
                  target" objective (string at 0x4e06ec)
 
 state 110 ("dark reign shoot", group1) -> HandleDarkReignExitState
   -> depends on (NOT YET IN DB): FUN_0040e8a0 (cleanup)
+```
+
+## AI perception/event queue — a second AI subsystem (eighteenth session)
+
+```
+ScanForTargetCandidate (0x401cb0)
+  -> depends on: object+0x684 (AI command struct, mode selector at +2),
+                 DAT_005267cc (mission-scripted candidate list, one of
+                 LoadMissionFile's 27 directory tables — direct link
+                 between AI targeting and mission-authored data)
+  -> depends on (NOT YET IN DB): thunk_FUN_004531c0 (candidate
+                 iterator), FUN_00401d80 (mode-2 delegate)
+  <- depended on by: HandleDarkReignAttackState (and presumably other
+                 AI target-search call sites, not individually traced)
+
+QueueAiEvent (0x402660)
+  -> depends on: object+0xb8c/+0xb90 (event queue count/buffer, lazily
+                 allocated 720 bytes), ReportAssertionFailureEx
+                 (overflow guard, "DPStack Overflow on %s"),
+                 DAT_005883b0 (tick counter, for expiry timestamps),
+                 HasDamageAuthority (multiplayer broadcast gate)
+  -> depends on (NOT YET IN DB): FUN_004ba560 (multiplayer AI-event
+                 broadcast)
+  <- depended on by: HandleDarkReignAttackState; presumably a wide
+                 range of other AI decision-making call sites given
+                 its generic "push a perceived event with TTL" shape
+                 — relationship to TrySetAiState's state machine not
+                 directly traced
 ```
 
 ## SurrenderLib scene-node primitives (tenth session)

@@ -2807,8 +2807,93 @@ the shipped game.
 
 ### Open follow-ups
 
-- `FUN_00401cb0` (the real Dark Reign target-scan logic), `FUN_00402660`
-  (the actual fire/effect trigger), `FUN_0040e8a0` (exit-state cleanup
-  detail).
+- ~~`FUN_00401cb0`, `FUN_00402660`~~ — resolved next, see below.
+- `FUN_0040e8a0` (exit-state cleanup detail).
 - Whether group 2 is truly entirely unused or has real content beyond
   the single placeholder entry read this session.
+
+---
+
+# Twentieth pass (2026-09-08, same day): `ScanForTargetCandidate` and a second AI subsystem, `QueueAiEvent`
+
+Resolved `HandleDarkReignAttackState`'s two remaining calls. The second
+one, `QueueAiEvent`, turned out to be a genuinely new discovery: an
+entire second AI subsystem — a per-object perception/event queue —
+distinct from the `TrySetAiState` finite-state-machine documented two
+sessions ago.
+
+## `ScanForTargetCandidate` (`0x00401cb0`)
+
+```c
+void __fastcall ScanForTargetCandidate(int shipSlot, char (*testCallback)(void));
+```
+
+A generic, 3-mode target-search dispatcher, reading its mode from the
+ship's AI command structure (`object+0x684 → +2`):
+
+- **Mode 0**: calls `testCallback` exactly once — an "immediate,
+  no-search" fast path (e.g. "is my current target still valid").
+- **Mode 1**: iterates a MISSION-SCRIPTED candidate list —
+  `DAT_005267cc`, one of the 27 mission-directory tables `LoadMissionFile`
+  populates when a `.dte` file loads (documented 6 sessions ago), with
+  a 20-byte stride per candidate record. Calls `testCallback` on each
+  candidate (via an unopened helper, `thunk_FUN_004531c0`) until one
+  succeeds or the list — bounded by a count byte at each list-header's
+  `+9` offset — is exhausted.
+- **Mode 2**: delegates entirely to `FUN_00401d80` (not decompiled).
+
+This directly connects the AI targeting system to mission-authored
+data: a mission file can apparently script a specific candidate-target
+list for certain AI searches (mode 1), rather than every AI search
+being a generic "find nearest enemy" scan over the live object list.
+
+## `QueueAiEvent` (`0x00402660`) — a second AI subsystem
+
+```c
+void __fastcall QueueAiEvent(int shipSlot, short eventKey[4],
+                              int durationTicks, uint flags);
+```
+
+Source-tagged `C:\lancer\game\Ai.cpp` line `0x752` — the same file as
+`TrySetAiState` and `SetShipDestroyedState`, but a genuinely different
+mechanism: a per-object **perception/event queue**, not the state
+machine.
+
+- Lazily allocates a 720-byte buffer (`object+0xb90`, ~19 event slots)
+  the first time an object needs one, tracking a live count at
+  `object+0xb8c`.
+- **Guards against overflow with a real, named assertion**:
+  `"DPStack Overflow on %s"` via `ReportAssertionFailureEx` if the
+  queue would exceed 19 entries — "DP" plausibly short for "Decision
+  Process," suggesting this queue is a direct input to AI
+  decision-making, not just a log.
+- **Implements deduplication**: pushing an event whose 4-`short` key
+  matches an already-queued one either no-ops (if the existing entry
+  hasn't expired) or replaces it (if it has) — rather than queuing
+  duplicate perceptions.
+- Each event carries roughly a 13-`short` payload, a flags byte, and
+  an expiry timestamp (`DAT_005883b0` — the tick counter confirmed in
+  many earlier sessions — plus the caller-supplied duration).
+- **Multiplayer-synced**: when the pushing client has damage/simulation
+  authority over the object (`HasDamageAuthority`), the event is
+  broadcast to other clients via `FUN_004ba560` (not decompiled).
+
+This is a genuinely distinct mechanism from `TrySetAiState`'s FSM:
+**state** answers "what is this ship currently doing" (with priority-
+gated transitions), while the **event queue** answers "what has this
+ship perceived or been told, with a time-to-live" — presumably state
+transitions get triggered by processing queued events, though that
+specific link (which code reads this queue and turns entries into
+state-transition requests) wasn't traced this session.
+
+### Open follow-ups
+
+- `FUN_00401d80` (`ScanForTargetCandidate` mode 2), `thunk_FUN_004531c0`
+  (mission-scripted candidate iterator), `FUN_004ba560` (multiplayer
+  AI-event broadcast) — none decompiled.
+- The actual link between `QueueAiEvent`'s queue and `TrySetAiState`'s
+  state transitions — inferred from shared domain, not directly traced
+  through code. Finding whatever reads `object+0xb90`'s queue would
+  settle this.
+- `DAT_005267cc`'s own record layout (20 bytes/entry; only the `+9`
+  count/flag byte is decoded, via this one consumer).

@@ -673,9 +673,26 @@ being effectively vestigial in the shipped game.
 
 ### Open follow-ups
 
-- `FUN_00401cb0` (the real Dark Reign target-scan logic), `FUN_00402660`
-  (the actual fire/effect trigger), `FUN_0040e8a0` (exit-state cleanup
-  detail) — none decompiled.
+- ~~`FUN_00401cb0`, `FUN_00402660`~~ — **both resolved next, see below: a target-scan dispatcher and a second, previously-unknown AI subsystem (the perception/event queue).**
+- `FUN_0040e8a0` (exit-state cleanup detail) — not decompiled.
 - Whether group 2 is truly entirely unused, or has real entries beyond
   the single placeholder read this session (only the first 24 bytes of
   its table were examined).
+
+## `ScanForTargetCandidate` and `QueueAiEvent` — a second AI subsystem (2026-09-08, eighteenth session)
+
+Resolved `HandleDarkReignAttackState`'s two remaining calls. `QueueAiEvent`
+in particular turned out to be a significant find: a whole second AI
+subsystem — a per-object **perception/event queue** — distinct from
+the state-machine (`TrySetAiState`) documented two sessions ago.
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `ScanForTargetCandidate` (0x401cb0, was `FUN_00401cb0`) | 2 | A generic, 3-mode target-search dispatcher: `(shipSlot, testCallback)`. Reads a mode selector from the ship's AI command structure (`object+0x684 → +2`). Mode 0: calls the test callback exactly once (immediate/no-search). Mode 1: iterates a MISSION-SCRIPTED candidate list — `DAT_005267cc` (stride `0x14`=20 bytes), one of the 27 mission-directory tables `LoadMissionFile` populates (documented 6 sessions ago) — calling the test callback on each candidate (via a helper, `thunk_FUN_004531c0`, not decompiled) until it returns success or the list is exhausted. Mode 2: delegates entirely to `FUN_00401d80` (not decompiled). Directly connects the AI targeting system to mission-authored data — a real mission file can apparently script a specific candidate-target list for certain AI searches, not just "nearest enemy." |
+| `QueueAiEvent` (0x402660, was `FUN_00402660`) | 2 | **A second, previously undocumented AI subsystem**: a per-object perception/event queue, source-tagged `C:\lancer\game\Ai.cpp` line `0x752` (lazily allocates a 720-byte, ~19-slot buffer at `object+0xb90`, count at `object+0xb8c`). Guards against overflow with a real named assertion (`"DPStack Overflow on %s"` — "DP" plausibly "Decision Process," suggesting this queue feeds AI decision-making) via `ReportAssertionFailureEx`. Implements DEDUPLICATION: pushing an event matching an already-queued one (compared by a 4-`short` key) either no-ops if the existing entry hasn't expired yet, or replaces it if it has. Each event carries a payload (~13 shorts), a flags byte, and an expiry timestamp (`DAT_005883b0 + duration`). In multiplayer, authoritative pushes are broadcast to other clients via `FUN_004ba560` (not decompiled). This is a distinct mechanism from the `TrySetAiState` FSM: state = "what is this ship currently doing," event queue = "what has this ship perceived/been told, with a time-to-live" — presumably state transitions are triggered by processing this queue, though that link isn't directly traced. |
+
+### Open follow-ups
+
+- `FUN_00401d80` (`ScanForTargetCandidate` mode 2), `thunk_FUN_004531c0` (mission-scripted candidate-list iterator), `FUN_004ba560` (multiplayer AI-event broadcast) — none decompiled.
+- Whether/how the event queue (`QueueAiEvent`) actually drives state transitions (`TrySetAiState`) — the two systems' relationship is inferred from their shared domain (`Ai.cpp`, per-object AI data) but not directly traced through code.
+- `DAT_005267cc`'s own record layout (20 bytes/entry, `+9`=count/flag byte observed) — only partially decoded via this one consumer.
