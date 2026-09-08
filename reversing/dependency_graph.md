@@ -1280,3 +1280,19 @@ RunShipInteriorVRLoop, roomType==7 transition
 
 RunMissionBriefingScreen callers: RunMenuScreenLoop (screen ID 7) AND WinMain directly (0x4aa027, 0x4aa6f2)
   -> WinMain-level triggering condition: under investigation (forked)
+
+## THE MISSING LINK FOUND: roomType 1 leads to mission briefing, not the main menu (2026-09-09, forty-sixth session)
+
+```
+RunShipInteriorVRLoop, roomType==1 door
+  -> RunMenuScreenLoop(7)   [literal argument -- corrects Pass 4/5's "exit to menu" mislabel]
+       -> RunMissionBriefingScreen (Pass 43's full 5-stage sequence)
+            -> DAT_0051d4b4==1 (confirmed) -> VR loop reopens fresh at bunkroom entry hub
+            -> DAT_0051d4b4==0 or 2 (declined/cancelled) -> unwinds toward main menu
+
+WinMain (0x4aa027, 0x4aa6f2)
+  -> RunMissionBriefingScreen()   [only when DAT_00562dc8==0x1d, mission-29 epilogue]
+       -> FUN_004ac620 (ending cutscene/credits, not decompiled) -> DAT_00562dc8 reset to 1
+
+RunMissionSelectMapScreen (roomType==5 hub)
+  -> InitializeMissionGameplay -> RunMissionGameplay -> UnloadMission   [direct, no briefing hop]

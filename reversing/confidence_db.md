@@ -1449,3 +1449,18 @@ Direct research request. Decompiled `FUN_0043c1c0` (the per-frame VR-loop callba
 - WinMain-level trigger investigation (forked, pending).
 - Exact mission-number-to-news-clip-string mapping direction.
 - Narrative significance of mission 1's distinct news cycle.
+
+## THE MISSING LINK FOUND: roomType 1 leads to mission briefing, not the main menu (2026-09-09, forty-sixth session)
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `roomType==1` doors call `RunMenuScreenLoop(7)` (literal argument), i.e. lead to `RunMissionBriefingScreen`, NOT the main menu | 5 | Directly read after exposing the hidden argument via `set_function_prototype` on `RunMenuScreenLoop`. **Corrects Passes 4/5**, which described roomType==1 as "exit to front-end menu" based only on the function name, not its argument. Flagged, not silently fixed. |
+| `WinMain`'s two direct `RunMissionBriefingScreen` calls (0x4aa027, 0x4aa6f2) are mission-29-epilogue-only short-circuits | 4 | Confirmed via background investigation: both gated on `DAT_00562dc8==0x1d`, followed by an ending-cutscene call (`FUN_004ac620`) and campaign reset to mission 1. |
+| `RunMissionSelectMapScreen` launches gameplay directly (`InitializeMissionGameplay`/`RunMissionGameplay`/`UnloadMission`), does NOT route through briefing | 4 | Full decompile this session; no call to `RunMissionBriefingScreen` or write to `DAT_0051dac4` anywhere in it. |
+| The complete closed-loop picture: briefing-hub (roomType 7) <-> briefing screen (roomType 1) <-> star map (roomType 5) -> gameplay | 4 | Synthesized directly from this session's findings plus Passes 4/5/7/33/43/45. |
+
+### Open follow-ups
+
+- Exact disambiguation of `DAT_0051d4b4` values 0 vs. 2 (both exit paths, distinct narrative meaning not confirmed).
+- Systematic sweep of other `RunMenuScreenLoop(N)` call sites for further mislabeled transitions.
+- `FUN_004ac620` (mission-29 ending cutscene/credits function) -- not decompiled.

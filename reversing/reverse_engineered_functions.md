@@ -5963,3 +5963,116 @@ writes within it).
 - Whether the mission-1-specific 3-state news cycle has special
   narrative significance (a scripted "first mission" intro sequence
   seems likely, not confirmed).
+
+## Pass 46 -- THE MISSING LINK FOUND: roomType 1 leads to mission briefing, not the main menu (2026-09-09)
+
+Direct capstone to "work on the rest of the VR engine all the way to
+mission briefing." Applied the same `set_function_prototype` technique
+(Passes 34/35/37) to `RunMenuScreenLoop` itself and re-decompiled
+`RunShipInteriorVRLoop` -- this immediately exposed every hidden
+starting-screen-ID argument at every call site project-wide, and one
+of them resolves the exact question this whole investigation was
+chasing.
+
+### The finding
+
+```c
+else if (sVar3 == 1) {
+    ...cleanup, free resources...
+    RunMenuScreenLoop(7);   // <-- LITERAL ARGUMENT: 7 = RunMissionBriefingScreen
+    if (DAT_0051d4b4 == 0) goto LAB_0043b957;      // -> exit the VR loop entirely
+    if (DAT_0051d4b4 == 2) { ...; goto LAB_0043b94f; }  // -> also exits, different flag
+    // otherwise (DAT_0051d4b4 == 1): reload resources, reopen the VR
+    // interior fresh at the BUNKROOM entry hub (VRRoomNode_0050b2b8/
+    // _00506ad0) -- i.e. "loadout confirmed, launching"
+}
+```
+
+**Correction to Passes 4/5, not silent**: both earlier passes described
+`roomType == 1` doors as "exit to front-end menu," inferred purely from
+the fact that the code called `RunMenuScreenLoop()` with no visible
+argument (the hidden-fastcall-argument problem, unresolved at the
+time). **The actual call passes `7`, meaning every `roomType == 1`
+"exit" door in the ship interior sends the player directly into
+`RunMissionBriefingScreen`, not the main menu.** This makes complete
+narrative sense in hindsight: `roomType == 1` doors are how the player
+RE-ENTERS the loadout/briefing screen from within the ship (e.g. to
+review or change their loadout before actually launching), not how
+they quit to the title screen.
+
+This closes the full loop documented across Passes 4, 5, 33, 43, and
+45: `RunMissionBriefingScreen`'s own ending hands off into
+`RunShipInteriorVRLoop` (Pass 43), and `RunShipInteriorVRLoop`'s
+`roomType == 1` doors hand control straight back into
+`RunMissionBriefingScreen` (this pass) -- the two systems form a
+closed cycle: loadout/briefing <-> ship interior, with the player able
+to move between them freely until they confirm their loadout
+(`DAT_0051d4b4 == 1`) and launch, or cancel out entirely
+(`DAT_0051d4b4 == 0` or `2`, both of which unwind out of the VR loop
+and, per `RunMissionBriefingScreen`'s own Pass-43-documented behavior,
+ultimately return toward the main menu / mission outcome flow).
+
+### `WinMain`'s two direct `RunMissionBriefingScreen` calls: resolved (background investigation)
+
+A background investigation (forked separately) confirmed both of
+`WinMain`'s direct calls into `RunMissionBriefingScreen` (`0x4aa027`,
+`0x4aa6f2`) are **mission-29-epilogue-only short-circuits** -- each is
+gated on `DAT_00562dc8 == 0x1d`, calling `RunMissionBriefingScreen()`
+(which per Pass 43 loads `enddebriefing.ut` for this special case)
+followed by an ending-variant cutscene/credits function
+(`FUN_004ac620`, branching on campaign-performance flags
+`DAT_0052a410`/`DAT_0052a40c`/`DAT_0052a424`) and then resetting
+`DAT_00562dc8 = 1` to loop the campaign back to mission 1. **For every
+normal mission, `WinMain` does NOT call `RunMissionBriefingScreen`
+directly at all** -- the only path is via `RunMenuScreenLoop(7)`, and
+this pass has now confirmed the one call site inside the VR loop that
+actually reaches it during normal gameplay.
+
+### `RunMissionSelectMapScreen`, re-examined: does NOT route through briefing
+
+Fully decompiled (previously only summarized in Pass 7). Confirms it
+launches gameplay **directly**: `InitializeMissionGameplay(); Run
+MissionGameplay(); UnloadMission();`, with no call to
+`RunMissionBriefingScreen` or write to `DAT_0051dac4` anywhere. This
+means the star-map screen (reached via the VR loop's `roomType == 5`
+"pod bay" hub, per Pass 7) is a genuinely separate, LATER step from
+loadout/briefing in the overall flow -- the player briefs and loads out
+first (via the `roomType == 7` hub and its `roomType == 1`
+return-loop, this pass), then separately visits the star map to pick
+between a small number of mission-variant branches
+(`mission30`/`31`/`32`, plus a `mission29` epilogue option) and launch
+directly into gameplay.
+
+### The complete, closed-loop picture
+
+```
+[VR ship interior]
+  roomType==7 door -> RunBriefingHubNewsReport (Pass 45) -> briefing-hub room (tv2brd.bik)
+  roomType==1 door (within/near the hub) -> RunMenuScreenLoop(7) -> RunMissionBriefingScreen
+     -> loadout setup, briefing video, interactive loadout, closing speech (Pass 43)
+     -> confirm (DAT_0051d4b4==1): reopen VR interior fresh at the bunkroom entry hub
+     -> decline/cancel (DAT_0051d4b4==0 or 2): unwind out toward the main menu
+  roomType==5 door -> RunMissionSelectMapScreen -> pick mission30/31/32/29 -> InitializeMissionGameplay
+     -> RunMissionGameplay -> UnloadMission (gameplay itself, documented in earlier sessions)
+```
+
+### Confidence
+
+**Confidence 5** on the `RunMenuScreenLoop(7)` finding -- a literal,
+unambiguous decompiled argument value, not an inference. **Confidence
+4** on the overall closed-loop picture and the WinMain/mission-29
+resolution (both directly read, cross-referencing multiple passes'
+prior work). **Confidence 3** on the precise meaning of `DAT_0051d4b4`
+values 0 vs. 2 (both "exit," but the exact narrative distinction
+between them -- e.g. "declined to fly" vs. some other cancel path --
+not fully disambiguated this session).
+
+### Open follow-ups
+
+- Exact disambiguation of `DAT_0051d4b4` values 0 vs. 2.
+- Whether OTHER `RunMenuScreenLoop(N)` call sites elsewhere in the
+  codebase (now trivially discoverable via the same exposed-argument
+  technique) reveal further previously-mislabeled transitions --
+  worth a systematic sweep if this thread continues.
+- `FUN_004ac620` (the mission-29 ending-variant cutscene/credits
+  function) -- not decompiled.
