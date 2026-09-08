@@ -4199,3 +4199,95 @@ not otherwise explored.
 - No compressed BigFile sample was actually decoded byte-for-byte this
   session -- the RefPack identification rests on control-byte-shape
   matching against public documentation, not a live test.
+
+## Pass 30 -- The .ccb loader investigated: a master-palette resource format (2026-09-08)
+
+Direct follow-up on the incidental `SR_CCB_load` finding from Pass 29.
+
+### Only 3 `.ccb` files exist in the whole game: all palettes
+
+`search_strings` for `.ccb` returns exactly 3 hits: `palette.ccb`,
+`palette3.ccb`, `softpal.ccb`. Unlike `.dte` (per-mission) or `.ut`
+(per-line-of-dialogue, 383 instances), `.ccb` is a rare, GLOBAL
+resource type -- consistent with a small number of master
+color-palette definitions (one default, one alternate/"palette3", and
+one for a software-rendering fallback path -- "softpal" strongly
+implies "software palette", i.e. a palette used specifically when
+SurrenderLib falls back to software rasterization instead of
+hardware-accelerated rendering).
+
+### File structure, confirmed via `SR_CCB_load` (0x4cb9d0)
+
+```c
+struct CcbResource {          // total 0x30 bytes, allocated by SR_CCB_load
+    void*  payload;           // +0x00, variable length, size = scalar7 (below)
+    void*  unused1;           // +0x04, never written by SR_CCB_load
+    void*  scalarBlockC;      // +0x08, points at a single DWORD copied from file offset 0xf00
+    void*  blockA;            // +0x0c, 0x300 (768) bytes copied from file offset 0x000
+    void*  blockB;            // +0x10, 0xc00 (3072) bytes copied from file offset 0x300
+    uint32 scalar1..scalar6;  // +0x14..+0x28, 6 native-endian dwords read sequentially
+    uint32 scalar7;           // +0x2c, also used as the trailing payload's byte size
+};
+```
+
+File layout on disk (via the `HOG_BigRead` buffer, before the struct is
+built): `[0x300 bytes: Block A][0xc00 bytes: Block B][4 bytes: scalar
+C][7 x 4-byte scalar fields][variable-length payload, size = last
+scalar]`. The 7 scalar reads use `FUN_004cb540` -- confirmed to be a
+plain (non-byte-swapped) native-endian `uint32` read from an advancing
+cursor, the same hidden-fastcall-argument pattern documented
+repeatedly elsewhere in this project (contrast with `bigfile.cpp`'s
+`ReadSwappedUint32`, which DOES byte-swap -- `.ccb` files are stored in
+native x86 byte order, unlike the BigFile archive's own big-endian
+header/TOC).
+
+### Block A confirmed as a 256-color master RGB palette
+
+`0x300 = 768 = 256 x 3` -- and this is independently confirmed, not
+just size-inferred. Tracing `SR_CCB_load`'s two callers:
+
+- `FUN_004acbe0` (a graphics-device/window init routine -- sets window
+  styles, computes device caps at `DAT_00588730`) calls `SR_CCB_load()`
+  and stores the result at renderer-state offset `+0x1606`.
+- `FUN_00441aa0` (the game's asset-preload sequence -- loads ships,
+  missiles, backdrops, with `DebugLog_Stub` progress markers like
+  `"-- pre sample load (%d)"`) also calls `SR_CCB_load()` (into
+  `DAT_005246d0`), and later in the SAME function contains a loop that
+  reads RAW BYTES from renderer-state offset `+0x1602` (a field
+  immediately adjacent to the `+0x1606` CCB-pointer field) in groups of
+  3 (`pbVar1[0]`, `pbVar1[1]`, `pbVar3[0]` -- an R/G/B byte triple),
+  bit-shifts and ORs each channel using shift/mask amounts pulled from
+  the device's pixel-format descriptor
+  (`DAT_00588730+0x162a/0x1626/0x1632/0x163e/0x1636/0x1642`), and
+  writes one packed native-pixel-format `uint32` per input triple, for
+  exactly `0x300` (768) bytes of input. This is a textbook
+  **RGB-palette-to-hardware-pixel-format conversion loop** (e.g. RGB888
+  -> RGB565 or whatever the current display mode uses), operating on
+  exactly the same byte count as Block A. **Confidence 4** that Block A
+  is a raw 256-entry RGB palette table, consumed by the renderer to
+  build a native-format color lookup table for paletted rendering.
+
+### Block B: plausible but unconfirmed shading-ramp hypothesis
+
+`0xc00 = 3072 = 256 x 12`. Not observed being read by either traced
+caller this session. A 12-shades-per-palette-color pre-computed
+lighting/shading ramp table is a very common paletted-rendering
+technique from this era (used so dynamic lighting can be approximated
+by picking a pre-shaded palette index instead of recomputing color
+blends per-pixel), and the exact byte count fits neatly, but this is
+**not independently confirmed** -- flagged explicitly as a structural
+size-coincidence hypothesis, confidence 2, not a traced finding.
+
+### Open follow-ups
+
+- Trace what consumes `CcbResource.blockB` (0xc00 bytes) and the 7
+  scalar fields, to confirm or refute the shading-ramp hypothesis.
+- Determine what `.ccb` actually stands for -- no textual confirmation
+  found in the binary; the on-disk content (global master palettes,
+  not per-object sprite/cel data) does not obviously support a "Cel
+  Control Block" (3DO terminology) reading, so that guess is
+  explicitly NOT being adopted here.
+- `FUN_00441aa0` and `FUN_004acbe0` are both large, mostly-unexplored
+  graphics-initialization functions (window/device setup and the main
+  asset-preload sequence respectively) -- only the CCB-relevant slice
+  of each was examined this session.

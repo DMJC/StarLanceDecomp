@@ -1155,3 +1155,21 @@ public-API naming convention.
 
 - `.ccb` file format -- not investigated, out of scope for this pass.
 - RefPack identification not verified against an actual live compressed sample from the game's data.
+
+## The .ccb loader: a master-palette resource format (2026-09-08, thirtieth session)
+
+Direct follow-up on the incidental `SR_CCB_load` find from Pass 29.
+
+| Name (address) | Confidence | Notes |
+|---|---|---|
+| `.ccb` = global master-palette resource type | 4 | Only 3 exist in the whole game (`palette.ccb`, `palette3.ccb`, `softpal.ccb` -- "softpal" implying a software-rendering-path palette), unlike per-mission/`.dte` or per-line/`.ut` resources. |
+| `CcbResource` struct layout (0x30 bytes: payload ptr, unused, scalarC ptr, blockA ptr [0x300B], blockB ptr [0xc00B], 6 scalars, 1 size scalar) | 4 | Directly derived from `SR_CCB_load`'s field-by-field construction; internally consistent (payload copy length matches the last scalar field exactly). |
+| Block A (0x300/768 bytes) = 256-entry raw RGB palette | 4 | Confirmed via `FUN_00441aa0`: a companion RGB-triple-to-native-pixel-format packing loop reads exactly 768 bytes from a renderer-state field adjacent to the CCB-result field, using shift/mask constants from the device pixel-format descriptor. |
+| Block B (0xc00/3072 bytes) = possible 12-shade-per-color lighting ramp | 2 | Size (256x12) fits a common paletted-rendering shading-ramp technique, but not observed being consumed by either traced caller -- flagged as unconfirmed hypothesis, not a traced finding. |
+| `FUN_004cb540` = native-endian (non-swapped) uint32 cursor read | 3 | Same hidden-fastcall-cursor-advance pattern as `ReadSwappedUint32`, but without the byte-swap -- `.ccb` files are native x86 byte order, unlike the BigFile archive's big-endian header/TOC. |
+| "CCB" acronym meaning | 0 | No textual confirmation found. Content (global palettes) does not support a "Cel Control Block" (3DO) reading -- explicitly not adopted as a guess. |
+
+### Open follow-ups
+
+- Trace consumers of `CcbResource.blockB` and the 7 scalar fields.
+- `FUN_00441aa0`/`FUN_004acbe0` are large graphics-init functions, only their CCB-relevant slices examined.

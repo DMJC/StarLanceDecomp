@@ -1013,3 +1013,17 @@ SR_CCB_load (0x4cb9d0, was FUN_004cb9d0)
                  not decompiled), FUN_004d0333 (free)
   <- depended on by: (not traced this session -- found only as a HOG_BigRead caller)
 ```
+
+## The .ccb loader: a master-palette resource format (2026-09-08, thirtieth session)
+
+```
+SR_CCB_load (0x4cb9d0)
+  -> depends on: HOG_BigRead (0x4c7f60), FUN_004cb540 (native-endian cursor read),
+                 SR_MEM_allocate (5 allocations: struct, blockA, blockB, scalarC, payload),
+                 FUN_004d0333 (free), SR_MEM_free
+  <- depended on by: FUN_004acbe0 (graphics-device init -- stores result at
+                 rendererState+0x1606), FUN_00441aa0 (asset-preload sequence --
+                 stores result in DAT_005246d0, and separately contains an
+                 RGB-palette-to-native-pixel-format packing loop over 0x300 bytes
+                 at rendererState+0x1602, confirming Block A = 256-entry RGB palette)
+```
