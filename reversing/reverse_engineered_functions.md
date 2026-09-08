@@ -4291,3 +4291,120 @@ size-coincidence hypothesis, confidence 2, not a traced finding.
   graphics-initialization functions (window/device setup and the main
   asset-preload sequence respectively) -- only the CCB-relevant slice
   of each was examined this session.
+
+## Pass 31 -- Mission trigger-type catalog discovered (2026-09-08)
+
+Continued investigation of the mission-scripting subsystem, following
+the earlier `MissionScript_SetAnyTriggerState` finding (Pass 27). Set
+out to locate the actual `.dte` script interpreter/dispatcher; did not
+find it this session (see below), but found something arguably more
+valuable: the complete mission TRIGGER TYPE catalog.
+
+### Interpreter search: ruled out one large candidate
+
+Following `DAT_005799bc` (WaitForKey's key-wait index global) to all
+its read/write sites turned up a huge (9351-byte) previously-undefined
+function at `0x4843a4` (created via `create_function`, not yet named).
+Full decompile showed this is NOT the script interpreter -- it's the
+per-frame **HUD rendering function**, and its `DAT_005799bc` usage is
+simply drawing the on-screen "press [KEY] to continue" prompt banner
+(looking up the current wait-key's display name/glyph, checking SHIFT/
+CONTROL modifier requirements via a local string-pointer table, and
+positioning the prompt text). This usefully clarifies `DAT_005799bc`'s
+full role (a UI-visible "currently prompting for this key" index, not
+just an internal condition-table lookup key) but is a dead end for
+finding the interpreter itself. Not renamed or further explored this
+session given its size and tangential relevance.
+
+### The real find: `Mission_TriggerCount`'s overflow-dump function
+
+Searching for the source of the `"Mission_TriggerCount < MAX_TRIGGERLIST"`
+assert string (found in Pass 25 but not traced) led directly to
+`DumpMissionTriggerListOverflow` (`0x45b330`, was `FUN_0045b330`) -- a
+diagnostic function that fires when the live trigger count
+(`DAT_005373e4`, confirmed as the real `Mission_TriggerCount`) exceeds
+999. It dumps every live trigger's type name and owning-object name via
+`DebugLog_Stub`, then calls `ReportAssertionFailureEx` with `"Trigger
+List exceeded"`. **This directly implies `MAX_TRIGGERLIST` = 1000**
+(the `999 < count` guard is the only condition under which the dump AND
+the fatal assert both fire) -- confidence 3, inferred from the guard
+value rather than a literal `MAX_TRIGGERLIST` constant read.
+
+Critically, this function embeds a **complete, 32-entry trigger-type
+name table**, read directly by indexing a local string-pointer array
+with each trigger record's first byte:
+
+```
+TT_SHOTAT                      TT_PLAYER_READY_TO_WARP
+TT_DESTROYED                   TT_JUMPED_THROUGH_HOOP
+TT_LAUNCHED                    TT_PLAYER_WANTS_BACKUP
+TT_CAMERAREACHED                TT_RIPPER_GRABBED_OBJECT
+TT_SHIPREACHED                  TT_RIPPER_DROPPED_OBJECT
+TT_PROXIMITY_CLOSE              TT_CLOAKED
+TT_PROXIMITY_GENERAL            TT_DECLOAKED
+TT_OBJECT_SCOOPED               TT_TARGETTED
+TT_PLAYER_READY_TO_JUMP         TT_PLAYER_L1_DOUBLETAP
+TT_JUMPED_IN                    TT_PLAYER_L2_DOUBLETAP
+TT_FG_JUMPED_IN                 TT_PLAYER_R1_DOUBLETAP
+                                 TT_PLAYER_R2_DOUBLETAP
+                                 TT_PLAYER_L1_L2_R1_R2_PRESSED
+                                 TT_PLAYER_L1_R1_PRESSED
+                                 TT_GAME_TIMER_EXPIRED
+                                 TT_TRACTOR_BEAM_LOCKED
+                                 TT_TRACTOR_BEAM_BROKEN
+                                 TT_INSIDE_OBJECT
+                                 TT_OUTSIDE_OBJECT
+                                 TT_DOCKED
+                                 TT_UNDOCKED
+                                 TT_BEING_CHASED
+```
+
+This is the real, complete event/condition vocabulary for the mission
+scripting system's trigger mechanism -- e.g. a mission script can react
+to a player being shot at, a ship being destroyed, a ship reaching a
+waypoint, a controller double-tap combo, a tractor beam locking on, a
+game timer expiring, docking/undocking, cloaking, and so on. **This is
+a DIFFERENT system from the previously-documented AI perception/event
+queue** (`QueueAiEvent`, 19-slot buffer, `Ai.cpp`) -- this is the
+mission-SCRIPT-facing trigger list (`Mission_TriggerCount`/
+`MAX_TRIGGERLIST`, up to 1000 live triggers), which mission designers
+presumably attach via commands like `SetAnyTriggerState` to gate
+script branches on gameplay events. **Confidence 4** on the trigger-type
+catalog itself (read directly from real code); confidence 2 on the
+exact conceptual boundary between this system and the AI event queue
+(plausible, not exhaustively cross-checked).
+
+### Trigger record structure, partially confirmed
+
+Each live trigger record is a fixed 0x30-byte (48-byte) struct, stored
+in an array at `DAT_0052abe0` here (iterated with `pbVar2 = pbVar2 +
+0x30`), with **byte offset 0x00 = the trigger type code** (0-31,
+indexing the above catalog). `GetObjectIndexFromPointer()` and
+`FUN_004024e0()` (not decompiled) are used together to resolve a
+display name for the owning object -- the exact field holding that
+object reference within the 0x30-byte record isn't pinned down this
+session (the dump code passes the record pointer implicitly via hidden
+fastcall arguments, not shown in the decompile).
+
+This 0x30-byte stride matches the INNER per-trigger-instance array
+`MissionScript_SetAnyTriggerState` (Pass 27) walks via
+`DAT_005294e0 + nodeIndex*0x30` -- strong circumstantial evidence
+(matching stride, matching subject matter) that these are the same
+underlying trigger-instance array, referenced via different global
+aliases from different functions, though this is not proven by a
+direct code-level cross-reference this session. **Confidence 2** on
+the two arrays being identical/aliased.
+
+### Open follow-ups
+
+- The `.dte` script interpreter/dispatcher itself remains unlocated.
+  `FUN_004843a4` (HUD render) was ruled out; no other strong candidate
+  found yet via the `DAT_005799bc`/`DAT_00588338` global-xref approach.
+  A different search strategy (e.g. tracing what calls the mission
+  command table's base address, or examining `RunMissionGameplay`'s
+  full body for a per-tick script-cursor advance) is needed.
+- The full 0x30-byte trigger record layout beyond byte 0 (type code) --
+  not mapped.
+- Whether `DAT_0052abe0` and `DAT_005294e0` are the same array or two
+  parallel ones -- not directly confirmed.
+- `FUN_004024e0` (object display-name resolver) -- not decompiled.

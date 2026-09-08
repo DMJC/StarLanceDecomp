@@ -1027,3 +1027,20 @@ SR_CCB_load (0x4cb9d0)
                  RGB-palette-to-native-pixel-format packing loop over 0x300 bytes
                  at rendererState+0x1602, confirming Block A = 256-entry RGB palette)
 ```
+
+## Mission trigger-type catalog discovered (2026-09-08, thirty-first session)
+
+```
+DumpMissionTriggerListOverflow (0x45b330)
+  -> depends on: DAT_005373e4 (Mission_TriggerCount, confirmed real name),
+                 DAT_0052abe0 (trigger record array, stride 0x30, byte 0 = type code),
+                 GetObjectIndexFromPointer, FUN_004024e0 (object display name, not decompiled),
+                 DebugLog_Stub, ReportAssertionFailureEx
+  <- depended on by: (not traced -- likely called from the per-tick trigger-add path)
+
+FUN_004843a4 (HUD per-frame render, NOT the script interpreter -- ruled out this session)
+  -> depends on: DAT_005799bc (WaitForKey's key-wait index; also drives the on-screen
+                 "press key to continue" prompt rendered here), DAT_004e2380 (per-key
+                 condition/display table, shared with MissionScript_WaitForKey)
+  <- depended on by: (not traced)
+```

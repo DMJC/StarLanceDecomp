@@ -1173,3 +1173,25 @@ Direct follow-up on the incidental `SR_CCB_load` find from Pass 29.
 
 - Trace consumers of `CcbResource.blockB` and the 7 scalar fields.
 - `FUN_00441aa0`/`FUN_004acbe0` are large graphics-init functions, only their CCB-relevant slices examined.
+
+## Mission trigger-type catalog discovered (2026-09-08, thirty-first session)
+
+Continued mission-scripting investigation. Interpreter/dispatcher still
+not located (one large candidate, the HUD renderer at 0x4843a4, was
+checked and ruled out), but found the complete trigger-type catalog.
+
+| Name (address) | Confidence | Notes |
+|---|---|---|
+| `DumpMissionTriggerListOverflow` (0x45b330, was FUN_0045b330) | 4 | Diagnostic dump + fatal assert when live trigger count exceeds 999; confirms `DAT_005373e4` = real `Mission_TriggerCount`. |
+| `MAX_TRIGGERLIST` = 1000 | 3 | Inferred from the `999 < count` guard value, not a literal constant read. |
+| 32-entry mission trigger-type catalog (TT_SHOTAT, TT_DESTROYED, TT_CLOAKED, TT_DOCKED, TT_GAME_TIMER_EXPIRED, controller-doubletap types, etc.) | 4 | Read directly from `DumpMissionTriggerListOverflow`'s local string-pointer table, indexed by each trigger record's byte 0. Real, complete event vocabulary for the mission-script trigger mechanism -- distinct from the previously-documented AI perception/event queue (`QueueAiEvent`). |
+| Trigger record struct: 0x30 (48) bytes, byte 0x00 = trigger type code | 3 | Directly confirmed for byte 0 only; rest of the 48-byte record not mapped. Array base `DAT_0052abe0` here. |
+| `DAT_0052abe0` and `DAT_005294e0` (from `MissionScript_SetAnyTriggerState`, Pass 27) may be the same trigger-instance array | 2 | Matching 0x30-byte stride and matching subject matter, but not directly cross-referenced -- circumstantial, not proven. |
+| `FUN_004843a4` = HUD per-frame render function (not the script interpreter) | 3 | Ruled out as an interpreter candidate; its `DAT_005799bc` usage draws the on-screen "press key to continue" prompt. Not renamed -- large, mostly unexplored otherwise. |
+
+### Open follow-ups
+
+- Locate the `.dte` script interpreter/dispatcher itself -- still open.
+- Map the full 0x30-byte trigger record beyond byte 0.
+- Confirm/refute `DAT_0052abe0` == `DAT_005294e0`.
+- `FUN_004024e0` (object display-name resolver) -- not decompiled.
