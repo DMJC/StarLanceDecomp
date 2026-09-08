@@ -412,9 +412,11 @@ ProcessProjectileImpact (0x479b40)
                  InvokeEffectAnchorCallback (called recursively against
                  the HIT SHIP's own subsystem/component anchor list —
                  this IS the callback mystery's resolution)
-  -> depends on (NOT YET IN DB): FUN_00463d30 (hit-facing resolver),
-                 FUN_00463ee0 (apply-damage), FUN_004645c0 (effect/
-                 sound dispatcher), FUN_00479940/FUN_00479b30 (hit-
+  -> depends on: GetShieldFacingIndex (hit-facing resolver, itself a
+                 thin wrapper over unopened FUN_00463ca0), ApplyShieldDamage
+                 (the real damage-application function), ApplyComponentDamage
+                 (grouped-hitbox subsystem damage — resolved this session)
+  -> depends on (NOT YET IN DB): FUN_00479940/FUN_00479b30 (hit-
                  exemption checks)
   <- depended on by: (not directly determined — reached via the
                  callback mechanism from SpawnProjectile's proximity
@@ -427,8 +429,38 @@ UpdateShieldPowerAndComponents (0x465380)
   -> NOT decoded in full detail this session
 
 HandleComponentDestroyedEvent (0x495ac0)
-  -> depends on: PropagateAlertToChildren, FUN_004645c0
+  -> depends on: PropagateAlertToChildren, ApplyComponentDamage
   -> NOT decoded in full detail this session
+```
+
+## Shield/component damage resolution (thirteenth session)
+
+```
+GetShieldFacingIndex (0x463d30)
+  -> depends on (NOT YET IN DB): FUN_00463ca0 (the real facing-index
+                 computation this function wraps)
+  <- depended on by: ProcessProjectileImpact
+
+ApplyShieldDamage (0x463ee0)
+  -> depends on: ship-object +0x5f0..+0x5fc shield-quadrant floats
+                 (damage committed here), _DAT_0051cf34/_DAT_0051cf78
+  -> depends on (NOT YET IN DB): FUN_00463d70 (difficulty damage
+                 scaling), FUN_004641f0 (hull-damage spillover),
+                 FUN_004b5590 (multiplayer damage-authority check),
+                 FUN_00474c80 (scoring/kill-credit), FUN_00456dd0/
+                 FUN_00463e10 (local-player hit feedback)
+  <- depended on by: ProcessProjectileImpact
+
+ApplyComponentDamage (0x4645c0)
+  -> depends on: ship-object +0xf8/+0x100 child list (component-group
+                 lookup), ReportAssertionFailureEx (attackerSlot bounds
+                 check — confirms general-purpose assert usage outside
+                 bootstrap code)
+  -> depends on (NOT YET IN DB): FUN_00463d70, FUN_004b5590 (shared
+                 with ApplyShieldDamage), FUN_00474e00 (component-
+                 destroyed reaction), FUN_00415270 (wingman/comm
+                 chatter trigger), FUN_0047d1f0 (per-turret hit mark)
+  <- depended on by: ProcessProjectileImpact, HandleComponentDestroyedEvent
 ```
 
 ## SurrenderLib scene-node primitives (tenth session)

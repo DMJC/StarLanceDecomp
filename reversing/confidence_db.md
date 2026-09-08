@@ -443,10 +443,30 @@ among the most gameplay-central code found in this entire investigation.
 
 ### Open follow-ups
 
-- `FUN_00463d30` ("which shield facing was hit" — resolves an index 0-3), `FUN_00463ee0` ("ApplyDamage"-shaped), `FUN_004645c0` (effect/sound dispatcher, called from at least 3 different functions this session with an ID+owner+code signature).
+- ~~`FUN_00463d30`, `FUN_00463ee0`, `FUN_004645c0`~~ — **all three resolved next session, see below.**
 - "Ulysses" as a probable in-universe capital ship class name — worth checking the string table for siblings (other ship class names) if ship/fleet naming becomes a focus.
 - The full component/subsystem damage model — only the existence and rough shape (per-component hit test, independent destruction, distinct effects) is confirmed; the component list's own structure isn't decoded.
 - `UpdateShieldPowerAndComponents`/`HandleComponentDestroyedEvent` deserve a full pass if the shield/subsystem-damage system becomes a focus — both still Confidence 1, only skimmed this session.
+
+## `ApplyShieldDamage` / `ApplyComponentDamage` / `GetShieldFacingIndex` (2026-09-08, thirteenth session)
+
+Resolved the 3 remaining follow-up functions from `ProcessProjectileImpact`.
+Between `ApplyShieldDamage` and `ApplyComponentDamage`, this reveals the
+complete two-stage damage model: shields absorb per-facing damage with
+hull spillover, and SEPARATELY, individually-targetable components use
+their own grouped-hitbox health pools with armor thresholds.
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `GetShieldFacingIndex` (0x463d30, was `FUN_00463d30`) | 1 | A thin wrapper — sets up a transform context from a sub-object pointer (`object+0x30`→`+0x70`, an unidentified turret/hardpoint-position reference) then delegates the actual facing computation to `FUN_00463ca0` (not decompiled). The real "which of the 4 quadrants was hit" logic lives in that unopened call, not here. |
+| `ApplyShieldDamage` (0x463ee0, was `FUN_00463ee0`) | 2 | Confirmed as the real damage-application function: `(object, quadrantIndex, damageAmount, damageRatio, attackerSlot, damageTypeCode)`. Early-exits on an invulnerability flag (`object+8 & 0x200000`) or a "special/scripted" class-def state (`+0x28==6`). Computes overflow (`max(0, damage - currentShieldValue)`) for hull spillover, applies a difficulty-scaling pass (`FUN_00463d70`, not decompiled — "AdjustDamageForDifficulty"), triggers scoring/kill-credit (`FUN_00474c80`) and camera-shake/audio feedback (`FUN_00456dd0`/`FUN_00463e10`) when the LOCAL PLAYER is attacker or target respectively, checks multiplayer damage-authority (`FUN_004b5590` — "should this client actually apply this damage") and deathmatch team/friendly-fire rules (`DAT_0050c2f8` FF-enabled flag, per-slot team-ID array `DAT_005dae30`) before committing the shield decrement, spills excess damage to hull via `FUN_004641f0` ("ApplyHullDamage", not decompiled) when the quadrant goes negative, and finally updates several "recently hit" UI-flash flags (`DAT_005635d4`/`DAT_00563160`) and plays an impact sound (`FUN_0045a9e0`). A complete, coherent shield-then-hull damage pipeline. |
+| `ApplyComponentDamage` (0x4645c0, was `FUN_004645c0`) | 2 | The real subsystem/component damage function: `(object, componentInstance, damageAmount, attackerSlot, damageTypeCode)`. Validates `attackerSlot` via `ReportAssertionFailureEx` (bounds-checked against the active-object count, or `-1` for "no attacker") — confirms `ReportAssertionFailureEx` is genuinely used as a general-purpose runtime assert throughout the codebase, not just in bootstrap code. Reveals a **grouped-hitbox component model**: components sharing a group ID (`+0xd4`) pool their health across multiple physical hit-collision pieces — the function walks the object's child list to find a group's "representative" member with remaining health (`+0x104>0`) before applying damage to it, meaning one logical subsystem (e.g. "engine cluster") can be modeled as several separate targetable meshes that share one HP pool. Also implements an **armor/threshold system**: components with health above `0x9c3` (2499) are immune to small hits (<500 damage) unless a "penetrating" damage type (3/4) or a specific target flag is set — i.e. some subsystems need a proportionally big hit to scratch. A **shielded-component damage reduction** (0.25× for hits under 1000 when a `0x4000` flag is set) suggests some components have their own point-defense-resistant armor. On destruction (health `<0`), sets a "destroyed" flag bit (`0x40`) and — for the LOCAL PLAYER's own ship, outside deathmatch — triggers a distinct reaction (`FUN_00474e00`). Also triggers wingman/comm chatter (`FUN_00415270`) when a friendly AI's assigned escort-target component is hit. Ends by resolving ANOTHER "representative component" lookup (two variants depending on a `+0x108` grouping field) and playing an impact sound (`FUN_0045a9e0`/`FUN_0045ade0`). |
+
+### Open follow-ups
+
+- `FUN_00463ca0` (the real shield-facing computation), `FUN_00463d70` (difficulty damage-scaling), `FUN_004641f0` (hull-damage spillover), `FUN_004b5590` (multiplayer damage-authority check), `FUN_00474c80`/`FUN_00474e00` (scoring/reaction hooks) — none decompiled, but all now precisely scoped by role.
+- The component group-ID fields (`+0xd4`, `+0x108`) and the armor-threshold constant (`0x9c3`=2499) — real, load-bearing balance numbers, not yet cross-referenced against any other data source (e.g. a ship-stats file) to see if they're tunable per-ship-class or hardcoded globally.
+- `DAT_004f7478` — the assertion message string for the `attackerSlot` bounds check in `ApplyComponentDamage`, not read.
 
 ## WinMain state-machine cluster (first dive, 2026-09-08)
 

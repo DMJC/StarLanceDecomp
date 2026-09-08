@@ -2307,3 +2307,140 @@ session (Confidence 1, real follow-up candidates):
 - `UpdateShieldPowerAndComponents`/`HandleComponentDestroyedEvent`
   deserve a full decode pass if the shield/subsystem-damage system
   becomes the next focus.
+
+---
+
+# Sixteenth pass (2026-09-08, same day): `ApplyShieldDamage` and `ApplyComponentDamage`
+
+Resolved the 3 functions flagged at the end of last session
+(`GetShieldFacingIndex`, `ApplyShieldDamage`, `ApplyComponentDamage`).
+Together these complete the two-stage damage model `ProcessProjectileImpact`
+dispatches into: shields absorb per-facing damage with hull spillover,
+and separately, individually-targetable components use their own
+grouped-hitbox health pools.
+
+## `GetShieldFacingIndex` (`0x00463d30`)
+
+```c
+int __fastcall GetShieldFacingIndex(void *hitContext);
+```
+
+Thinner than expected: sets up a transform context from a sub-object
+reference (`hitContext+0x30` → `+0x70`, an unidentified turret/hardpoint
+position field) and delegates the actual "which of the 4 shield
+quadrants was hit" computation to `FUN_00463ca0` (not decompiled). The
+real geometry logic lives in that unopened call.
+
+## `ApplyShieldDamage` (`0x00463ee0`)
+
+```c
+void __fastcall ApplyShieldDamage(ShipObject *target, int quadrantIndex,
+                                   float damageAmount, float damageRatio,
+                                   int attackerSlot, int damageType);
+```
+
+The real shield-damage pipeline, and a genuinely complete one:
+
+1. **Invulnerability/exemption checks**: exits immediately if the
+   target has an invulnerability flag (`+8 & 0x200000`) or its
+   class-definition state is `6` (a "special/scripted, no damage"
+   object state, not otherwise identified).
+2. **Overflow calculation**: computes how much damage would exceed the
+   quadrant's current shield value — this becomes the amount that
+   spills through to the hull.
+3. **Difficulty scaling**: passes the raw damage through
+   `FUN_00463d70` (not decompiled, presumably applying an
+   easy/normal/hard multiplier).
+4. **Scoring and feedback**: if the LOCAL PLAYER is the attacker (and
+   the target isn't on their own team), triggers scoring/kill-credit
+   (`FUN_00474c80`) for certain damage types; if the LOCAL PLAYER is
+   the one hit, triggers camera-shake and audio feedback
+   (`FUN_00456dd0`/`FUN_00463e10`).
+5. **Multiplayer authority and team rules**: in networked play, checks
+   `FUN_004b5590` ("does this client have authority to actually apply
+   this damage") before committing anything; in deathmatch, compares
+   team-ID arrays (`DAT_005dae30`, indexed by object slot) and a
+   friendly-fire-enabled flag (`DAT_0050c2f8`) to decide whether damage
+   applies at all between the two objects involved.
+6. **Commits the shield decrement**, and if it goes negative, spills
+   the excess (scaled by `damageRatio`) to the hull via `FUN_004641f0`
+   (not decompiled — "ApplyHullDamage").
+7. **UI/network bookkeeping**: records the last attacker, flags
+   "recently hit" state for HUD flash effects (two parallel arrays,
+   one all-ships-wide and one local-player-specific), and plays an
+   impact sound.
+
+A clean, complete shield-then-hull pipeline — the kind of function that
+would make an excellent differential-test target if a live/dynamic
+harness for this game is ever built (well-defined inputs, well-defined
+observable state changes).
+
+## `ApplyComponentDamage` (`0x004645c0`)
+
+```c
+void __fastcall ApplyComponentDamage(ShipObject *object, ComponentInstance
+                                      *component, float damageAmount,
+                                      int attackerSlot, int damageType);
+```
+
+The real subsystem/component damage function, and considerably richer
+than the shield pipeline:
+
+- **Input validation via a real runtime assert**: `attackerSlot` is
+  bounds-checked against the live active-object count (or must be
+  `-1`, "no attacker") using `ReportAssertionFailureEx` — confirming
+  that function (documented back in the second session as the
+  engine's general-purpose fatal-assert mechanism) is genuinely used
+  throughout gameplay code, not just bootstrap/resource-loading paths
+  as the earlier sessions' evidence alone suggested.
+- **A grouped-hitbox component model**: components share a group ID
+  (`+0xd4`) and pool their health across potentially several separate
+  physical hit-collision pieces. Before applying damage, the function
+  walks the target's child-object list looking for that group's
+  "representative" member — the one still holding remaining health
+  (`+0x104>0`) — meaning a single logical subsystem (e.g. an engine
+  cluster, a turret battery) can be modeled as multiple independently
+  collidable meshes that nonetheless share one combined HP pool.
+- **An armor/threshold system**: components with health above `0x9c3`
+  (2499) are immune to small hits (under 500 damage) unless the damage
+  type is "penetrating" (type 3 or 4) or a specific target flag is set
+  — some subsystems need a proportionally large hit to actually
+  register damage, not just enough raw damage.
+- **Shielded-component damage reduction**: hits under 1000 damage
+  against a component flagged `0x4000` get reduced to 25% — suggesting
+  certain components carry their own point-defense-resistant armor
+  independent of the ship's main shields.
+- **Friendly/ally exemption list**: a small per-object table
+  (`+0x250`, up to `+0x152` entries) is checked to decide whether a
+  particular attacker is exempt from damaging this component — plus a
+  deathmatch-specific team check.
+- **On destruction** (health drops below 0): sets a "destroyed" flag
+  bit (`0x40`) on the component, and — specifically when it's the
+  LOCAL PLAYER's own ship being damaged, outside deathmatch — triggers
+  a distinct reaction (`FUN_00474e00`, not decompiled, plausibly a
+  "you've lost a subsystem" warning).
+- **Wingman/comm chatter**: if a friendly AI wingman had this exact
+  component as an assigned escort/protect target, triggers comm
+  chatter (`FUN_00415270`).
+- **A second, separate "representative component" resolution** at the
+  end (two lookup variants depending on a `+0x108` grouping field,
+  distinct from the `+0xd4` grouping used earlier) followed by an
+  impact sound — the relationship between the `+0xd4` and `+0x108`
+  grouping schemes isn't determined; they may represent two different
+  levels of component hierarchy (e.g. individual part vs. whole
+  subsystem).
+
+### Open follow-ups
+
+- `FUN_00463ca0` (real shield-facing geometry), `FUN_00463d70`
+  (difficulty damage scaling — shared by both functions), `FUN_004641f0`
+  (hull-damage spillover), `FUN_004b5590` (multiplayer damage
+  authority — also shared), `FUN_00474c80`/`FUN_00474e00` (scoring and
+  component-destroyed reactions), `FUN_00415270` (wingman chatter
+  trigger).
+- The `+0xd4` vs. `+0x108` component-grouping fields' relationship to
+  each other.
+- The armor-threshold constant (`0x9c3` = 2499) and other balance
+  numbers found here — real, load-bearing values, not yet cross-checked
+  against any external data source (e.g. a ship-stats file) to see
+  whether they're globally hardcoded or per-ship-class tunable.
