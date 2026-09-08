@@ -1295,3 +1295,20 @@ Continuation of Pass 34's flagged follow-up.
 - Read `DAT_004e5cd0`'s ~51 entries to produce a real default-flight-control-scheme table.
 - `DAT_004e23cc`'s exact per-control meaning.
 - ~40 remaining `CheckKeyEdgeState` callers not yet re-examined.
+
+## .bik loading/playback pipeline decoded; DAT_004e5cd0 corrected (2026-09-08, thirty-seventh session)
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `FindBinkMovieInArchive` (0x4c83f0, was FUN_004c83f0) | 4 | Structurally identical to `FindBigFileTocEntry` (Pass 28), operating on the same `OpenBigFile`-returned struct via its raw Win32 `HANDLE` field (+4) instead of the CRT `FILE*` (+0). Resolves why `OpenBigFile` opens the file twice. |
+| `DAT_005202d4` = the currently-mounted BigFile archive handle, shared between resource loads and Bink movie streaming | 3 | Written once in `WinMain`, rewritten per disc-swap in `EnsureCorrectCDMounted`; read constantly by VR/briefing screen code. |
+| Generic Bink 1.x SDK playback pattern (Open/SetFrameRate/SetSoundSystem/DoFrame/CopyToBuffer/Wait/Goto/Close) | 5 | Public, well-documented third-party library semantics -- not itself a StarLancer-specific finding, just confirmed as the consistent pattern used throughout. |
+| `GetLanguageString` (0x491030, was FUN_00491030) | 5 | Confirmed via own `"invalid language string %d"` assert string. Central localized-text accessor, 1-based index into a runtime-loaded string-pointer array (`DAT_0057dbbc`/`DAT_0057dbc0`). |
+| **Correction to Pass 36** (not silent): `DAT_004e5cd0` is a table of 89 candidate REBINDABLE SCANCODES (`{scancode, tag}`, 0x24-byte stride), NOT a table of named flight controls with inline display names as previously assumed | 4 | Directly confirmed by raw memory read (scancodes match real A/B/C/D/E key values) + re-decompiled `RunControlsOptionsScreen` with `GetLanguageString`'s prototype set. |
+| Real per-control data lives in `DAT_004e2380`'s existing runtime binding table (`DAT_004e23ac`=name string index, `DAT_004e23ae`=device-name string) | 3 | Confirmed via the `GetLanguageString(*(short*)(&DAT_004e23ac+idx*0x4e))` call chain; not yet read out to produce an actual control-name list. |
+
+### Open follow-ups
+
+- Read `DAT_004e2380`'s full range to produce the real control list + default bindings (the corrected version of Pass 36's original goal).
+- `FUN_0042c5f0` (rebind-conflict check) -- not decompiled.
+- Language string table content is runtime-only, unrecoverable from the static image.

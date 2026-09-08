@@ -1141,3 +1141,25 @@ RunControlsOptionsScreen (0x42b690)
                  DAT_004e2380 (live runtime key-binding table, shared with MissionScript_WaitForKey),
                  DAT_004e23cc, DAT_004e23ae (per-control mode/device-name fields),
                  CheckKeyEdgeState (used to detect "which key did the user just press to rebind")
+
+## .bik loading/playback pipeline decoded; DAT_004e5cd0 corrected (2026-09-08, thirty-seventh session)
+
+```
+RunShipInteriorVRLoop / RunMissionBriefingScreen / etc.
+  -> FindBinkMovieInArchive (0x4c83f0)
+       -> depends on: DAT_005202d4 (current BigFile* archive, same struct as OpenBigFile's return,
+                       shared between resource loads and movie streaming),
+                       FUN_004dae20 (case-insensitive compare), ReadSwappedUint32,
+                       SetFilePointer (raw Win32 HANDLE seek, +4 field of the BigFile struct)
+  -> _BinkOpen_8 / _BinkSetFrameRate_8 / _BinkSetSoundSystem_8 / _BinkDoFrame_4 /
+     _BinkCopyToBuffer_28 / _BinkWait_4 / _BinkGoto_12 / _BinkClose_4  (public Bink 1.x SDK)
+
+RunControlsOptionsScreen (0x42b690)
+  -> depends on: DAT_004e5cd0 (KeyScanCandidate table, 89 entries, stride 0x24 --
+                 CORRECTED from Pass 36: candidate scancodes, not control names),
+                 CheckKeyEdgeState (scanned across scancode x 3 modifier modes),
+                 DAT_004e2380 (runtime binding table, stride 0x4e) with sub-fields
+                 DAT_004e23ac (control name -> GetLanguageString index),
+                 DAT_004e23ae (bound device/joystick name string),
+                 DAT_004e23cc (mode/type field),
+                 GetLanguageString (0x491030, was FUN_00491030)

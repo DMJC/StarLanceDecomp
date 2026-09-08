@@ -5055,3 +5055,130 @@ the REAL underlying data structures cleanly:
   mode/type value distinct from the scancode").
 - The remaining ~40 `CheckKeyEdgeState` callers (see Pass 34's full
   caller list) not yet re-examined.
+
+## Pass 37 -- .bik movie loading/playback pipeline, and DAT_004e5cd0 decoded (correcting Pass 36) (2026-09-08)
+
+### The .bik loading pipeline: unifies with the BigFile archive system (Pass 28)
+
+`FindBinkMovieInArchive` (`0x4c83f0`, was `FUN_004c83f0`, called
+everywhere as `FUN_004c83f0()` with hidden fastcall args) turns out to
+be structurally **identical to `FindBigFileTocEntry`** (Pass 28): same
+TOC-walk shape (`param_1+0x18`=buffer base, `param_1+0x20`=size,
+case-insensitive name compare via `FUN_004dae20`, offset/size read via
+`ReadSwappedUint32`), operating on **the exact same struct `OpenBigFile`
+returns** -- field offsets `+4` (Win32 `HANDLE`) and `+0x18`/`+0x20`
+(TOC buffer/size) match `OpenBigFile`'s `piVar2[1]`/`piVar2[6]`/
+`piVar2[8]` (DWORD-indexed: byte offsets 4/0x18/0x20) exactly.
+
+**This resolves an open question implicitly left by Pass 28**: why does
+`OpenBigFile` open the archive file TWICE -- once via the CRT
+(`FUN_004d02ef`, buffered `FILE*`, stored at offset 0) and once via
+raw `CreateFileA` (stored at offset 4)? Now it's clear: the CRT
+`FILE*` backs the normal buffered resource path (`HOG_BigRead` and
+friends), while the raw Win32 `HANDLE` exists specifically so
+`FindBinkMovieInArchive` can call `SetFilePointer` on it directly and
+hand that positioned, unbuffered handle straight to the Bink Video SDK
+for streaming playback -- movies are NOT loaded into a memory buffer
+first, they stream directly from the open archive file. **Confidence
+4** (exact struct-offset match across two independently-documented
+functions; not independently re-verified via a fresh disassembly of
+the exact call site).
+
+`DAT_005202d4` (read constantly throughout `RunShipInteriorVRLoop`,
+`RunMissionBriefingScreen`, and several other `0x436xxx`-`0x43cxxx`
+menu/interior functions) is this same `BigFile*` -- written once in
+`WinMain` (initial archive open) and re-written repeatedly inside
+`EnsureCorrectCDMounted` (once per disc-swap/archive-reopen). So the
+SAME currently-mounted `.hog` archive (`cd1.hog`/`cd2.hog`, per Pass
+28's `EnsureCorrectCDMounted` documentation) backs both ordinary
+resource loads and movie streaming.
+
+### Generic Bink playback pattern (RAD Game Tools' public SDK -- not StarLancer-specific)
+
+Confirmed the same call sequence recurs at every `.bik` transition
+throughout the VR loop, briefing screen, and others: `FindBinkMovieInArchive`
+(locate + seek) -> `_BinkOpen_8(handle, flags)` -> `_BinkSetFrameRate_8`/
+`_BinkSetSoundSystem_8` (once, at loop entry) -> `_BinkDoFrame_4`
+(decode next frame) -> `_BinkCopyToBuffer_28` (blit into the game's own
+back-buffer, `DAT_0051d7c4`, a `0x500x0x1e0`=1280x480?? -- actually
+`0x500`=1280, `0x1e0`=480, likely a doubled/interlaced frame buffer) ->
+`_BinkClose_4` on transition. `_BinkWait_4` polls for audio-sync
+completion (busy-loop `while (_BinkWait_4(...) != 0) {}` seen at every
+transition). Reverse playback (Pass 33's earlier finding) uses
+`_BinkGoto_12(bink, startFrameOffset, 0)` then a `CopyToBuffer` call
+with the `0x80000000` flag bit set. These are standard, publicly
+documented Bink 1.x SDK entry points (the trailing `_N` suffix is the
+MSVC `__stdcall` byte-count decoration) -- their own internal behavior
+is well-established third-party library semantics, not a StarLancer
+reverse-engineering target in itself.
+
+### `DAT_004e5cd0` decoded -- **correcting Pass 36's assumption**
+
+Pass 36 guessed `DAT_004e5cd0` was "a control-descriptor table... each
+entry's display-name string [living] at a parallel offset." Read the
+raw table bytes directly and reused the `set_function_prototype`
+technique (this time on `FUN_00491030`, confirmed via its own
+`"invalid language string %d"` assert string to be `GetLanguageString`,
+the game's central localized-text accessor: `DAT_0057dbbc` is a base
+pointer to a loaded array of string pointers, `DAT_0057dbc0` its count,
+1-based indexing). Re-decompiling `RunControlsOptionsScreen` with that
+prototype set resolves the ambiguity cleanly:
+
+**~~`DAT_004e5cd0` is NOT a table of named flight controls~~ -- corrected:
+it is a table of *candidate rebindable keyboard scancodes*.**
+
+```c
+struct KeyScanCandidate {
+    int32_t scancode;   // +0x00: a real PC Set-1 scancode (confirmed:
+                         // 30/48/46/32/18 decimal = 0x1E/0x30/0x2E/0x20/0x12
+                         // = the A/B/C/D/E keys, in sequence -- this table
+                         // enumerates essentially every assignable key)
+    int32_t tag;         // +0x04: a small monotonically-increasing integer
+                         // per entry; used as raw inline bytes in one debug
+                         // SafeFormatString call (which is why it looked
+                         // like single ASCII letters "A","B","C"... on a
+                         // raw byte read -- it's the low byte of this int,
+                         // not real text); purpose otherwise undetermined
+    // +0x08..+0x23: zero in every sampled entry
+};  // 0x24 (36) bytes; 89 entries total, DAT_004e5cd0..0x4e6954
+```
+
+Used by `RunControlsOptionsScreen`'s "detect which key the player just
+pressed to (re)bind" scan loop: for each of the 89 candidate scancodes,
+checks `CheckKeyEdgeState(scancode, modifierMode, 1)` across 3 modifier
+modes (0/1/2 = none/Shift/Ctrl -- Alt, mode 3, is NOT scanned for
+control rebinding), i.e. an exhaustive "was ANY assignable key just
+pressed, in ANY of 3 modifier states" poll.
+
+**The REAL per-control data lives elsewhere**: a parallel record inside
+the already-documented `DAT_004e2380` runtime binding table (stride
+`0x4e`/78 bytes, confirmed in Pass 36), specifically:
+- `DAT_004e23ac[control*0x4e]` (a `short`) -- **the control's
+  language-string index**, resolved via `GetLanguageString()` to get
+  its real display name (e.g. "Roll Left", "Fire Primary Weapon", etc.
+  -- not read out this session).
+- `DAT_004e23ae[control*0x4e]` -- a string field (bound joystick/device
+  name, already noted in Pass 36).
+- Two further fixed language-string indices, `0x5af` and `0x5b0`, used
+  as connective phrase text in the rebind-conflict confirmation dialog
+  (`"<control> is already bound to <other control>"`-shaped, exact
+  wording not recovered -- the loaded string table itself isn't present
+  in the static binary image, `DAT_0057dbbc` reads as all-zero,
+  confirming it's populated at runtime from an external language
+  resource, not baked into the `.exe`).
+
+**Confidence 4** on the `KeyScanCandidate` structure and its role
+(directly read from real data + confirmed by the decompiled scan loop);
+confidence 2 on the `tag` field's purpose (clearly not meaningful
+display text, otherwise undetermined).
+
+### Open follow-ups
+
+- Read `DAT_004e2380`'s full entry range to enumerate the REAL control
+  list (names via `DAT_004e23ac`+`GetLanguageString`, default bound
+  scancodes via the table's own key fields) -- this is the corrected
+  version of Pass 36's goal, now pointed at the right table.
+- The loaded language string table itself is runtime-only; no static
+  strings are recoverable without a live session.
+- `FUN_0042c5f0` (used in the rebind-conflict-detection path, returns
+  -1 for "no conflict") -- not decompiled.
