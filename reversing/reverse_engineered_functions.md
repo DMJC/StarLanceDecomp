@@ -3379,8 +3379,9 @@ described above.
 
 ### Open follow-ups
 
-- What consumes `object+0x670` (the "most threatening nearby weapon
-  type" result) — not traced.
+- ~~What consumes `object+0x670`~~ — the network-sync side is now
+  confirmed (see below); the actual damage-blocking READ site is
+  still not located.
 - `DAT_0057bf20`'s exact semantics — only its `-1`/`0`/`1` states were
   observed, not a full value range or what sets it initially.
 - Whether ship-flags bit `0x8000000` is explicitly checked anywhere in
@@ -3394,3 +3395,85 @@ described above.
   from the DirectPlay message-name string) — found but not traced to
   its actual usage (likely a HUD or pickup/ability-notification
   label).
+
+---
+
+# Twenty-sixth pass (2026-09-08, same day): confirming Spectral Shields blocks a specific weapon type
+
+The user made a further, specific claim: Spectral Shields blocks the
+single most dangerous nearby NON-superweapon — exactly the value
+`SetSpectralShieldsActive` computes into `object+0x670`. Searched for
+every OTHER reference to that struct offset via `search_byte_patterns`
+on the raw displacement bytes (`70 06 00 00`) to see where else it's
+touched.
+
+## Found: the value is network-synced, confirming the mechanism's shape
+
+A second write site turned up at `0x4b90f5`, inside a large (~9.5KB)
+function (`0x4b6f80`-`0x4b9511`) renamed `ProcessNetworkMessage` — the
+master incoming-DirectPlay-message dispatcher, receive-side
+counterpart to the many individual `Send*Message` functions found
+across earlier sessions. Disassembling directly around `0x4b90b0`
+(rather than decompiling the whole giant function) revealed the
+`DPGMESSAGE_SPECTRALSHIELDSACTIVE` receive case:
+
+```c
+if (receivedValue == 0) {
+    targetShip->flags &= ~0x8000000;           // deactivate
+} else {
+    ReadMessageBits(...);                       // read the extra field
+    targetShip->flags |= 0x8000000;             // activate
+    targetShip->field_0x670 = receivedValue;    // the blocked weapon type
+}
+```
+
+This mirrors `SendSpectralShieldsMessage`'s own shape exactly: it
+calls `WriteMessageBits` once unconditionally, then a SECOND time only
+`if (activate != 0)` — that conditional second write is precisely this
+weapon-type value, sent only when activating.
+
+**This confirms the "most threatening weapon type" computed locally is
+deliberately transmitted over the network so every other client knows
+which specific weapon type this ship's Spectral Shields currently
+blocks.** That's strong, direct architectural support for the user's
+claim about the ability's actual defensive behavior — sending this
+value over the wire would serve no purpose unless something on the
+receiving end (and presumably the local end too) checks it during hit
+resolution to negate matching incoming fire.
+
+## What's still open
+
+The actual hit-resolution code that READS `object+0x670` and blocks or
+negates damage from a matching weapon type was NOT located this
+session — the `0x670` displacement search found only the two WRITE
+sites (local computation in `SetSpectralShieldsActive`, and the
+network-receive write in `ProcessNetworkMessage`), no read. It's
+likely inside or near `FireWeapon`, `ProcessProjectileImpact`, or
+`ApplyShieldDamage`, but wasn't found via this pass. Recorded honestly
+as Confidence 2: the SYNC mechanism is directly confirmed in code, the
+ENFORCEMENT check itself remains inferred from context (the sync would
+be pointless without one) rather than independently verified.
+
+## `ReadMessageBits` (`0x004b6e50`)
+
+The receive-side counterpart to `WriteMessageBits`, structurally
+symmetric: reads an arbitrary number of bits from the current incoming
+message buffer (`DAT_005dcce8`/`DAT_005dcc9c`), handling both the
+byte-aligned fast path and the general unaligned case, masking
+trailing bits via the same `DAT_0050ca88` table plus a second,
+read-only-side sibling table (`DAT_0050ca7c`).
+
+## `ProcessNetworkMessage` (`0x004b6f80`)
+
+The master incoming-message dispatcher — one large function handling
+all ~80 cataloged `DPGMESSAGE_*`/`DPIMESSAGE_*` types. Only the
+Spectral Shields case has been examined in detail; the rest of this
+~9.5KB function is a rich, mostly-unopened target that could confirm
+or correct many other message-name-only findings from the DirectPlay
+catalog session.
+
+### Open follow-ups
+
+- The actual `object+0x670` READ/enforcement site — not found.
+- The rest of `ProcessNetworkMessage`'s body (~80 other message cases).
+- `DAT_0050ca7c` (the read-side trailing-bit-mask sibling table).

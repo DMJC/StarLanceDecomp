@@ -887,9 +887,65 @@ caller to the real toggle function.
 | | | **Also performs a threat-analysis pass on activation**: scans every nearby enemy ship (proximity-radius-gated, team check `+0x644==1`) and tallies which weapon TYPES their hardpoints are using into a 15-slot accumulator (indexed via the same weapon-type-definition `+0x64` field documented many sessions ago in `FireWeapon`), then weights each tally by a per-type "threat" value read from a previously-undocumented field in the SAME 11-int-stride weapon-type table already partly catalogued (`DAT_00500cec` — a sibling of `DAT_00500ce0`/`ce4`/`ce8`), and stores the single most-weighted-threatening weapon type (excluding the two Huge Gun superweapon types, `0xd`/`0xe`) into a NEW ship-object field, `object+0x670`. Purpose of this analysis isn't fully confirmed — plausibly selects a matching visual/audio cue for the shield effect, or feeds into some other reactive system, but the mechanism itself (tally→weight→pick-max) is directly read from the decompiled code, not guessed. |
 | `SendSpectralShieldsMessage` (0x4babc0, was `FUN_004babc0`) | 3 | Confirmed network-send counterpart via the exact message-ID immediate-value search described above — not inferred from naming. |
 
-### Open follow-ups
+### Open follow-ups (updated below)
 
-- What `object+0x670`'s "most threatening nearby weapon type" value is actually used for downstream — not traced.
+- ~~What `object+0x670` is used for downstream~~ — **the network-sync side is now confirmed (see next session below); the actual damage-blocking READ site is still not located.**
 - `DAT_0057bf20`'s exact semantics (availability flag vs. cooldown timer vs. something else) — only its `!=-1`/`==0`/`==1` states observed, not a full value range.
 - Whether bit `0x8000000` on the ship-flags dword is checked by name anywhere else (e.g. in `ApplyShieldDamage`/`ApplyComponentDamage`'s own invulnerability checks, which so far only documented bit `0x200000`) — worth a targeted re-check of those functions' flag masks now that this specific bit's meaning is known.
 - The `"SPECTRAL SHIELDS"` UI-display string (`0x4e37a0`) — found but not traced to its own usage (likely a HUD/pickup-notification label), separate from the message-name string.
+
+## `object+0x670` is network-synced as the blocked weapon type (2026-09-08, twenty-fourth session)
+
+The user supplied a further, specific claim: Spectral Shields blocks
+the single most dangerous nearby NON-superweapon (the exact value
+`SetSpectralShieldsActive` computes). Searched for other references to
+struct offset `0x670` via `search_byte_patterns` on the raw
+displacement bytes (`70 06 00 00`) to find where else this field is
+touched, beyond the write already documented in
+`SetSpectralShieldsActive` itself.
+
+Found a SECOND write site, at `0x4b90f5`, inside a large (~9.5KB)
+function spanning `0x4b6f80`-`0x4b9511` — renamed `ProcessNetworkMessage`,
+the master incoming-DirectPlay-message dispatcher (the receive-side
+counterpart to the ~44 individual `Send*Message` functions documented
+across earlier sessions). Disassembled the instructions around
+`0x4b90b0` directly (rather than decompiling the whole giant function)
+and found, for the `DPGMESSAGE_SPECTRALSHIELDSACTIVE` case specifically:
+
+```
+if (receivedValue == 0) {
+    targetShip->flags &= ~0x8000000;      // deactivate
+} else {
+    ReadMessageBits(...);                  // read the extra field
+    targetShip->flags |= 0x8000000;        // activate
+    targetShip->field_0x670 = receivedValue;  // <-- the blocked weapon type
+}
+```
+
+This exactly matches `SendSpectralShieldsMessage`'s own send-side
+shape (`WriteMessageBits` called unconditionally once, then a SECOND
+time only `if (activate != 0)` — the conditional second write is
+precisely this weapon-type value, sent only on activation). **This
+confirms the "most threatening weapon type" computed locally is
+transmitted over the network specifically so other clients know which
+weapon type THIS ship's Spectral Shields currently blocks** — strong,
+direct architectural support for the user's claim about the ability's
+actual defensive behavior, even though the specific code that CHECKS
+`object+0x670` during hit resolution (to actually negate/block a
+matching incoming shot) was not located this session — only the
+computation (`SetSpectralShieldsActive`) and the two-directional
+network sync (`SendSpectralShieldsMessage`/`ProcessNetworkMessage`)
+were found. Recorded as Confidence 2: the SYNC mechanism is directly
+confirmed in code; the actual ENFORCEMENT (the hit-blocking check
+itself) remains inferred from context, not yet independently located.
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `ProcessNetworkMessage` (0x4b6f80, was `FUN_004b6f80`) | 2 | The master incoming-DirectPlay-message dispatcher — a single large function handling all ~80 cataloged `DPGMESSAGE_*`/`DPIMESSAGE_*` types (receive-side counterpart to the many individual `Send*Message` functions found across several sessions). Only the `DPGMESSAGE_SPECTRALSHIELDSACTIVE` case (`0x4b90b0`-`0x4b9113`) has been examined in detail. |
+| `ReadMessageBits` (0x4b6e50, was `FUN_004b6e50`) | 3 | The receive-side counterpart to `WriteMessageBits`, confirmed structurally symmetric: reads an arbitrary bit count from the current incoming-message buffer (`DAT_005dcce8`/`DAT_005dcc9c`), handling byte-aligned and unaligned cases and trailing-bit masking via the same lookup tables (`DAT_0050ca88`, plus a sibling `DAT_0050ca7c` used only on the read side). |
+
+### Open follow-ups
+
+- The actual hit-resolution code that reads `object+0x670` and blocks/negates damage from a matching weapon type — not located. Likely somewhere in or near `FireWeapon`/`ProcessProjectileImpact`/`ApplyShieldDamage`, but a direct search for the `0x670` displacement found only the two WRITE sites (computation + network sync), no read.
+- The rest of `ProcessNetworkMessage`'s ~9.5KB body — only the one message case was examined; this function is a rich target for confirming/correcting many other message-name-only findings from the DirectPlay catalog session.
+- `DAT_0050ca7c` (the second trailing-bit-mask-adjacent table used only in `ReadMessageBits`, not `WriteMessageBits`).

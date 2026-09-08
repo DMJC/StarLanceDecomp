@@ -688,6 +688,23 @@ SendSpectralShieldsMessage (0x4babc0)
   -> depends on: BeginNetworkMessage, WriteMessageBits (confirmed via
                  exact `mov edx, 0x43` immediate-value byte-pattern
                  search)
+
+ProcessNetworkMessage (0x4b6f80) [master incoming-message dispatcher]
+  -> DPGMESSAGE_SPECTRALSHIELDSACTIVE case (0x4b90b0-0x4b9113):
+     depends on: ReadMessageBits, ship-object +8 flags (0x8000000 bit),
+                 ship-object +0x670 (receives the network-synced
+                 "blocked weapon type" value here — SECOND confirmed
+                 write site for this field, alongside
+                 SetSpectralShieldsActive's own local computation)
+  -> the other ~79 cataloged message cases NOT individually examined
+  <- depended on by: incoming DirectPlay traffic (not individually
+                 traced to a specific receive-loop caller)
+
+ReadMessageBits (0x4b6e50)
+  -> depends on: DAT_005dcce8 (incoming message buffer), DAT_005dcc9c
+                 (bit cursor), DAT_0050ca88/DAT_0050ca7c (trailing-bit
+                 mask tables) — structurally symmetric to WriteMessageBits
+  <- depended on by: ProcessNetworkMessage
 ```
 
 QueueAiEvent (0x402660)
