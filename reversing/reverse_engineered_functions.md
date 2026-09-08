@@ -5389,3 +5389,138 @@ specific damage-event caller this session.
   decompiled.
 - Confirm `DrawShapeJittered`'s callers to nail down exactly which
   gameplay event triggers the jitter effect.
+
+## Pass 40 -- WINVFX8.DLL is present in gamedata: the real .spr/.fnt formats decoded (2026-09-09)
+
+**Correcting Pass 39, not silently**: Pass 39 concluded the `.fnt`/
+`.spr` binary formats were "genuinely unrecoverable... `winvfx8.dll`/
+`winvfx16.dll` (not present in this project)". That was wrong --
+`WINVFX8.DLL` **is** present at
+`gamedata/StarLancer/WINVFX8.DLL` and was loaded as a second Ghidra
+program in this session. It's small (22 functions, ~174KB), and most
+exports were already usefully named by prior auto-analysis
+(`VFX_shape_draw`, `VFX_shape_bounds`, `VFX_shape_count`,
+`VFX_shape_list`, `VFX_shape_palette`, `VFX_shape_colors`,
+`VFX_font_height`, `VFX_character_width`, `VFX_character_draw`,
+`VFX_string_draw`, etc.) -- decompiling them directly gives the real,
+byte-exact on-disk/in-memory format for both asset types.
+
+### `.spr` (Shape) format
+
+```c
+struct ShapeSet {
+    uint32_t unknown0;       // +0x00, purpose not decoded this pass
+    uint32_t shapeCount;     // +0x04 -- VFX_shape_count reads this directly
+    struct {
+        uint32_t recordOffset;   // +0x00: byte offset (from ShapeSet base) to this
+                                  // shape's ShapeRecord
+        uint32_t paletteOffset;  // +0x04: byte offset (from ShapeSet base) to an
+                                  // optional palette-override sub-record, or 0
+    } shapes[shapeCount];    // +0x08, 8 bytes per entry
+};
+
+struct ShapeRecord {           // at ShapeSet_base + shapes[i].recordOffset
+    uint32_t headerField0;     // +0x00 -- returned verbatim by VFX_shape_bounds();
+                                // exact meaning (packed bbox? flags?) not decoded
+    uint32_t headerField1;     // +0x04 -- not examined
+    int32_t  boundX1, boundY1; // +0x08, +0x0C -- top-left of the shape's bounding box
+    int32_t  boundX2, boundY2; // +0x10, +0x14 -- bottom-right
+    uint8_t  rleData[];        // +0x18 -- RLE-compressed pixel data, row-major,
+                                // width = boundX2-boundX1+1 implied by the draw loop
+};
+
+struct PaletteOverrideRecord {  // at ShapeSet_base + shapes[i].paletteOffset (VFX_shape_palette)
+    uint32_t entryCount;
+    struct { uint8_t paletteIndex, r6, g6, b6; } entries[entryCount];
+    // r6/g6/b6 are 6-bit VGA-style color components, left-shifted by 2 to
+    // produce 8-bit output -- classic VGA-palette-register precision.
+};
+```
+
+**The RLE pixel encoding** (decoded from `VFX_shape_draw`'s inner
+loop, confirmed against the simpler unclipped path
+`VFX_shape_blit_unclipped`, was `FUN_100035fc`): a **row-oriented,
+back-reference-free run-length scheme**, distinct from the RefPack/QFS
+LZ77 codec already documented for BigFile archive compression (Pass
+29) -- this is a much simpler, sprite-specific format with no
+cross-row or long-distance back-references, well suited to fast
+scanline blitting with integrated clip-rectangle handling. Each row is
+terminated by a marker byte tested via `(byte & 1)`; runs alternate
+between literal-copy and single-byte-repeat modes based on a low-bit
+flag in each control byte, with run lengths unpacked via `>> 1` and
+`& 3`/`>> 2` (byte-then-dword copy loops for speed). The decoder is
+heavily inlined and duplicated (4 near-identical variants) to handle
+every combination of left/right/top/bottom clip-edge intersection
+without a per-pixel branch -- a genuine, hand-optimized 2D sprite
+blitter from the "software rendering era."
+
+**Confidence 4** on the `ShapeSet`/`ShapeRecord`/`shapes[]` layout
+(directly read from real code, internally consistent across 4
+independent functions -- `count`, `list`, `bounds`, `draw` all agree);
+confidence 3 on the exact RLE bit-packing (the control-flow is real and
+decoded, but not independently verified by hand-decoding one real
+`.spr` file's bytes against this scheme this session); confidence 1 on
+`headerField0`/`headerField1`'s meaning (not decoded).
+
+### `.fnt` (Font) format
+
+```c
+struct FontResource {
+    uint32_t unknown0;        // +0x00
+    uint32_t unknown1;        // +0x04
+    uint32_t lineHeight;      // +0x08 -- VFX_font_height reads this directly
+    uint32_t unknown2;        // +0x0C
+    uint32_t glyphOffset[256];// +0x10 -- one 4-byte offset per possible character
+                               // code (0-255), each pointing (relative to
+                               // FontResource base) to a GlyphRecord; a NULL/0
+                               // offset presumably means "no glyph" for that code
+};
+
+struct GlyphRecord {          // at FontResource_base + glyphOffset[charCode]
+    uint32_t width;           // +0x00 -- VFX_character_width reads this directly
+    uint8_t  pixels[];        // +0x04 -- RAW, UNCOMPRESSED bitmap, width*lineHeight
+                               // bytes, one byte per pixel (palette index) -- NOT
+                               // RLE-compressed, unlike shapes
+};
+```
+
+Confirmed via `VFX_character_draw`, which supports two blit modes
+selected by its `param_8` argument: **direct copy** (`param_8==0`,
+palette-index bytes written straight to the destination, used for
+plain paletted-8-bit-mode text) and a **remap-table mode**
+(`param_8!=0`, each source byte looked up in a 256-entry table before
+writing -- either a `short` table, for 16-bit true-color text with a
+transparent-pixel sentinel `0xfffe`, or a `byte` table with sentinel
+`0xff` -- i.e. **tinted/colored text rendering**, matching the many
+different-colored `.fnt` files found in Pass 39's string search --
+`blk2orng.fnt`, `blufont.fnt`, `med_red.fnt`, `sml_red.fnt`, etc. are
+very likely all differently-PALETTED uses of the same underlying glyph
+bitmaps via this remap mechanism, though that specific claim isn't
+independently confirmed).
+
+**Confidence 4** on the `FontResource`/`GlyphRecord` layout (directly
+read from `VFX_font_height`/`VFX_character_width`/`VFX_character_draw`,
+mutually consistent); confidence 2 on the "differently-named .fnt files
+are palette-remap variants of shared glyphs" hypothesis.
+
+### Corrected conclusion
+
+Pass 39's category-level finding stands (this IS a separate,
+dynamically-loaded rendering library distinct from SurrenderLib/Bink/
+Miles) but its specific claim that the binary is "not present in this
+project" was wrong and is corrected here explicitly. The DLL is a real,
+small, fully-decompilable target and both asset formats are now
+understood at the structural level.
+
+### Open follow-ups
+
+- `ShapeRecord.headerField0`/`headerField1` -- not decoded.
+- `VFX_shape_colors`'s exact record format (a flat int array, distinct
+  from `VFX_shape_palette`'s structured RGB entries) -- read but not
+  fully explained.
+- Byte-exact verification against a real `.spr`/`.fnt` file's actual
+  bytes (e.g. via `search_byte_patterns` against a known filename's
+  loaded buffer) -- not done this session, would raise the RLE-decoding
+  confidence from 3 to higher.
+- `WINVFX16.DLL` (the 16-bit-color counterpart) -- not examined; likely
+  near-identical with wider pixel fields.

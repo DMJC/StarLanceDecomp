@@ -1204,3 +1204,18 @@ DrawShapeJittered (0x48c6e0, was FUN_0048c6e0)
 .fnt / .spr resources
   -> loaded via: LoadNamedResource (Pass 28's generic resource path)
   -> consumed via: winvfx8.dll / winvfx16.dll's VFX_* API (opaque -- binary layout not in Lancer.exe)
+
+## WINVFX8.DLL present in gamedata: the real .spr/.fnt formats decoded (2026-09-09, fortieth session)
+
+```
+WINVFX8.DLL (gamedata/StarLancer/WINVFX8.DLL, loaded as a second Ghidra program this session)
+  VFX_shape_draw (0x100031d9)
+    -> depends on: ShapeSet/ShapeRecord layout, VFX_shape_blit_unclipped (0x100035fc, renamed)
+  VFX_shape_bounds (0x1000925d) / VFX_shape_count (0x100093f7) / VFX_shape_list (0x1000940c)
+    -> depend on: same ShapeSet layout (shapeCount @+4, 8-byte {recordOffset,paletteOffset} pairs @+8)
+  VFX_shape_palette (0x10009308) / VFX_shape_colors (0x10009361)
+    -> depend on: paletteOffset sub-records (structured RGB entries vs. flat int list, respectively)
+  VFX_font_height (0x10008798) / VFX_character_width (0x100087ad) / VFX_character_draw (0x100087cf)
+    -> depend on: FontResource layout (lineHeight @+8, glyphOffset[256] @+0x10, raw glyph bitmaps)
+
+Lancer.exe's InitializeWinVfxLibrary (Pass 39) -> loads this exact DLL and resolves these exact exports

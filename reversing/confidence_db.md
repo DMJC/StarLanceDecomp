@@ -1345,3 +1345,22 @@ Direct continuation of Pass 37. Read `DAT_004e2380` in full (74 entries x 78 byt
 - `DAT_00588700`/`DAT_00588724` (jitter intensity globals) -- not independently confirmed as damage-flash state.
 - `FUN_00480a40` (true-color-mode palette-skip alternative) -- not decompiled.
 - `DrawShapeJittered`'s callers -- not traced to confirm the trigger event.
+
+## WINVFX8.DLL present in gamedata: the real .spr/.fnt formats decoded (2026-09-09, fortieth session)
+
+**Correction to Pass 39** (not silent): Pass 39 claimed `winvfx8.dll`/`winvfx16.dll` were "not present in this project" -- wrong. `WINVFX8.DLL` is present at `gamedata/StarLancer/WINVFX8.DLL` and was loaded and decompiled directly this session.
+
+| Name (address, in WINVFX8.DLL) | Confidence | Notes |
+|---|---:|---|
+| `ShapeSet`/`ShapeRecord`/`shapes[]` layout for `.spr` files (unknown0, shapeCount @+4, then 8-byte {recordOffset,paletteOffset} pairs; ShapeRecord holds a bbox + RLE pixel data) | 4 | Directly read from `VFX_shape_count`/`VFX_shape_list`/`VFX_shape_bounds`/`VFX_shape_draw`, mutually consistent across all four. |
+| Row-oriented, back-reference-free RLE pixel encoding (distinct from the RefPack/QFS codec used by the BigFile archive, Pass 29) | 3 | Control flow fully decoded from `VFX_shape_draw`/`VFX_shape_blit_unclipped` (was `FUN_100035fc`); not independently verified against a real `.spr` file's actual bytes. |
+| `FontResource`/`GlyphRecord` layout for `.fnt` files (lineHeight @+8, glyphOffset[256] @+0x10, each glyph = {width, raw uncompressed pixel bytes}) | 4 | Directly read from `VFX_font_height`/`VFX_character_width`/`VFX_character_draw`, mutually consistent. |
+| `VFX_character_draw`'s two blit modes: direct paletted copy vs. 256-entry remap table (short table w/ 0xfffe transparent sentinel for 16-bit color, byte table w/ 0xff sentinel for 8-bit) | 4 | Directly read; explains the many differently-named/colored `.fnt` files found in Pass 39. |
+| `PaletteOverrideRecord` format (entryCount, then {index, r6,g6,b6} entries, 6-bit VGA-precision colors) | 3 | Directly read from `VFX_shape_palette`. |
+
+### Open follow-ups
+
+- `ShapeRecord.headerField0`/`headerField1` -- not decoded.
+- `VFX_shape_colors`'s record format -- read but not fully explained.
+- Byte-exact verification against a real loaded `.spr`/`.fnt` buffer -- not done.
+- `WINVFX16.DLL` -- not examined.
