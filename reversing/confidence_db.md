@@ -1417,3 +1417,20 @@ Direct research request. Full decompile of `RunMissionBriefingScreen` plus its t
 - `UpdateLoadoutSelection`'s input/selection-change handling -- not traced.
 - Mission 23's hidden loadout object -- not identified.
 - `FUN_00446180` (tooltip/description builder) -- not decompiled; likely path to real weapon/ship names.
+
+## VR ship interior: what happens when a .bik clip finishes (2026-09-09, forty-fourth session)
+
+Direct research request. Decompiled `FUN_0043c1c0` (the per-frame VR-loop callback installed at `DAT_00588730+0x88`, previously only referenced by address).
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| Ordinary steady-state room videos freeze on their last frame (no auto-loop) | 5 | `_BinkNextFrame_4` simply stops being called once `frame==totalFrames`; completion flag `DAT_00520298` set instead. |
+| Special `roomType` (1/2/5/6/7/9) transitions are driven by this completion flag, not a separate timer | 4 | Confirmed via the outer loop's `if (DAT_00520298==0) break;` gate (Pass 33) combined with this session's finding of where the flag gets set. |
+| `roomType==3`'s "fish tank" prop cycles through NEW `.bik` clips on completion, not a `.spr` file | 5 | Directly read: 14-entry weighted table resolving to 4 base names (`move_a_`/`move_b_`/`move_c_`/`move_d_`), own error strings confirm `fish_tank_resource`/`tv_in_loop.bik` theming. Real `fish.spr` file exists (Pass 39) but is not what's loaded here. |
+| Non-type-3 arrival clips loop back to frame 2 via `_BinkGoto_12`, rather than freezing | 4 | Directly read; opposite behavior from the ordinary steady-state freeze case. |
+
+### Open follow-ups
+
+- Cross-reference the full 145-node VR graph (Pass 5) for other `roomType==3` fish-tank instances.
+- Whether `fish.spr` serves as a hotspot cursor/icon for this prop -- not traced.
+- Whether the table's uneven 7/3/1/2 weighting toward `move_a_` is deliberate.

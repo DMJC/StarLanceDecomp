@@ -5791,3 +5791,112 @@ actually is (not decoded).
 - `FUN_00446180` (tooltip/description text builder) -- not decompiled;
   likely the most direct path to real weapon/ship names and stats if
   pursued further.
+
+## Pass 44 -- VR ship interior: what happens when a `.bik` clip finishes (2026-09-09)
+
+Direct research request: decompiled `FUN_0043c1c0`, the per-frame
+callback installed at `DAT_00588730+0x88` throughout
+`RunShipInteriorVRLoop` (previously only referenced by address, never
+opened -- this is where the ACTUAL Bink frame-advance and
+completion-handling logic lives, not in the loop body documented in
+Pass 33).
+
+### Does the animation stop on the last frame? Yes, for ordinary rooms.
+
+```c
+iVar8 = _BinkWait_4(DAT_0051d7e8);
+if (iVar8 == 0) {                        // Bink is ready to advance
+  _BinkDoFrame_4(DAT_0051d7e8);
+  _BinkCopyToBuffer_28(...);              // decode + blit current frame
+  if (*(int *)(bink+0xc) == *(int *)(bink+8)) {   // current frame == total frame count
+    if (DAT_0051d9e4 == 1) { ... }        // "just transitioned" state -- see below
+    else { DAT_00520298 = 1; }            // ordinary steady-state room: just flag completion
+  } else {
+    _BinkNextFrame_4(DAT_0051d7e8);       // not at the end yet -- advance normally
+  }
+}
+```
+
+**Confirmed: once a steady-state room's ambient `.bik` loop (e.g. the
+already-documented `"b2iloop.bik"` bunkroom idle clip) reaches its
+final frame, `_BinkNextFrame_4` simply stops being called.** There is
+no automatic loop-back to frame 0 anywhere in this function for the
+ordinary case -- the decoder just keeps re-decoding/re-blitting
+whatever the current (final) frame is, so **the displayed image holds
+on the last frame** rather than restarting. The only thing that changes
+is a completion flag, `DAT_00520298`, gets set to 1.
+
+### What happens after completion depends on room state
+
+`DAT_00520298` is read every frame by the OUTER loop body (documented
+in Pass 33): `if (DAT_00520298 == 0) break;` -- once it's 1, the loop
+proceeds into the `roomType`-keyed dispatch block. For the special hub
+room types (1/2/5/6/7/9), that dispatch is what actually drives the
+scripted transition to a different room/screen already documented in
+Pass 5 (e.g. roomType 7 -> briefing room). **For an ordinary room with
+no special `roomType` case, nothing further happens automatically --
+the video just sits frozen on its last frame until the player clicks a
+hotspot**, which is handled entirely separately (Pass 33's hotspot
+hit-test, unrelated to this completion flag).
+
+### `DAT_0051d9e4 == 1` (arrival-clip just finished): two distinct behaviors
+
+This branch fires when a `pMoviePathAlt` arrival clip (Pass 33) finishes,
+or when the current room is `roomType == 3` (the hover-prop trigger
+room type, also Pass 33):
+
+**`roomType == 3` -- confirms and extends Pass 33's finding, and directly
+answers the original question about a follow-on asset**: rather than
+loading a `.spr` file, the game **opens a completely NEW `.bik` clip**,
+chosen from a small weighted table and cycled via an incrementing index
+(`DAT_0051dac0`, wraps at 14): the 14-entry table
+(`PTR_s_move_a__004e8138`) resolves to just 4 distinct base names --
+`"move_a_"` (7 of 14 slots), `"move_b_"` (3 slots), `"move_c_"` (1
+slot), `"move_d_"` (2 slots) -- built into filenames like
+`"move_a_.bik"`. The function's own error strings confirm the theme:
+`"fish_tank_resource: error searching %s"` / `"tv_in_loop.bik"`. **This
+is a decorative in-room fish-tank/TV prop**: the FIRST clip you trigger
+by hovering (`"move_a.bik"`, no trailing underscore, per Pass 33) plays
+once, and once it completes, the game cycles into a weighted-random
+sequence of 4 follow-up clips (`move_a_`/`move_b_`/`move_c_`/`move_d_`)
+-- almost certainly 4 different fish-swimming animation variants,
+looping indefinitely with this same completion-triggered logic feeding
+itself. **A real `fish.spr` file does exist** (found in Pass 39's
+initial `.spr` string search) and is thematically related, but is NOT
+what loads here -- the animated content itself is entirely `.bik`
+video, not a sprite; `fish.spr` is presumably a separate static
+icon/cursor asset for the hoverable hotspot rather than the played
+content.
+
+**Any other room reaching this branch** (an ordinary room's arrival
+clip finishing, `roomType != 3`): does NOT open a new file at all --
+instead calls `_BinkGoto_12(bink, 2, 1)`, seeking the SAME already-open
+clip back to frame 2 and re-caching its decoded pixels into the shared
+overlay buffer (`DAT_0051d9d8`, the same hover-prop compositing buffer
+from Pass 33). This effectively holds/re-loops the arrival clip near
+its start rather than freezing on its end frame -- the opposite
+behavior from the ordinary steady-state case above.
+
+### Confidence
+
+**Confidence 5** on the "no auto-loop, freezes on last frame for
+ordinary rooms" finding and the "fish-tank clip-cycling, not an `.spr`
+file" finding -- both directly read from the decompile, including
+literal filenames and the weighted table's real contents.
+**Confidence 2** on the "4 different fish-swim-direction animations"
+interpretation of `move_a/b/c/d` (a reasonable inference from the
+`fish_tank`/`tv_in_loop` naming, not independently confirmed by viewing
+the actual clips).
+
+### Open follow-ups
+
+- Which specific VR room(s) actually have `roomType == 3` in the full
+  145-node graph (Pass 5 found one instance, `0x50ad48`, without
+  further characterizing it as a "fish tank") -- worth cross-referencing
+  now that this room type's behavior is fully understood.
+- Whether `fish.spr` is used elsewhere as a hotspot cursor/icon for
+  this specific prop -- not traced.
+- The exact selection logic for `DAT_0051dac0`'s table walk (simple
+  wraparound increment, confirmed; whether the table's uneven 7/3/1/2
+  weighting is deliberate "mostly A, rarely C" design or an authoring
+  artifact -- not determined).

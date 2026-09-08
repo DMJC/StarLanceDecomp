@@ -1255,3 +1255,16 @@ RunMissionBriefingScreen (0x437010)
                        not decompiled), mission-0x17-specific hidden-object rule
   -> HOG_BigRead("ms_speech_enrbr_tag_%02d.ut") + FUN_00461d80  [stage 4: closing narration]
   -> DAT_0051d478 = campaign-stage-appropriate VRRoomNode hub   [stage 5: hand-off to RunShipInteriorVRLoop]
+
+## VR ship interior: what happens when a .bik clip finishes (2026-09-09, forty-fourth session)
+
+```
+FUN_0043c1c0 (per-frame VR-loop callback, installed at DAT_00588730+0x88)
+  -> depends on: _BinkWait_4/_BinkDoFrame_4/_BinkCopyToBuffer_28/_BinkNextFrame_4/_BinkGoto_12,
+                 DAT_0051d9e4 (1=just-transitioned, 2=steady-state),
+                 DAT_00520298 (completion flag, read by RunShipInteriorVRLoop's outer dispatch, Pass 33)
+  -> roomType==3 completion path: FindBinkMovieInArchive + _BinkOpen_8 on a NEW clip from
+       PTR_s_move_a__004e8138 (14-entry table -> move_a_/move_b_/move_c_/move_d_.bik),
+       DAT_0051dac0 (cycling index), DAT_0051d9d8 (shared hover-prop overlay buffer, Pass 33)
+  -> other-room arrival-clip completion path: _BinkGoto_12(bink, 2, 1) -- loops near-start,
+       no new file opened
