@@ -1364,3 +1364,18 @@ Direct continuation of Pass 37. Read `DAT_004e2380` in full (74 entries x 78 byt
 - `VFX_shape_colors`'s record format -- read but not fully explained.
 - Byte-exact verification against a real loaded `.spr`/`.fnt` buffer -- not done.
 - `WINVFX16.DLL` -- not examined.
+
+## ShapeRecord.headerField1 resolved as origin point (2026-09-09, forty-first session)
+
+| Name (address, WINVFX8.DLL) | Confidence | Notes |
+|---|---:|---|
+| `ShapeRecord+0x04` = origin/hotspot point, confirmed via `VFX_shape_origin` | 4 | Directly read; resolves a Pass-40 open item. |
+| `VFX_shape_minxy`/`VFX_shape_resolution` confirm existing bbox field positions | 4 | No surprises, cross-confirms Pass 40's layout. |
+| Real loose `.fnt`/`.spr` files are RefPack-compressed even outside the BigFile archive | 3 | Confirmed via `gamedata/StarLancer/RESOURCE/FONT.FNT`'s literal header bytes (`10 FB ...`, the Pass-29 RefPack magic). |
+| No live Lancer.exe process attached this session | 4 | `read_memory` on runtime-only globals (`DAT_00520134`) reads zero, consistent with static-image-only access throughout this project. |
+
+### Open follow-ups
+
+- A carefully-tested RefPack decompressor to verify `FontResource`/`ShapeSet` against real file bytes -- deliberately not attempted by hand this session to avoid a false verification.
+- `ShapeRecord.headerField0` still unresolved.
+- `VFX_shape_colors` record format, `WINVFX16.DLL` -- still open.

@@ -5524,3 +5524,73 @@ understood at the structural level.
   confidence from 3 to higher.
 - `WINVFX16.DLL` (the 16-bit-color counterpart) -- not examined; likely
   near-identical with wider pixel fields.
+
+## Pass 41 -- `ShapeRecord.headerField1` resolved: it's the shape's origin point (2026-09-09)
+
+Direct follow-up on Pass 40's open items. Checked the three remaining
+undecompiled `VFX_shape_*` accessors in `WINVFX8.DLL`
+(`VFX_shape_minxy`, `VFX_shape_origin`, `VFX_shape_resolution`) --
+all three confirm and extend the `ShapeRecord` layout cleanly, with no
+surprises for the bounding-box fields:
+
+```c
+undefined4 VFX_shape_origin(int shapeSet, int shapeIndex)
+{
+    return *(undefined4 *)(*(int *)(shapeSet + 8 + shapeIndex * 8) + shapeSet + 4);
+}
+```
+
+**This directly resolves `ShapeRecord+0x04`** (called `headerField1`,
+"not examined", in Pass 40): it's the shape's **origin/handle point** --
+a packed offset (the function name and its position immediately after
+the mystery header field strongly implies a packed `{x,y}` pivot used
+when positioning the shape on-screen, analogous to a sprite's "hotspot"
+in classic 2D engines). `VFX_shape_minxy` and `VFX_shape_resolution`
+both independently confirm the bounding-box field positions already
+documented in Pass 40 (`+0x08`/`+0x0C` = X1/Y1, `+0x10`/`+0x14` = X2/Y2,
+with `VFX_shape_resolution` computing width/height as
+`(X2-X1)+1`/`(Y2-Y1)+1` -- a clean, unsurprising confirmation).
+
+Updated `ShapeRecord`:
+
+```c
+struct ShapeRecord {
+    uint32_t headerField0;   // +0x00 -- still unresolved; VFX_shape_bounds
+                              // returns this verbatim, but no accessor gives
+                              // it independent meaning
+    uint32_t originXY;       // +0x04 -- packed {x,y} draw origin/hotspot,
+                              // confirmed via VFX_shape_origin
+    int32_t  boundX1, boundY1; // +0x08, +0x0C
+    int32_t  boundX2, boundY2; // +0x10, +0x14
+    uint8_t  rleData[];       // +0x18
+};
+```
+
+### Verification attempt: real `.spr`/`.fnt` files exist on disk but are RefPack-compressed
+
+Located real loose asset files (`gamedata/StarLancer/RESOURCE/FONT.FNT`,
+`gamedata/StarLancer/cd1/YOVB.SPR`, etc.) intending to verify the
+decoded structs against real bytes. `FONT.FNT` begins `10 FB 00 34 72
+E1 32 2E ...` -- the RefPack magic (Pass 29) followed immediately, so
+even LOOSE, non-archived `.fnt`/`.spr` files ship RefPack-compressed
+and must be decompressed before the `FontResource`/`ShapeSet` structs
+apply. Also confirmed no live Lancer.exe process is attached this
+session (`read_memory` on known runtime-only resource-pointer globals
+like `DAT_00520134` reads as zero, consistent with earlier sessions'
+findings that only compile-time-initialized `.data` is visible, not
+runtime state) -- so a live-memory verification isn't available either.
+**Did not attempt a hand-ported RefPack decompressor this session** --
+mis-porting the intricate control flow from `DecompressRefPackBlock`
+by hand risked producing a false-positive or false-negative
+verification, which would be worse than leaving this open. Flagging
+this honestly as unverified rather than forcing a shaky confirmation.
+
+### Open follow-ups
+
+- A careful, tested RefPack decompressor (Python or otherwise) run
+  against a real `.fnt`/`.spr` file would let the `FontResource`/
+  `ShapeSet` confidence move from "structurally decoded" to "verified
+  against real data" -- valuable if pursued carefully.
+- `ShapeRecord.headerField0` remains unresolved.
+- `VFX_shape_colors`'s record format, `WINVFX16.DLL` -- still open
+  from Pass 40.

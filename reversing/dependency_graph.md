@@ -1219,3 +1219,15 @@ WINVFX8.DLL (gamedata/StarLancer/WINVFX8.DLL, loaded as a second Ghidra program 
     -> depend on: FontResource layout (lineHeight @+8, glyphOffset[256] @+0x10, raw glyph bitmaps)
 
 Lancer.exe's InitializeWinVfxLibrary (Pass 39) -> loads this exact DLL and resolves these exact exports
+
+## ShapeRecord.headerField1 resolved as origin point (2026-09-09, forty-first session)
+
+```
+VFX_shape_origin (0x10009281, WINVFX8.DLL)
+  -> depends on: ShapeSet.shapes[idx].recordOffset, ShapeRecord+0x04 (origin/hotspot point)
+VFX_shape_minxy (0x100092dc) / VFX_shape_resolution (0x100092a6)
+  -> depend on: ShapeRecord+0x08/+0x0C/+0x10/+0x14 (bbox X1/Y1/X2/Y2, confirms Pass 40 layout)
+
+gamedata/StarLancer/RESOURCE/FONT.FNT, gamedata/StarLancer/cd1/*.SPR
+  -> RefPack-compressed on disk (Pass 29 magic 10 FB), even as loose files --
+     must decompress before FontResource/ShapeSet structs (Pass 40) apply
