@@ -536,6 +536,116 @@ checked" detail.
 | Ship-interior room map (roomType → hub) | 1-2 | Cross-referencing `RunShipInteriorVRLoop`'s per-`roomType` branches against the 6 root-node pairs shows a clean 1:1 mapping (`roomType` 1 has no paired hub — it calls back into `RunMenuScreenLoop` directly, i.e. "exit to front-end menu"; types 2/5/6/7/9 each jump to one specific pair of `VRRoomNode` roots). Reading each hub's own `moviePath` string gives a strong naming signal (Confidence 2 for the byte-level fact of which string is where, Confidence 1 for the room-NAME interpretations below, which are abbreviation guesses): type 7 → `0x50b318`/`0x506e30`, movie `"tv2brd.bik"` (`BRD` = Briefing Room, consistent with `RunMissionBriefingScreen`'s own `brd_`-prefixed assets); type 2 → `0x50aec8`/`0x506c80`, movie `"itac2rot.bik"` (`ITAC`/`ROT` rooms, exact meaning unclear — possibly a tactical/intel room and a ready-room); type 5 → `0x50b678`/`0x506d10`, movie `"pod2rot2.bik"` (`POD` = escape-pod bay, plausible for a carrier); type 6 → `0x50b3a8`/`0x506f20`, movie `"lockzomo.bik"` (`LOCK` = locker room, where a pilot would suit up); type 9 → `0x50b168`/`0x506dd0`, movie `"cd_cd2d.bik"` (`CD` = corridor, connecting the named rooms). The entry pair itself (`0x50b2b8` late-campaign / `0x506ad0` early-campaign) has movies `"b2iloop.bik"` (bunkroom idle loop) and `"rel_ladd_bunk.bik"` (a ladder-to-bunkroom transition — a plausible campaign-opening scene of the player descending into their bunk). Overall picture: a hub-and-spoke ship interior — bunkroom, locker room, briefing room, a corridor, an escape-pod bay, and one more room (ITAC/ROT) — matching genre convention for a carrier-based flight sim. Room-name abbreviation guesses are NOT confirmed against any external source (manual, credits, etc.) — flagged accordingly. |
 | `EnsureCorrectCDMounted` (0x42fe00, was `FUN_0042fe00`) | 3 | The 2-disc CD-swap-prompt system. Compares the currently-mounted CD number (`FUN_004ac6c0()`) against a required `param_1` (1 or 2); if they differ and the game isn't a full hard-drive install (`DAT_005d62c4==0`, set by `LoadInstallPathsFromRegistry`), loops showing a "please insert disc" state (via `FUN_0043eb30`) until the right disc is detected, then opens `"cd<N>.hog"` (`SafeFormatString` format string confirmed) via `OpenBigFile`/`CloseBigFile`, fatally erroring (`"Can't open HOG resource file: %s"` → `ReportAssertionFailureEx`) if it still can't open. Directly matches the real `cd1.hog`/`cd2.hog` files in the game directory and cross-confirms `DAT_005d62c4`'s "hard-drive install, no CD swapping needed" meaning from `LoadInstallPathsFromRegistry`. Confirmed called from `RunMissionBriefingScreen`. |
 
+## Single-player campaign structure (2026-09-08, twenty-fifth session)
+
+First dedicated pass at the campaign layer, building on the mission
+load/run/unload chain documented several sessions ago.
+
+### `mission.cpp` — the real subsystem name and API, confirmed
+
+String-table sweep for "Mission" turned up direct source evidence:
+`"C:\lancer\game\mission.cpp"`, `"!mission_initialised"`,
+`"init_mission: A mission is already initialised"`,
+`"destroy_mission: No mission to destroy!"`,
+`"process_mission: No mission initialised"`, `"Mission_TriggerCount <
+MAX_TRIGGERLIST"`, and `"gMissionBuffer"` (the real name of the buffer
+`LoadMissionFile` allocates). Confirms the real API shape:
+`init_mission`/`process_mission`/`destroy_mission`, matching
+`LoadMissionFile`/`RunMissionGameplay`/`UnloadMission`'s roles
+one-to-one, plus a real trigger-list system (`Mission_TriggerCount`,
+`MAX_TRIGGERLIST`) not yet located in code.
+
+### Campaign outcome branching, in `InitializeMissionGameplay`
+
+Re-examined the "previous mission result code → next mission-select
+code" branch table flagged as unopened when `InitializeMissionGameplay`
+was first documented. It's a genuine two-tier campaign narrative
+branch:
+
+- Reads a per-player "last mission outcome" code (`DAT_0050c2e8` in
+  single-player, or `DAT_00588400 + playerSlot*0x54` — the same
+  per-player-record stride seen in multiplayer contexts elsewhere).
+- **Codes 0-11**: a `switch` maps most of them through to a shared
+  fallback, with only a few (values not individually distinguished
+  from the decompile — the switch mostly falls through to one path)
+  taking distinct routes.
+- **Codes `0xf4`-`0xff`** (244-255 — reads as a small SIGNED byte range,
+  -12 to -1, cast to int): a SECOND switch maps each to a distinct
+  target value stored in `DAT_005883c0` — `0x10e`, `0x108`, `0x107`,
+  `0x106`, `0x10b`, `0x11b`, `0x10f`, `0x11e`, `0x117`, `0x11a`, `0x112`
+  — 11 distinct values in the `0x106`-`0x11e` range. `DAT_005883c0` is
+  then used to select a resource via `FUN_004a44d0` (not decompiled).
+  This reads as a genuine **branching debrief/intro-cutscene selector**:
+  how the PREVIOUS mission ended (11 distinct special outcome codes —
+  plausibly things like "died," "captured," "objective failed,"
+  "retreated," etc., though the exact code-to-meaning mapping isn't
+  determined) determines which of 11 different follow-up
+  cutscenes/screens plays before the next mission. This is the
+  campaign's actual narrative-branching mechanism.
+- A completely separate, later switch in the same function (on the
+  local player's own SHIP CLASS ID, not mission outcome) sets
+  `DAT_00566f8c`/`DAT_00579990` — flags already seen referenced in
+  `RunMissionBriefingScreen`/`RunMissionSelectMapScreen` — gating
+  whether a specific ship class is eligible for some later behavior
+  (plausibly eject-pod/escape-craft eligibility, given the context of
+  those two callers).
+
+### A mission-scripting command catalog exists (found, not yet fully mapped)
+
+Following up on two command-description strings noticed during the
+string sweep (`"TerminateMission"` → `"End the mission, and drop to
+death sequence"`; `"Sets a Mission Objective's status"`), located both
+as DATA in a real table via `search_byte_patterns` (`0x4f323c` and
+`0x4f3298` respectively) — a fixed-stride record table, each entry
+holding a description-string pointer, a handler FUNCTION pointer
+(real code addresses, e.g. `0x459bb0`, `0x459bd0`, `0x459c90`), and
+further name/parameter string fields in a sparse, mostly-zero-padded
+layout (consistent with per-command parameter slots, mostly unused for
+simple 0-argument commands like `TerminateMission`). This is very
+likely SHARED metadata between `Lancer.exe` and the `SLEdit.exe`
+mission editor also present in `gamedata/StarLancer/` — a
+scripting-command catalog for the `.dte` mission format's script
+opcodes, analogous in spirit to the AI state table and DirectPlay
+message catalog found in earlier sessions, but NOT fully read or
+mapped this session (only 2-3 entries examined, exact struct layout
+not resolved, no xrefs found from executable CODE to
+`"TerminateMission"` specifically — meaning the STRING itself might be
+editor-only tooltip text not touched by the runtime, even though the
+adjacent HANDLER FUNCTION POINTERS presumably are real runtime script
+opcodes).
+
+### Known campaign mission numbers (consolidated from this and earlier sessions)
+
+- Normal numbered missions: `mission1.dte` through at least `mission32`
+  (`.dte`), sequenced via `DAT_00562dc8`.
+- `mission25` (`0x19`): repeatedly special-cased across many earlier
+  sessions (`WinMain`, `RunMenuScreenLoop`, `RunMissionBriefingScreen`)
+  — always paired with a `DAT_00587cdc` companion flag, suggesting a
+  two-part or replayable mission.
+- `mission29` (`0x1d`): special-cased with NO speech-tag lookup in
+  `RunMissionBriefingScreen` — plausibly an epilogue, cutscene-only,
+  or otherwise non-standard "mission."
+- `mission251`, `mission311`: two additional specifically-named
+  missions outside the normal low-number sequence — likely bonus,
+  secret, or otherwise non-linear campaign content.
+
+### Open follow-ups
+
+- The exact meaning of each of the 11 outcome codes (`0xf4`-`0xff`)
+  and their 11 corresponding `DAT_005883c0` cutscene/screen values —
+  only the existence and count of branches confirmed, not their
+  individual narrative meaning.
+- `FUN_004a44d0` (resolves `DAT_005883c0`/`DAT_0057e048` into an
+  actual resource) — not decompiled.
+- The mission-scripting command table's full extent and exact struct
+  layout — only 2-3 entries examined.
+- The trigger-list system (`Mission_TriggerCount`/`MAX_TRIGGERLIST`)
+  referenced in a debug string but not yet located in code — likely
+  part of the same scripting subsystem.
+- What `mission25`/`mission29`/`mission251`/`mission311` actually
+  represent narratively — structural specialness confirmed across many
+  sessions, in-universe meaning still unknown.
+
 ## Open follow-ups (not yet started)
 
 - `WinMain`'s post-bootstrap state machine (mission select, loadout, multiplayer zone-check/deathmatch dispatch) — the largest remaining unknown reachable from the program entry point. Still untouched.

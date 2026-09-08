@@ -876,3 +876,32 @@ for wide fan-in from elsewhere in the binary once other subsystems are
 explored — worth re-checking `get_function_callers` on it periodically as
 coverage grows, rather than assuming its current "callers not yet
 enumerated" note stays small.
+
+## Single-player campaign structure (2026-09-08, twenty-fifth session)
+
+```
+InitializeMissionGameplay (0x4934f0)
+  -> depends on: DAT_0050c2e8 (SP prev-mission-outcome code),
+                 DAT_00588400[slot*0x54] (MP prev-mission-outcome code, per-player array),
+                 DAT_005883c0 (resolved cutscene/debrief ID, 0x106-0x11e range),
+                 FUN_004a44d0 (resolves DAT_005883c0/DAT_0057e048 into a loadable resource, not decompiled),
+                 DAT_00566f8c / DAT_00579990 (ship-class-keyed eject-eligibility-shaped flags)
+  <- depended on by: campaign mission-to-mission flow (caller not re-traced this session)
+
+Mission-scripting command table (data, ~0x4f31xx-0x4f33xx+, exact bounds unknown)
+  -> depends on: (nothing -- static data table)
+     entries reference: description strings ("TerminateMission" @0x4f4074,
+       "End the mission, and drop to death sequence" @0x4f4048,
+       "Sets a Mission Objective's status" @0x4f43dc),
+       handler function pointers (0x459bb0, 0x459bd0, 0x459c90, ... range,
+       none decompiled this session)
+  <- depended on by: presumably the .dte mission script interpreter (not yet located)
+     and/or shared with SLEdit.exe (mission editor, gamedata/StarLancer/) -- not confirmed
+
+mission.cpp API (source-confirmed via debug strings, code not newly traced this session)
+  init_mission / process_mission / destroy_mission
+  -> depends on: gMissionBuffer, Mission_TriggerCount / MAX_TRIGGERLIST (trigger-list
+     system referenced in an assert string, not yet located in code)
+  <- matches structurally to: LoadMissionFile / RunMissionGameplay / UnloadMission
+     (already documented in an earlier session under different working names)
+```

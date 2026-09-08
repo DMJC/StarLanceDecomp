@@ -3477,3 +3477,185 @@ catalog session.
 - The actual `object+0x670` READ/enforcement site — not found.
 - The rest of `ProcessNetworkMessage`'s body (~80 other message cases).
 - `DAT_0050ca7c` (the read-side trailing-bit-mask sibling table).
+
+## Pass 25 -- Single-player campaign structure (2026-09-08)
+
+Investigated the campaign layer directly on request, building on the
+mission load/run/unload chain documented in an earlier pass.
+
+### `mission.cpp` -- confirmed real subsystem name
+
+A string-table sweep for "Mission" (57 matches) turned up direct
+source-path and debug-assert evidence for the real mission subsystem:
+
+```
+"C:\lancer\game\mission.cpp"
+"!mission_initialised"
+"init_mission: A mission is already initialised"
+"destroy_mission: No mission to destroy!"
+"process_mission: No mission initialised"
+"Mission_TriggerCount < MAX_TRIGGERLIST"
+"gMissionBuffer"
+```
+
+This confirms the real API names (`init_mission`, `process_mission`,
+`destroy_mission`) map one-to-one onto the previously-documented
+`LoadMissionFile`/`RunMissionGameplay`/`UnloadMission` working names,
+and that `LoadMissionFile`'s allocated buffer is really named
+`gMissionBuffer` in source. It also surfaces a trigger-list system
+(`Mission_TriggerCount`/`MAX_TRIGGERLIST`) that hasn't been located in
+code yet -- likely part of the mission-scripting command subsystem
+described below.
+
+Also surfaced, not previously catalogued: a `.xmf` "Temporary Mission
+Files" format string, distinct from the `.dte` format already
+documented -- most likely a mission-editor scratch/save format used by
+`SLEdit.exe`, not loaded by the runtime's normal mission-load path.
+
+### Campaign narrative branching, in `InitializeMissionGameplay` (0x4934f0)
+
+`InitializeMissionGameplay` was fully decompiled in an earlier pass but
+had two switch statements left unopened. Both are now understood:
+
+**Switch 1 -- previous-mission-outcome -> next cutscene/debrief ID.**
+The function reads a small signed outcome code left over from the
+mission that just ended:
+
+```c
+// single-player:
+iVar6 = DAT_0050c2e8;
+// multiplayer (deathmatch), per-player-slot record, 0x54-byte stride
+// matches the per-player record stride seen elsewhere in the netcode:
+iVar6 = *(int *)((char *)&DAT_00588400 + playerSlot * 0x54);
+```
+
+Values `0`-`0xb` mostly fall through a shared default path. Values
+`0xf4`-`0xff` (i.e. -12..-1 as a signed byte, promoted to int) each
+take a DISTINCT branch, writing one of 11 different values into
+`DAT_005883c0`:
+
+| outcome code | -> DAT_005883c0 |
+|---|---|
+| 0xf4 | 0x10e |
+| 0xf5 | 0x108 |
+| 0xf6 | 0x107 |
+| 0xf7 | 0x106 |
+| 0xf8 | 0x10b |
+| 0xf9 | 0x11b |
+| 0xfa | 0x10f |
+| 0xfb | 0x11e |
+| 0xfc | 0x117 |
+| 0xfd | 0x11a |
+| 0xfe | 0x112 |
+
+(exact code-to-slot pairing reconstructed from switch-case order in the
+decompile; a couple of branches additionally call `FUN_004a44d0()`,
+which was not decompiled, to eagerly resolve `DAT_005883c0`/
+`DAT_0057e048` into a loadable resource -- presumably the actual
+debrief/cutscene asset.)
+
+**Confidence: 3** that this is real campaign branching (the code shape
+-- outcome code in, distinct cutscene-ID slot out, resource preload --
+is unambiguous); **confidence 1** on what any individual outcome code
+or cutscene ID narratively represents (no strings or further xrefs
+examined yet to pin down "died," "captured," "retreated," etc.).
+
+**Switch 2 -- ship-class-keyed eject eligibility (unrelated to the above).**
+A second, separate switch later in the same function keys off the
+player's own ship's CLASS-TYPE id (an int already documented elsewhere
+as the ship-class discriminator), not the mission outcome:
+
+```c
+switch (localPlayerShipClassType) {
+case 0: case 4: case 7: case 9: case 10: case 0xb:
+    DAT_00566f8c = ...;   // one flag value
+    DAT_00579990 = ...;
+    break;
+default:
+    DAT_00566f8c = ...;   // a different flag value
+    DAT_00579990 = ...;
+}
+```
+
+`DAT_00566f8c`/`DAT_00579990` are the same two globals referenced from
+`RunMissionBriefingScreen`/`RunMissionSelectMapScreen` in an earlier
+pass; the shape (small closed set of ship-class IDs vs. everything
+else, gating a pair of flags checked during mission briefing/select
+UI) is consistent with an eject-pod/escape-craft eligibility check,
+though this is not independently confirmed. **Confidence: 2.**
+
+### A mission-scripting command catalog (found, only partially mapped)
+
+Two command-description strings noticed in the earlier string sweep --
+`"TerminateMission"` (`"End the mission, and drop to death sequence"`)
+and `"Sets a Mission Objective's status"` -- were traced with
+`search_byte_patterns` on their literal pointer bytes rather than
+guessed offsets. Both resolved to DATA references (not code xrefs)
+inside a structured table:
+
+- `"TerminateMission"`'s address (`0x4f4074`) is referenced as a
+  pointer at `0x4f323c`.
+- `"Sets a Mission Objective's status"`'s address is referenced nearby
+  at `0x4f3298`.
+
+Two 200-byte reads (`0x4f3200`, `0x4f3358`) show a repeating,
+fixed-stride-looking record shape: a description-string pointer, an
+integer that's `1` in the samples seen (plausibly a parameter-type-code
+or arg-count field), a handler FUNCTION pointer into real code
+(`0x459bb0`, `0x459bd0`, `0x459c90`, and further addresses in the
+`0x459bxx`-`0x45dxxx` range), followed by several more sparse,
+mostly-zero fields -- consistent with per-command parameter-slot
+metadata that's simply unused for 0-argument commands like
+`TerminateMission`.
+
+This strongly resembles the AI state table and DirectPlay message
+catalog found in earlier passes: a data-driven command dispatch table,
+almost certainly the `.dte` mission format's scripting-opcode
+metadata. It is likely SHARED between `Lancer.exe` and the `SLEdit.exe`
+mission editor (also present under `gamedata/StarLancer/`) as
+authoring-time tooltip/metadata, with only the handler function
+pointers being runtime-relevant. **Not fully mapped this session** --
+exact entry stride, entry count, and full field layout are still open,
+and none of the handler function pointers were decompiled.
+**Confidence: 2** that this is a mission-scripting command dispatch
+table at all; **confidence 0-1** on any individual field's exact
+meaning beyond "string pointer" / "handler code pointer."
+
+### Known special-cased campaign missions (consolidated)
+
+Restating and consolidating findings scattered across several earlier
+passes, now framed as campaign structure:
+
+- Normal numbered missions run `mission1.dte`..`mission32.dte`+,
+  sequenced via `DAT_00562dc8`.
+- `mission25` is special-cased in `WinMain`, `RunMenuScreenLoop`, and
+  `RunMissionBriefingScreen`, always paired with companion flag
+  `DAT_00587cdc` -- shape suggests a two-part or replayable mission.
+- `mission29` is special-cased in `RunMissionBriefingScreen` with NO
+  speech-tag lookup performed -- shape suggests an epilogue or
+  cutscene-only "mission" rather than a normal playable one.
+- `mission251` and `mission311` are named outside the normal
+  low-number sequence entirely -- likely bonus/secret/non-linear
+  content, not yet investigated further.
+
+None of these numeric specifics were re-derived this session; they're
+gathered here because they bear directly on "campaign structure" and
+were previously scattered across unrelated passes.
+
+### Open follow-ups
+
+- Decompile 1-2 mission-scripting command handler functions (e.g. the
+  one near `0x459bb0` for `TerminateMission`) to confirm the dispatch
+  table theory and pin down the calling convention used to invoke them
+  from `.dte` script data.
+- Determine the mission-scripting table's true bounds/entry count
+  (only ~2-3 entries examined across two 200-byte reads).
+- Decompile `FUN_004a44d0` to see exactly what a `DAT_005883c0` value
+  resolves to (a cutscene FMV? a debrief text screen? a save-state
+  transition?).
+- Locate the trigger-list system (`Mission_TriggerCount`/
+  `MAX_TRIGGERLIST`) in code -- referenced only via a debug assert
+  string so far.
+- Pin down what `mission25`/`mission29`/`mission251`/`mission311`
+  actually are narratively, now that they're framed as part of
+  campaign structure rather than isolated oddities.
