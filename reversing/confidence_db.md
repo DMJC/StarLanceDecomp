@@ -1549,3 +1549,25 @@ stack region the manual reading pointed at.
 - `RunSaveLoadScreen` record 0 `(201,217,84,21)` -- referenced only via a button-descriptor pointer, not hit-tested; role unclear.
 - `RunNewGameSetupScreen`'s 8-entry row remains unresolved (Pass 50).
 - `RunMultiplayerSetupScreen`/`RunMultiplayerLobbyScreen` remaining items untouched this pass.
+
+## Pass 52 -- `RunMultiplayerSetupScreen` and `RunMultiplayerLobbyScreen`: full hotspot layouts (2026-09-09)
+
+Both screens' previously-flagged "chained pointer alias" layouts
+resolved using the same technique validated in Pass 51 (reconstruct
+the contiguous stack table from all literal-assignment offsets, then
+slice per `HitTestRectArray` window; adjacency confirmed via matching
+base-pointer arithmetic, not inferred).
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `RunMultiplayerSetupScreen` 38-record contiguous table, 5 `HitTestRectArray` windows | 5 | Directly read: main row+session list (16), connecting panel (4), host-setup dialog (4), difficulty row (8), join dialog (6). |
+| `RunMultiplayerSetupScreen` main-row index 7 = Options dialog | 5 | Corrects Pass 48's "Cancel-confirm" guess. |
+| `RunMultiplayerLobbyScreen` 3-entry exit cluster + 40-entry (`0x28`) main table | 5 | Directly read: Ready/Start, Cancel, page-scroll x2, mission-list (6), roster-slot toggles (8, one literally zeroed), 2 dropdown toggles + item lists (4+12), reserved tail. |
+| `RunMultiplayerLobbyScreen` host-mode 3-entry checkbox row (`&pcStack_258`) | 0 | Unresolved -- stack slot reused for SEH bookkeeping, no literal assignments visible in the decompile. Same limitation class as Pass 50. |
+
+### Open follow-ups
+
+- `RunMultiplayerLobbyScreen`'s 3-entry host-mode checkbox row coordinates -- would need the Pass 50-style P-code cross-check if pursued further.
+- Button-label text for both screens remains blocked on the runtime-only string table (Pass 37).
+
+All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNewGameSetupScreen`'s 8-entry row (Pass 50, root-caused decompiler limitation) and this pass's one 3-entry checkbox row -- both are the same class of gap (a stack region the decompiler didn't expose as literal assignments).

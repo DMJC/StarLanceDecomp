@@ -6338,17 +6338,15 @@ guess (there is no delete hotspot in this set).
 
 ### Screen 14 -- `RunMultiplayerSetupScreen` (`0x432fc0`)
 
-Position data built from ~30+ chained pointer-aliases rather than a
-flat table -- the investigating fork correctly declined to force a
-full mapping rather than risk wrong coordinates. Confirmed **actions**
-for the 8-hotspot main row (confidence 5, direct switch-case reads):
-0=Direct Connect/Play, 1=**Zone.com** (confirms Pass 6's
-`ShellExecuteA` finding), 2=Join, 3=Host(mode A), 4=Host(direct),
-5=Host Co-op(?), 6=Exit, 7=Cancel-confirm. One partial coordinate
-cluster found (confidence 2): a 4-item vertical list at `x=455, y=290/
-339/389/439, h=20`. Session-list rows use a separate
-`FUN_004bc720`-driven mechanism (20-int-stride records at
-`DAT_005dd7f8`), not coordinate-mapped.
+**Confidence 5, fully resolved in Pass 52** (see below) -- the "~30
+chained pointer-aliases" turned out to be one 38-record contiguous
+stack table with 5 different `HitTestRectArray` windows into it (main
+row + session list, connecting/status panel, host-setup dialog,
+difficulty/options row, join-session dialog), same pattern as
+`RunSaveLoadScreen` (Pass 51). Actions: 0=Direct Connect/Play,
+1=**Zone.com** (confirms Pass 6's `ShellExecuteA` finding), 2=Join,
+3=Host(mode A), 4=Host(direct), 5=Host Co-op, 6=Exit, 7=Options
+dialog (corrects the earlier "Cancel-confirm" guess for index 7).
 
 ### Screen 15 -- `RunVideoOptionsScreen` (`0x42e9b0`)
 
@@ -6403,17 +6401,18 @@ the list.
 2-byte computed field, plausibly ping or ready-icon index). Loop bound
 `DAT_005db83c` (live player count).
 
-**8 lobby buttons**, a clean repeated `{rectPtr, enabled=1,
-hover=-1, langStringIndex}` descriptor shape (confidence 4).
-Language-string indices: `0x59f`x2, `0x59b`, `0x592`, `0x5a3`x2,
-`0x59a`, `0x5a0`, `0x5a1`, `0x598` -- real `GetLanguageString` indices
-(Pass 37), label text itself unrecoverable statically (runtime-only
-string table). Underlying rects partially decoded (confidence 3): a
-repeated `(48,147,...)` roster-slot pattern x6, a large `(428,428)`
-region (plausibly a player-portrait panel), and a `(45,126,149,21)`
-block. Host-mode mission-select list (`DAT_0050c798`, 16-dword
-stride) reuses this same button mechanism -- no separate coordinates
-found.
+**Confidence 5, fully resolved in Pass 52** (see below): a 3-entry
+exit cluster plus one 40-entry (`0x28`) main table covering Ready/
+Start, Cancel/Back, page-scroll, the host-mode mission-select list (6
+rows), 8 player-roster slot toggles, two dropdown/expand toggles with
+their item lists, and a second 12-row list. Language-string indices
+(`0x59f`x2, `0x59b`, `0x592`, `0x5a3`x2, `0x59a`, `0x5a0`, `0x5a1`,
+`0x598`, real `GetLanguageString` indices per Pass 37) still point at
+runtime-only label text, per Pass 37/48. One small 3-entry checkbox
+row (host-mode ready/mute toggles) remains unresolved -- its stack
+slot was reused for SEH bookkeeping and carries no literal
+assignments in the decompile, the same class of gap documented in
+Pass 50.
 
 ### Consolidated confidence note
 
@@ -6757,3 +6756,129 @@ is active): `(562,384,32,20)`.
 - `RunMultiplayerSetupScreen`'s ~30-alias layout and
   `RunMultiplayerLobbyScreen`'s remaining rects -- not attempted this
   pass.
+
+## Pass 52 -- `RunMultiplayerSetupScreen` and `RunMultiplayerLobbyScreen`: full hotspot layouts (2026-09-09)
+
+Direct follow-up on the last two open items from Pass 48. Both screens
+turned out to follow the exact same pattern discovered for
+`RunSaveLoadScreen` in Pass 51: what looked like "~30 chained pointer
+aliases" is actually **one big contiguous stack table**, with several
+different `(base, count)` windows passed to `HitTestRectArray` for
+different UI modes/dialogs, plus a parallel set of small
+`{rectPtr, enabled, hover, langStringIndex}` button-descriptor
+structs (used for rendering/labeling) that merely point back into the
+same table -- those pointers are what earlier passes read as "aliases."
+Once the flat table is reconstructed from all its literal-assignment
+offsets, every window is a plain, directly-readable slice.
+
+### `RunMultiplayerSetupScreen` (`0x432fc0`)
+
+One 38-record `{x,y,w,h}` (`int16` x4) contiguous table, 5 different
+`HitTestRectArray` windows into it depending on connection state:
+
+**Main row + session list** (`&local_230`, count = `DAT_005dd568 + 8`
+-- 8 fixed buttons plus one row per discovered LAN/internet session):
+
+| idx | x | y | w | h | Action |
+|---|---|---|---|---|---|
+| 0 | 62 | 233 | 28 | 20 | Direct Connect / Play |
+| 1 | 251 | 233 | 28 | 20 | Zone.com (`ShellExecuteA`, Pass 6) |
+| 2 | 444 | 233 | 28 | 20 | Join |
+| 3 | 62 | 255 | 28 | 20 | Host (mode A) |
+| 4 | 251 | 255 | 28 | 20 | Host (direct) |
+| 5 | 444 | 255 | 28 | 20 | Host Co-op |
+| 6 | 292 | 441 | 25 | 16 | Exit to main menu |
+| 7 | 324 | 441 | 25 | 16 | Options dialog |
+| 8-15 | 66 | 292+12*i | 353 | 12 | Session list rows (8 visible, 12px pitch) -- index-8 = session table row |
+
+**Connecting/status panel** (`&local_2e0`, count 3 or 4 depending on
+connect mode): 4 stacked wide lines, all `x=455, w=178, h=20`, `y =
+290, 339, 389, 439`.
+
+**Host-setup dialog** (`&local_2c0`, 4 entries): `(372,305,28,20)`
+Cancel/back, `(258,339,28,20)` Exit(`0xa`), `(258,373,28,20)`
+Exit(`0x11`, lobby), `(198,305,169,21)` Options toggle.
+
+**Difficulty/options row** (`&local_2a0`, 8 entries): 5 `<`/`>`-style
+cycle fields (`20x15`, `x=208`/`411` at `y=295/338/381` -- 5 settings,
+each wrapping through a small fixed count: 4/7/3/5/4 states
+respectively) plus `(455,292,28,20)` Cancel, `(455,339,28,20)`
+Exit(`0xa`), `(455,389,28,20)` Options toggle.
+
+**Join-session dialog** (`&local_260`, 6 entries): `(373,305,28,20)`
+Cancel, `(444,339,28,20)` Exit(`0xa`), `(444,373,28,20)` Exit(`0x11`),
+`(198,304,169,21)` Options toggle, `(402,350,20,15)` scroll up,
+`(402,368,20,15)` scroll down.
+
+**Confidence 5** throughout -- every value read directly from the
+reconstructed table, and the table's adjacency/windowing itself is
+directly confirmed via matching base-pointer arithmetic (same method
+validated in Pass 51), not inferred.
+
+### `RunMultiplayerLobbyScreen` (`0x44b950`)
+
+Two (really three) contiguous tables:
+
+**3-entry exit cluster** (`&local_238`): `(201,126,79,21)` a
+larger "Back"-style link near the top, `(578,312,25,16)` Exit
+(`0xe`), `(578,334,25,16)` Exit (`0xe`, same destination as the
+first).
+
+**40-entry (`0x28`) main table** (`&local_220`, the big one):
+
+| idx | x | y | w | h | Action |
+|---|---|---|---|---|---|
+| 0 | 578 | 356 | 25 | 16 | Ready / Start |
+| 1 | 45 | 164 | 149 | 21 | Cancel / Back |
+| 2 | 323 | 421 | 25 | 16 | Scroll page up |
+| 3 | 291 | 441 | 25 | 16 | Scroll page down |
+| 4-9 | see below | | | | Host-mode mission-select list (6 rows) |
+| 10 (`0xa`) | 48 | 182 | 147 | 12 | Unused (no case label) |
+| 11-18 (`0xb-0x12`) | see below | | | | Player-roster slot toggles (8) |
+| 19 (`0x13`) | 435 | 172 | 162 | 12 | Dropdown/expand toggle |
+| 20-23 (`0x14-0x17`) | 435 | 186/200/214/228 | 162 | 12 | Dropdown items (4) |
+| 24 (`0x18`) | 266 | 130 | 28 | 14 | Second toggle |
+| 25-36 (`0x19-0x24`) | see below | | | | Second list (12 rows) |
+| 37-39 | 203 | 342/364/386 | 188 | 18 | Reserved/unused tail (same list pattern, no case label) |
+
+Mission-select list rows (4-9): `(323,441,25,16)`, `(45,126,149,21)`,
+`(464,388,32,21)`, `(428,251,28,14)`, `(428,266,28,14)`,
+`(48,168,147,12)`.
+
+Player-roster slot toggles (11-18): `(48,196,147,12)`,
+`(48,210,147,12)`, `(48,224,147,12)`, `(48,238,147,12)`, `(0,0,0,0)`
+(a genuinely zeroed slot -- one of the 8 roster positions is
+literally a null rect, plausibly an always-empty/host-reserved slot),
+`(435,130,162,12)`, `(435,144,162,12)`, `(435,158,162,12)`.
+
+Second list rows (25-36): `(203,150,55,17)` x4 at `y=150/172/194/216`,
+then `(399,168,28,14)` (an outlier -- likely a scroll/expand icon
+embedded mid-list), then seven `188x18` rows at `x=203,
+y=188/210/232/254/276/298/320`.
+
+**Confidence 5** on all of the above -- direct literal reads,
+adjacency confirmed via base-pointer arithmetic.
+
+### What remains genuinely unresolved
+
+One more small table exists: `HitTestRectArray(&pcStack_258, 3, ...)`,
+used only in host mode for the "ready/mute/second-checkbox" 3-toggle
+row (`DAT_00524a60`/`DAT_00524d74`/`DAT_00524d5c`). Unlike every other
+table in this pass, `pcStack_258` sits in a stack region the compiler
+reused for SEH exception-frame bookkeeping earlier in the function (it
+is declared as a plain `char *`, not a run of `undefined2` locals) --
+the decompile prints no literal-assignment lines for the 24 bytes this
+window covers, so its coordinates are not recoverable from this
+decompile the way every other table's are. **Confidence 0** on any
+specific values for this one row; not asserted. This is the same
+class of limitation documented in Pass 50, and would need the same
+P-code cross-check treatment if pursued.
+
+### Open follow-ups
+
+- The 3-entry host-mode checkbox row's coordinates (`&pcStack_258` in
+  `RunMultiplayerLobbyScreen`) -- unresolved, root cause identified.
+- Button-label language-string indices were captured in passing for
+  both screens' descriptor structs but not cross-referenced against
+  `GetLanguageString` output (blocked on the same runtime-only string
+  table noted in Pass 37/48).
