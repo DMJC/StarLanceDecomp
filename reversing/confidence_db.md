@@ -1464,3 +1464,20 @@ Direct research request. Decompiled `FUN_0043c1c0` (the per-frame VR-loop callba
 - Exact disambiguation of `DAT_0051d4b4` values 0 vs. 2 (both exit paths, distinct narrative meaning not confirmed).
 - Systematic sweep of other `RunMenuScreenLoop(N)` call sites for further mislabeled transitions.
 - `FUN_004ac620` (mission-29 ending cutscene/credits function) -- not decompiled.
+
+## Menu asset position data decoded: the mission-select star map's hotspot table (2026-09-09, forty-seventh session)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `MenuHotspotRect` struct `{x,y,w,h}` (8 bytes, int16 each) | 5 | Byte-exact match against `RunMissionSelectMapScreen`'s own hit-test code. Created as a real Ghidra struct, applied to state 0's array at `0x4ebaf8`. |
+| `MapScreenState` record: `{hotspotCount:2, pad:2, rects*:4, ...}`, stride 0x58 (88) bytes | 4 | First 8 bytes confirmed via two independently cross-checked states (0 and 1); tail fields (+0x08 onward) not mapped. |
+| State 0 (3 hotspots) / State 1 (5 hotspots) real coordinates | 5 | Directly read from the shipped binary's static image. |
+| State 1 = state 0 + a 3rd mission-choice button + a 2nd small button (plausibly mission29 + confirm/cancel) | 2 | Reasonable inference from position/size/count, not independently confirmed. |
+| Transition table at `0x4ebb60` (`[state][hotspotIndex] -> nextState`, 22 dwords/state) | 3 | Structurally located and characterized, not mapped entry-by-entry. |
+
+### Open follow-ups
+
+- `MapScreenState`'s fields beyond +0x08.
+- Full entry-by-entry mapping of the `0x4ebb60` transition table.
+- State 5 (referenced in code, not read).
+- The other 11 menu screens' position tables are mostly one-off stack locals, not global struct arrays -- this table was an atypically clean target.

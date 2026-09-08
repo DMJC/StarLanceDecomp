@@ -6076,3 +6076,109 @@ not fully disambiguated this session).
   worth a systematic sweep if this thread continues.
 - `FUN_004ac620` (the mission-29 ending-variant cutscene/credits
   function) -- not decompiled.
+
+## Pass 47 -- Menu asset position data decoded: the mission-select star map's hotspot table (2026-09-09)
+
+Direct request: decode the "asset position data" underlying the menu
+system's UI layout. Rather than the huge per-function local stack
+tables noted structurally in Pass 6 (each menu screen builds its own
+one-off pixel-position locals), picked the one GLOBAL, reusable,
+data-segment-resident position table found so far:
+`RunMissionSelectMapScreen`'s hotspot-rectangle table
+(`DAT_004ebb38`/`PTR_DAT_004ebb3c`, Pass 46), and read it directly out
+of the shipped binary's static image.
+
+### `MenuHotspotRect` -- confirmed, real struct (created in Ghidra, applied to live data)
+
+```c
+struct MenuHotspotRect {
+    int16_t x, y, w, h;   // screen-space clickable rectangle, 8 bytes
+};
+```
+
+Confirmed by directly reading and cross-checking two independent
+per-state rectangle arrays (see below) against
+`RunMissionSelectMapScreen`'s own hit-test code (`*psVar3 < mouseX <
+*psVar3+psVar3[2]`, `psVar3[1] < mouseY < psVar3[1]+psVar3[3]`) --
+exact match, confidence 5.
+
+### The per-state record (`MapScreenState`, structurally confirmed)
+
+```c
+struct MapScreenState {          // stride 0x58 (88) bytes, confirmed via two
+    int16_t hotspotCount;        // +0x00 -- states 0 and 1 read as 3 and 5 respectively
+    // +0x02: 2 bytes unaccounted (padding, or high bits of a wider count field)
+    MenuHotspotRect *rects;      // +0x04 -- pointer to this state's rect array
+    // +0x08 onward: further per-state fields, not fully mapped this session
+};
+```
+
+Two states read directly and verified self-consistent (declared
+`hotspotCount` matches the number of real, sane rects at the pointed-to
+array; the SECOND state's record starts exactly `0x58` bytes after the
+first, confirming the stride independently):
+
+- **State 0** (3 hotspots, `0x4ebaf8`): `{265,164,111,111}`,
+  `{265,328,111,111}`, `{546,18,80,80}` -- two stacked large
+  (111x111px) buttons in a left column plus one small (80x80px) button
+  off to the right.
+- **State 1** (5 hotspots, `0x4ebb10`): `{100,164,111,111}`,
+  `{265,164,111,111}`, `{265,328,111,111}`, `{546,18,80,80}`,
+  `{546,114,80,80}` -- a superset of state 0, adding a third large
+  button in the same row (`x=100`) and a second small button stacked
+  directly below the first (`y=114` vs `y=18`, same 80x80 size).
+
+This matches `RunMissionSelectMapScreen`'s own logic precisely: state 0
+offers the normal 3-mission choice (`mission30`/`31`/`32`, drawn as the
+two-large-plus-one-small layout), and state 1 -- reached via a specific
+hotspot transition -- adds a 3rd large mission-choice button (very
+likely the `mission29` epilogue option, given Pass 43/46's established
+role for mission 29) plus a second small button (plausibly a
+confirm/cancel pair, given the two small buttons are visually stacked
+and identically sized).
+
+### The transition table (`0x4ebb60`, structurally located, not fully decoded)
+
+Confirmed as a SEPARATE table (not part of `MapScreenState`) read by
+`RunMissionSelectMapScreen` as `*(int *)((clickedHotspotIndex +
+currentState * 0x16) * 4 + 0x4ebb60)` -- a `[state][hotspotIndex] ->
+nextState` lookup, `0x16` (22) dwords per state. Real values read
+(`1,5,1,0,0,...,1,1,2,1,4,1,...`) are small, sane state-index-shaped
+numbers consistent with this role, but the full table wasn't mapped
+entry-by-entry this session.
+
+### Applied to the live Ghidra project
+
+Created `MenuHotspotRect` as a real struct type and applied
+`MenuHotspotRect[3]` at `0x4ebaf8` (state 0's array). State 1's array
+(`0x4ebb10`) and the outer `MapScreenState` records were read and
+verified but not struct-typed in Ghidra this session (the record's
+tail fields past `+0x08` aren't understood well enough yet to commit a
+full struct definition).
+
+### Confidence
+
+**Confidence 5** on `MenuHotspotRect`'s 4-field layout (directly
+matches the hit-test code, byte-exact). **Confidence 4** on
+`MapScreenState`'s first 8 bytes (count + rect-array pointer, confirmed
+via two independently cross-checked states with matching stride).
+**Confidence 2** on the specific "3rd button = mission29,
+small-button-pair = confirm/cancel" interpretation of state 1's extra
+hotspots (a reasonable inference from position/size and Pass 43/46's
+established mission-29 role, not independently confirmed).
+
+### Open follow-ups
+
+- `MapScreenState`'s fields beyond `+0x08` (each record is 88 bytes;
+  only the first 8 are understood) -- likely holds per-hotspot
+  metadata (action codes, sound cues, or similar) given the extra
+  small-int values seen in the raw reads (`4,5,7,...,1,1,2,1,4,1`).
+- The transition table at `0x4ebb60` -- located and structurally
+  characterized but not mapped entry-by-entry.
+- State 5 (the third state value seen in `RunMissionSelectMapScreen`'s
+  code, `DAT_00524fdc == 5`) -- not read.
+- This is only ONE of many per-screen position tables across the 12
+  menu screens (Pass 6) -- most others use one-off stack-local tables
+  rather than a reusable global struct array, making this particular
+  table an atypically clean target; the others would need per-screen
+  investigation if this thread continues.

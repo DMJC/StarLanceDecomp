@@ -1296,3 +1296,12 @@ WinMain (0x4aa027, 0x4aa6f2)
 
 RunMissionSelectMapScreen (roomType==5 hub)
   -> InitializeMissionGameplay -> RunMissionGameplay -> UnloadMission   [direct, no briefing hop]
+
+## Menu asset position data decoded: the mission-select star map's hotspot table (2026-09-09, forty-seventh session)
+
+```
+RunMissionSelectMapScreen (0x44f3d0)
+  -> depends on: DAT_004ebb38 / PTR_DAT_004ebb3c (MapScreenState[] table, stride 0x58,
+                 {hotspotCount, MenuHotspotRect* rects, ...} per state -- states 0 (3 rects,
+                 0x4ebaf8) and 1 (5 rects, 0x4ebb10) read directly),
+                 DAT_004ebb60 (state-transition table, [state][hotspotIndex] -> nextState, stride 0x16 dwords)
