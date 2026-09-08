@@ -1277,3 +1277,21 @@ newly-identified squadron-roster file loader, `LoadSquadronRoster`.
 - Confirm ship-class-abbreviation readings (`wolv`=Wolverine, `phe2`=Phoenix, etc.) against an authoritative source.
 - Map the `.sro` roster format itself -- out of scope for this pass.
 - Verify `DAT_00582e8c`'s corrected SP/MP semantics against a live multiplayer session.
+
+## More hidden key bindings revealed via CheckKeyEdgeState's prototype (2026-09-08, thirty-sixth session)
+
+Continuation of Pass 34's flagged follow-up.
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| Esc (scancode 1) = universal exit, confirmed in both `RunShipInteriorVRLoop` and `UpdateMissionFrame` | 5 | Directly read from decompiles. |
+| Space bar (scancode 0x39) = keyboard equivalent of clicking a VR hotspot | 4 | Confirmed via identical boolean condition alongside the tracked mouse-button state. |
+| `SaveScreenshotTga` (0x4adc20, was FUN_004adc20), bound to '0' key (scancode 0xb) in `UpdateMissionFrame` | 4 | Confirmed via its own literal `"screenshot_%04d.tga"` format string. |
+| `DAT_004e5cd0` = control-descriptor table (stride 0x24, ~51 entries, display names at `DAT_004e5cd4+idx*0x24`) | 3 | Structurally confirmed in `RunControlsOptionsScreen`'s rebind-conflict-detection logic; entries not individually read yet. |
+| `DAT_004e2380` confirmed as the live runtime key-binding table (not just a mission-script artifact) | 4 | Directly read/written throughout `RunControlsOptionsScreen`; matches the same global `MissionScript_WaitForKey` (Pass 26) consumes. |
+
+### Open follow-ups
+
+- Read `DAT_004e5cd0`'s ~51 entries to produce a real default-flight-control-scheme table.
+- `DAT_004e23cc`'s exact per-control meaning.
+- ~40 remaining `CheckKeyEdgeState` callers not yet re-examined.

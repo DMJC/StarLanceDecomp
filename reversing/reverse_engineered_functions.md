@@ -4980,3 +4980,78 @@ This fully answers the original request: `_DAT_00588400`'s ultimate
 consumer is a squadron-roster loader, and the 12 Ctrl+Potato debug
 codes are a direct QA shortcut for selecting which of 12 real,
 named roster files loads for the next mission.
+
+## Pass 36 -- More hidden key bindings revealed via `CheckKeyEdgeState`'s prototype (2026-09-08)
+
+Direct continuation of Pass 34's flagged follow-up: re-decompiled
+further heavy `CheckKeyEdgeState` callers now that its prototype is
+set project-wide.
+
+### `RunShipInteriorVRLoop` -- two real key bindings confirmed
+
+- `CheckKeyEdgeState(1, 0, 1)` (scancode `0x01` = **Esc**, no modifier)
+  -- the VR loop's per-frame exit check; pressing Esc triggers
+  `FUN_004394d0()`'s confirm/cancel handling (0 = keep playing normally,
+  1 = confirmed exit -- tears down and either returns to the menu or
+  ends, 2 = a third outcome not chased further).
+- `CheckKeyEdgeState(0x39, 0, 1)` (scancode `0x39` = **Space bar**, no
+  modifier) -- a keyboard equivalent to left-clicking the currently
+  hovered hotspot, confirmed alongside the existing mouse-button checks
+  in the same `if` condition (`bStack_88 & 0x80`, i.e. the tracked
+  mouse-button state, is checked in the identical boolean expression).
+
+### `UpdateMissionFrame` -- Esc to exit, and a screenshot hotkey
+
+- `CheckKeyEdgeState(1, 0, 1)` (Esc) -- exits the current mission
+  gameplay frame loop entirely (`DAT_005db830 = 0; FUN_00491e20();
+  return 0;`), the same universal-exit binding as the VR loop.
+- `CheckKeyEdgeState(0xb, 0, 1)` (scancode `0x0b` = the **'0' key** on
+  the number row, no modifier) -- calls a function confirmed via its
+  own literal format string (`"screenshot_%04d.tga"`, an
+  auto-incrementing counter global `DAT_005d6ca8`) to be a real
+  **screenshot hotkey**. Renamed `FUN_004adc20` to `SaveScreenshotTga`.
+  Captures either the display-mode's back-buffer directly (hardware
+  path) or a software-rendered composite (`FUN_004c3430`+`FUN_004c8600`)
+  depending on the current renderer mode, and writes a numbered `.tga`
+  file via `FUN_004ca620`.
+
+### `RunControlsOptionsScreen` -- the rebind mechanism's real shape (not a static binding list)
+
+Re-decompiled in full. This is the interactive "press a key to bind it"
+UI logic itself, not a lookup table of default bindings, so it doesn't
+directly answer "what key does X do by default" -- but it does reveal
+the REAL underlying data structures cleanly:
+
+- A **control-descriptor table**, `DAT_004e5cd0`, stride `0x24` bytes,
+  spanning up to `0x4e6954` (roughly `(0x4e6954-0x4e5cd0)/0x24` ~= 51
+  entries) -- each entry's display-name string lives at a parallel
+  offset (`DAT_004e5cd4 + entryIndex*0x24`), used to build a
+  confirmation prompt string (`"%s: %s, %s, %s"`-shaped format,
+  `s___s___s__s__s_004e8488`) when the player is about to rebind a
+  control already bound elsewhere.
+- The RUNTIME binding storage is the same `DAT_004e2380` table already
+  documented as the per-key/per-control condition table consumed by
+  `MissionScript_WaitForKey` (Pass 26) and read throughout this screen
+  -- confirming `DAT_004e2380` genuinely IS the live key-binding table
+  (not just a mission-script artifact that happens to share the name),
+  with entries also cross-linked to `DAT_004e23cc` (mode/type?) and
+  `DAT_004e23ae` (a string field, likely the bound device/axis name for
+  joystick bindings).
+- Confirms `starlancer.ini`'s `[KeyConfig]` write-back keys precisely
+  match Pass 6's earlier finding (`ForceFeedback`, `JoystickInvert`,
+  `HatEnable`, `TwistEnable`, `controller`) -- no new keys found, but
+  now each one's exact toggle condition is visible (e.g. `ForceFeedback`
+  only toggles when `DAT_0050e1a4 != 0 && DAT_0057e064 == 0`, i.e. force
+  feedback hardware present AND controller mode is "keyboard").
+
+### Open follow-ups
+
+- Read `DAT_004e5cd0`'s ~51 entries directly (`read_memory`) to produce
+  the actual list of control names (roll/pitch/yaw/fire/throttle/etc.)
+  and cross-reference against `DAT_004e2380`'s currently-loaded default
+  scancodes -- a natural, well-scoped next step that would produce a
+  real "default flight control scheme" table.
+- `DAT_004e23cc`'s exact per-control meaning (currently just "some
+  mode/type value distinct from the scancode").
+- The remaining ~40 `CheckKeyEdgeState` callers (see Pass 34's full
+  caller list) not yet re-examined.

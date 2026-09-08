@@ -1124,3 +1124,20 @@ RunMainMenuScreen (Ctrl+Potato + F1-F12/Enter combos)
             -> LoadSquadronRoster (0x4a44d0, was FUN_004a44d0)
                  -> depends on: srofiles.cpp-tagged parser, DAT_0057e048 (loaded roster handle,
                                 consumed later in the same function for ship/wing setup)
+
+## More hidden key bindings revealed via CheckKeyEdgeState's prototype (2026-09-08, thirty-sixth session)
+
+```
+RunShipInteriorVRLoop
+  -> CheckKeyEdgeState(1,0,1)   [Esc, exit VR loop]
+  -> CheckKeyEdgeState(0x39,0,1) [Space, activate hovered hotspot]
+
+UpdateMissionFrame
+  -> CheckKeyEdgeState(1,0,1)   [Esc, exit mission]
+  -> CheckKeyEdgeState(0xb,0,1) [0 key] -> SaveScreenshotTga (0x4adc20)
+
+RunControlsOptionsScreen (0x42b690)
+  -> depends on: DAT_004e5cd0 (control-descriptor table, stride 0x24, ~51 entries),
+                 DAT_004e2380 (live runtime key-binding table, shared with MissionScript_WaitForKey),
+                 DAT_004e23cc, DAT_004e23ae (per-control mode/device-name fields),
+                 CheckKeyEdgeState (used to detect "which key did the user just press to rebind")
