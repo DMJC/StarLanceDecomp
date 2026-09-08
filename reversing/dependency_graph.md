@@ -538,9 +538,24 @@ PTR_DAT_004e06e0 (3-pointer array: group0/1/2 state tables)
             ship to zero velocity and rotation", "Huuuuuuuuge
             explosion", "Turns object lights off", "Make ripper drop
             what it's carrying" — string pool at 0x4e0780)
-  group2 -> 0x4e06c8 (NOT read this session)
+  group2 -> 0x4e06c8 (read this session: essentially empty — one
+                 placeholder entry whose name points to the shared
+                 "empty string" global DAT_00515d70; no state IDs
+                 observed anywhere fall in the 200+ range this group
+                 would cover)
   <- depended on by: TrySetAiState (the whole priority-gated FSM this
                  table drives)
+
+state 33 ("Dark Reign shoot", group0) -> HandleDarkReignAttackState
+  -> depends on: HasDamageAuthority, deathmatch team array (DAT_005db650)
+  -> depends on (NOT YET IN DB): FUN_00401cb0 (target scan),
+                 FUN_00402660 (fire/effect trigger)
+  <- confirms user-supplied claim: this is a deathmatch superweapon
+                 attack state, tied to the "Deathmatch Dark Reign
+                 target" objective (string at 0x4e06ec)
+
+state 110 ("dark reign shoot", group1) -> HandleDarkReignExitState
+  -> depends on (NOT YET IN DB): FUN_0040e8a0 (cleanup)
 ```
 
 ## SurrenderLib scene-node primitives (tenth session)

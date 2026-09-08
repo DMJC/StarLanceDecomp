@@ -600,11 +600,7 @@ open questions at once:
   it's carrying") that attaches to and steals cargo, plausibly a
   pirate/salvage ship class. "Mammoth" is a second named ship/object
   type (the Ripper's cargo target).
-- **"Dark reign shoot"** — an unusual, specific state name; plausibly
-  a mission-specific or boss-enemy special attack. "Dark Reign" itself
-  may be an internal-only reference (coincidentally also the name of a
-  contemporary Activision RTS, but no evidence connects the two beyond
-  the name).
+- **"Dark reign shoot" — user's claim independently confirmed in code (Confidence 3), plus more found.** The user identified this as a superweapon-firing state. Located both occurrences precisely via `search_byte_patterns` (byte-exact pointer search, not guessed offsets): group0 entry 33 (state ID 33, string `"Dark Reign shoot"`, capital R) and group1 entry 10 (state ID 110, string `"Dark reign shoot"`, lowercase r). Decompiled their callbacks: `HandleDarkReignAttackState` (state 33's `+4` slot) initializes a target-search structure (`bestDistance = FLT_MAX` sentinel, `0x7f7fffff`), calls an unopened target-scan function, and on success rolls a `rand()`-based selection before calling `FUN_00402660` — a genuine find-target-then-fire sequence, gated by the same `HasDamageAuthority`/deathmatch-team-array checks documented for the shield/hull damage functions. `HandleDarkReignExitState` (state 110's OnExit) simply clears a 16-byte per-object field range (`+0x710..0x71f`) and calls an unopened cleanup function — consistent with post-fire state cleanup. **Also found the objective name this ties to**: a THIRD nearby string, `"Deathmatch Dark Reign target"` (at `0x4e06ec`, immediately adjacent to `PTR_DAT_004e06e0` itself) — confirms "Dark Reign" is specifically a **deathmatch-mode objective/superweapon** players fight over control of, not just a generic superweapon.
 - **Multiplayer/Player Control states** confirm the AI system itself
   handles the handoff between AI-controlled and human-controlled
   piloting of a ship — i.e., "Player Control" is just another AI state
@@ -630,3 +626,56 @@ open questions at once:
   larger).
 - "Mammoth" and "Ripper" as confirmed in-universe names — worth a
   broader string-table sweep if ship/enemy taxonomy becomes a focus.
+
+## Exact state-ID confirmations, Dark Reign verification, and Group 2 (2026-09-08, seventeenth session)
+
+Followed up on the user's "Dark Reign shoot = superweapon firing"
+claim by locating the exact table entries via `search_byte_patterns`
+(searching for the literal 4-byte pointer value, not estimating offsets
+by hand — avoids the manual-parsing errors flagged as a risk last
+session) and decompiling their callbacks.
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `HandleDarkReignAttackState` (0x40bad0, was `FUN_0040bad0`, group0 state 33's `+4` callback slot) | 2 | Confirms the user's claim directly: initializes a target-search context (`bestDistance` seeded to `FLT_MAX`/`0x7f7fffff`, matching a classic "find nearest/best candidate" scan pattern), calls an unopened scan function (`FUN_00401cb0`), and on finding a target rolls a `rand()`-based choice before calling `FUN_00402660` (the actual fire/effect trigger, not decompiled) — gated by `HasDamageAuthority` (multiplayer) and a deathmatch team-array check (`DAT_005db650`, same pattern as `ApplyShieldDamage`/`ApplyComponentDamage`). A genuine target-acquire-then-fire sequence. |
+| `HandleDarkReignExitState` (0x40d1e0, was `FUN_0040d1e0`, group1 state 110's OnExit slot) | 2 | Clears a 16-byte per-object field range (`object+0x710`..`+0x71f`) and calls an unopened cleanup function (`FUN_0040e8a0`) — consistent with post-attack state cleanup, not the firing logic itself. |
+
+**The objective name**: a third nearby string, `"Deathmatch Dark Reign
+target"` (`0x4e06ec`, positioned immediately adjacent to
+`PTR_DAT_004e06e0` itself), confirms "Dark Reign" is specifically a
+**deathmatch-mode objective** — likely a capturable/interactive
+superweapon on certain deathmatch maps that players fight over control
+of, matching the target-acquisition-then-fire mechanic found in its
+handler. This is a genre-appropriate design (deathmatch maps with a
+neutral superweapon objective are a known FPS/arena-shooter pattern,
+here adapted to a space-combat deathmatch mode).
+
+**Exact state-ID confirmations** (via byte-pattern search, not manual
+offset arithmetic): state `33` = "Dark Reign shoot" (group 0), state
+`110` = "dark reign shoot" (group 1) — two distinct states despite the
+near-identical names (capitalization differs), consistent with
+attack-state (33) and exit/cleanup-state (110) being separate FSM
+nodes for the same overall mechanic. Also re-confirms state `11`
+(`0xb`) = "Explode" in group 0, matching `SetShipDestroyedState`'s use
+of literal `0xb` for the destroyed transition — the state CATALOG and
+the EARLIER-decompiled `SetShipDestroyedState`/`TrySetAiState` code
+now cross-verify each other exactly.
+
+**Group 2's table** (`PTR_DAT_004e06e0`'s third pointer, `0x4e06c8`):
+turns out to be essentially empty — a single all-zero-except-name
+entry whose name field points to `DAT_00515d70`, a global already
+identified in an earlier session as a shared "empty string" constant
+(used elsewhere as a default value for `GetPrivateProfileStringA`
+calls). This reads as an unused/placeholder/reserved state (ID 200),
+not a populated third group. No state IDs observed anywhere in this
+investigation have fallen in the 200+ range, consistent with group 2
+being effectively vestigial in the shipped game.
+
+### Open follow-ups
+
+- `FUN_00401cb0` (the real Dark Reign target-scan logic), `FUN_00402660`
+  (the actual fire/effect trigger), `FUN_0040e8a0` (exit-state cleanup
+  detail) — none decompiled.
+- Whether group 2 is truly entirely unused, or has real entries beyond
+  the single placeholder read this session (only the first 24 bytes of
+  its table were examined).

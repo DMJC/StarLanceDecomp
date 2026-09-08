@@ -2728,8 +2728,87 @@ rotation"`, `"Huuuuuuuuge explosion"`, `"Turns object lights off"`,
   cross-checked entry-by-entry (names were read in the table's memory
   order, which should correspond to ID order within each group, but
   this wasn't independently re-verified per entry).
-- Group 2's table — not read this session.
+- ~~Group 2's table~~ — read next, see below (essentially empty).
 - The remaining portions of groups 0 and 1 beyond the ~20 entries each
   that were read — the full catalog is likely somewhat larger.
 - "Mammoth" and "Ripper" as confirmed in-universe ship/entity names —
   a good anchor for a future ship-taxonomy sweep of the string table.
+
+---
+
+# Nineteenth pass (2026-09-08, same day): verifying "Dark Reign shoot" and Group 2
+
+The user identified `"Dark reign shoot"` as a superweapon-firing state.
+Verified this directly against the binary using `search_byte_patterns`
+to locate the exact table entries by their literal pointer bytes
+(avoiding the manual offset-arithmetic errors flagged as a risk in the
+previous session), then decompiled the callbacks those entries point
+to.
+
+## Locating the entries precisely
+
+Two occurrences exist: `"Dark Reign shoot"` (capital R) at state ID
+`33` in group 0, and `"dark reign shoot"` (lowercase r) at state ID
+`110` in group 1 — two distinct FSM states for the same overall
+mechanic, not a duplicate. This also incidentally re-confirmed state
+`11` (`0xb`) = `"Explode"` in group 0, exactly matching
+`SetShipDestroyedState`'s literal use of `0xb` for the
+ship-destruction transition from two sessions ago — the state catalog
+and the earlier independently-decompiled code now cross-verify each
+other exactly.
+
+## `HandleDarkReignAttackState` (`0x0040bad0`)
+
+State 33's secondary (`+4`) callback slot. **Confirms the user's claim
+directly**: initializes a target-search context by seeding a
+"best distance so far" field to `FLT_MAX` (`0x7f7fffff`) — the classic
+pattern for "find the nearest/best candidate by scanning and keeping
+the minimum" — calls an unopened scan function (`FUN_00401cb0`), and
+on finding a valid target rolls a `rand()`-based selection before
+calling `FUN_00402660` (presumably the actual fire/effect trigger,
+not decompiled). Gated by `HasDamageAuthority` (multiplayer authority)
+and a deathmatch team-array check (`DAT_005db650`) — the exact same
+pattern documented for `ApplyShieldDamage`/`ApplyComponentDamage`. A
+genuine find-target-then-fire sequence.
+
+## `HandleDarkReignExitState` (`0x0040d1e0`)
+
+State 110's OnExit callback. Simpler: clears a 16-byte per-object field
+range (`object+0x710` through `+0x71f`) and calls an unopened cleanup
+function (`FUN_0040e8a0`) — consistent with post-attack state
+teardown, not the firing logic itself.
+
+## The objective: "Deathmatch Dark Reign target"
+
+A third string, found adjacent to `PTR_DAT_004e06e0` itself at
+`0x4e06ec`: `"Deathmatch Dark Reign target"`. This confirms "Dark
+Reign" isn't just a generic superweapon — it's specifically a
+**deathmatch-mode objective**, almost certainly a capturable or
+interactive superweapon object present on certain deathmatch maps that
+players fight over control of (a classic arena-shooter map-objective
+pattern, here adapted to a space-combat context). This gives the
+target-acquire-then-fire mechanic in `HandleDarkReignAttackState` a
+clear purpose: the object automatically searches for and fires on
+whichever player/ship is the current valid target once under a
+player's control.
+
+## Group 2's table — essentially empty
+
+Read `PTR_DAT_004e06e0`'s third pointer (`0x4e06c8`, the "group 2"
+table) directly. It's a single all-zero entry whose name field points
+to `DAT_00515d70` — a global already identified in an earlier session
+as a shared "empty string" constant (used elsewhere as the default
+value for `GetPrivateProfileStringA` calls throughout `WinMain`'s INI
+loading). This reads as an unused/reserved placeholder state (ID 200),
+not a real third group of behaviors. No state ID observed anywhere in
+this entire investigation has fallen in the 200+ range this group
+would cover — consistent with group 2 being effectively vestigial in
+the shipped game.
+
+### Open follow-ups
+
+- `FUN_00401cb0` (the real Dark Reign target-scan logic), `FUN_00402660`
+  (the actual fire/effect trigger), `FUN_0040e8a0` (exit-state cleanup
+  detail).
+- Whether group 2 is truly entirely unused or has real content beyond
+  the single placeholder entry read this session.
