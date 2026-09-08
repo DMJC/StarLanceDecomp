@@ -1079,3 +1079,17 @@ RunMissionScriptVM (0x45c980)
 Relationship to the Pass 25-27 named-command metadata table (adjacent in memory, immediately
 after DAT_004f6350's jump table ends): UNRESOLVED -- flagged as open, not assumed either way.
 ```
+
+## VR ship-interior system: closing open questions (2026-09-08, thirty-third session)
+
+```
+WinMain
+  -> RunShipInteriorVRLoop (0x439fb0)
+       -> depends on: VRRoomNode graph (145 nodes, complete), HOG_BigRead,
+                       DAT_0051d478 (current room), DAT_0051db34/DAT_0051dacc (mouse x/y),
+                       roomType 3/4 hover-prop path -> "move_a.bik" (literal) / LoadNamedResource
+                       -> DAT_0051d9cc (shared overlay-content slot)
+       -> RunMenuScreenLoop (0x4289d0)   [roomType==1 exit transition, direct call]
+       -> RunMissionSelectMapScreen (0x44f3d0)   [roomType==5 hub, already documented]
+  -> RunMenuScreenLoop (0x4289d0)   [also called directly by WinMain's own state machine]
+```

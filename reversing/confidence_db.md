@@ -1217,3 +1217,23 @@ Found by following the trigger-processing data flow from `UpdateMissionFrame` ra
 - Confirm whether this VM's bytecode is literally what `.dte` files store on disk.
 - Resolve the VM-vs-named-command-table relationship.
 - Map the full 0xB8-byte script-thread struct.
+
+## VR ship-interior system: closing open questions (2026-09-08, thirty-third session)
+
+Follow-up on the already-complete 145-node graph walk (Passes 4-5); the
+12-screen menu system (Pass 6) had no new leads this round.
+
+| Name (address) | Confidence | Notes |
+|---|---|---|
+| `RunShipInteriorVRLoop` caller = `WinMain` only | 4 | Confirmed via `get_function_callers`; also confirmed `RunShipInteriorVRLoop` itself calls `RunMenuScreenLoop` directly on the roomType==1 exit transition. |
+| `roomType` 3/4 = mouse-hover interactive-prop triggers, NOT room transitions | 3 | Both gated on a FIXED screen rect (x:0x43-0x87, y:0x83-0xfb) + held mouse button, independent of the node's own hotspot data; type 3 plays a literal `"move_a.bik"` overlay, type 4 loads a resource via `LoadNamedResource`. Reframes Pass 5's vaguer "replay movie" guess. |
+| `pMoviePathAlt` = one-time entry/arrival transition clip (vs. `pMoviePath`'s idle loop) | 2 | Refined from Pass 4's "not determined" -- when set, plays once on arrival and suppresses the roomType 3/4 hover-prop check for that visit. |
+| `unk10` (+0x10) unused by `RunShipInteriorVRLoop` | 3 | Confirmed by exhaustive read of the struct-typed decompile -- every other field is exercised, this one is not. Narrows (doesn't resolve) the open question. |
+| Hotspot hit-test mechanics (target's own leading 4 int16 = clickable rect vs. tracked mouse pos) | 4 | Up from 3 (structural inference) to 4 (behavior-confirmed) via the actual comparison code. |
+
+### Open follow-ups
+
+- `unk10`'s consumer elsewhere in the binary, if any.
+- Whether the roomType 3/4 interactive-prop content varies by room or is a single shared asset.
+- Mission-select cheat code's exact key sequence (needs `FUN_004bd570` internals or live debugging).
+- `DAT_0051dab4`'s display-mode-dependent Bink playback selection.

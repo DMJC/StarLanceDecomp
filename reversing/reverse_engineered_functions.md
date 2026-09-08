@@ -4575,3 +4575,148 @@ guessed at.
   characterized (`+0x00` stack ptr, `+0x04` cursor, `+0x0c` some
   count/limit, `+0x10` alt cursor field seen in `RunMissionScriptVM`,
   `+0x18` trigger-data landing area).
+
+## Pass 33 -- VR ship-interior system: closing open questions (2026-09-08)
+
+Direct follow-up on "decode menus and the complete VR system," building
+on the already-complete (145-node) graph walk and struct work from
+Passes 4-5. The menu system (12 screens) was already documented at a
+thorough structural level in Pass 6 with no new leads to chase this
+round, so this pass focused entirely on the VR loop's remaining open
+questions, re-examining `RunShipInteriorVRLoop`'s full decompile now
+that Ghidra has the `VRRoomNode` struct applied throughout (yielding
+much more readable field accesses than the earlier manual-offset pass).
+
+### `RunShipInteriorVRLoop`'s caller: resolved
+
+`get_function_callers` confirms both `RunShipInteriorVRLoop` and
+`RunMenuScreenLoop` are called **only from `WinMain`** — closing the
+"not yet traced to a specific caller" item from Pass 4. Additionally,
+`RunShipInteriorVRLoop` itself calls `RunMenuScreenLoop` directly (the
+`nRoomType == 1` "exit to menu" branch), confirming the menu <-> VR
+loop relationship is a direct mutual call, not mediated through
+`WinMain`'s state machine for that specific transition.
+
+### `roomType` 3 and 4: NOT room transitions -- mouse-hover interactive props
+
+The earlier passes correctly flagged `roomType == 3` as doing something
+distinct from the hub-jump types but didn't fully decode it. The full
+decompile makes it clear neither 3 nor 4 represent room destinations at
+all:
+
+```c
+if ((DAT_0051d478->pMoviePathAlt == NULL) && (DAT_0051d600 == -1)) {
+  if (DAT_0051d478->nRoomType == 3) {
+    if ((0x43 < mouseX) && (mouseX < 0x87) && (0x83 < mouseY) && (mouseY < 0xfb)
+        && (leftMouseButtonHeld)) {
+      // opens a FIXED literal movie "move_a.bik" (not the node's own moviePath)
+      // and loads its decoded frame buffer into DAT_0051d9cc
+    }
+  }
+  else if (DAT_0051d478->nRoomType == 4) {
+    // same trigger condition, but loads via LoadNamedResource (not a .bik
+    // movie at all) into the SAME DAT_0051d9cc slot
+  }
+}
+```
+
+Both are gated on the mouse sitting inside a FIXED screen rectangle
+(`x: 0x43-0x87, y: 0x83-0xfb` -- i.e. roughly a small button-sized
+region in a consistent screen location, not derived from the node's own
+hotspot data) while the left mouse button is held, and only trigger
+when the CURRENT node has no `pMoviePathAlt` and no other transition is
+already in flight (`DAT_0051d600 == -1`). This is an **interactive prop
+system layered on top of specific rooms**, not room navigation: hovering
+and holding the mouse over one fixed screen-space hotspot while standing
+in a `roomType == 3` room plays a secondary overlay video
+(`"move_a.bik"`); in a `roomType == 4` room it loads a secondary
+resource via `LoadNamedResource` instead (a still image or UI overlay,
+not a video, given the different load path). Both land their result in
+the same `DAT_0051d9cc` slot, later composited via `FUN_004c78a0`+
+`(**(DAT_00588730+0x78))()` each frame in the same place the "8-frame
+cursor-pulse" animation is driven.
+
+Plausible interpretation (**not confirmed**, confidence 1): `roomType 3`
+rooms have a control/lever/switch prop the player can operate to trigger
+a canned "you moved something" animation (`"move_a.bik"` reads naturally
+as "move, take A" or "movement animation A"), while `roomType 4` rooms
+have a similar interactive prop that instead displays a loaded static
+resource (an image, a readout, a screen). This reframes the earlier
+"replay current movie without changing rooms" guess from Pass 5 into
+something more specific and better-evidenced: **not a room-navigation
+state at all, but a mouse-hover interactive-prop trigger confined to a
+fixed screen region**, independent of which physical room-graph node the
+player currently occupies (any `roomType == 3` or `4` node exhibits this
+behavior identically).
+
+### `moviePathAlt`: refined hypothesis
+
+Confirmed structurally: whenever a node has a non-NULL `pMoviePathAlt`,
+`RunShipInteriorVRLoop` unconditionally opens and plays THAT clip first,
+and the `roomType` 3/4 hover-prop logic above is explicitly skipped
+(`pMoviePathAlt == NULL` is a precondition for reaching it at all).
+Combined with the "twin nodes share destination but differ only in
+their incoming transition movie" pattern documented in Pass 5, this
+supports (confidence 2, up from Pass 4's "not determined"): **`pMoviePathAlt`
+is a one-time ENTRY/ARRIVAL transition clip, distinct from `pMoviePath`'s
+steady-state idle-loop clip** -- when set, it plays once on arrival and
+suppresses that node's hover-prop behavior for that visit; nodes without
+one just loop `pMoviePath` directly and remain eligible for the
+`roomType` 3/4 interactive-prop check.
+
+### `unk10` (`+0x10`, between `pMoviePathAlt` and `nNumTargets`): confirmed unused by the main loop
+
+Read through the ENTIRE `RunShipInteriorVRLoop` decompile (now with the
+struct's named fields making every access visible) -- **the `+0x10`
+field is never read anywhere in this function.** Every other struct
+field (`hotspotX/Y/W/H`, `pMoviePath`, `pMoviePathAlt`, `nNumTargets`,
+`pTarget0..4`, `nRoomType`, presumably `soundFlag` at `+0x2a`, confirmed
+via the `!= -1` sound-trigger check) is exercised somewhere in this
+function; `+0x10` alone is not. This doesn't mean the field is unused
+by the GAME overall (a different function could read it), but it rules
+out `RunShipInteriorVRLoop` itself as the consumer, narrowing where to
+look next if anyone wants to resolve it. Not chased further this pass.
+
+### Hotspot hit-test mechanics, confirmed precisely
+
+```c
+if (0 < DAT_0051d478->nNumTargets) {
+  ppvVar15 = &DAT_0051d478->pTarget0;
+  do {
+    psVar4 = *ppvVar15;                 // the target node itself, reinterpreted as short*
+    if ((psVar4[0] < mouseX) && (mouseX < psVar4[2] + psVar4[0]) &&
+        (psVar4[1] < mouseY) && (mouseY < psVar4[3] + psVar4[1])) {
+      matchedIndex = i; break;
+    }
+  } while (...);
+}
+```
+
+Confirms exactly what Pass 4 inferred from field layout alone: each
+target's own leading 4 `int16` fields (`hotspotX/Y/W/H`) ARE its
+clickable rectangle as seen from the CURRENT room, tested directly
+against the tracked mouse position (`DAT_0051db34`/`DAT_0051dacc`).
+**Confidence raised from 3 to 4** (behavior-confirmed, not just
+structurally inferred).
+
+### Menu system: no new work this pass
+
+The 12 `RunMenuScreenLoop` handlers remain documented at the
+structural/purpose level established in Pass 6 -- this pass found no
+new open threads worth chasing there (the two flagged curiosities,
+the mission-select cheat code's exact key sequence and the save-file
+IFF format, are both already reasonably characterized and would need
+either `FUN_004bd570`'s internals or live-debugging to advance further,
+per METHODOLOGY's live-debugging guidance).
+
+### Open follow-ups
+
+- `unk10`'s consumer, if any, elsewhere in the binary.
+- Whether `"move_a.bik"` and the `roomType == 4` resource are the SAME
+  interactive prop across every room that uses them, or vary by room
+  (only one literal filename was seen; the `LoadNamedResource` call for
+  type 4 wasn't traced to see what name it resolves).
+- The mission-select cheat code's exact key sequence (needs
+  `FUN_004bd570` internals or live debugging).
+- `DAT_0051dab4`'s two-mode Bink playback selection
+  (`*(DAT_00588730+0x162e) != 0x3e0`) -- not investigated.
