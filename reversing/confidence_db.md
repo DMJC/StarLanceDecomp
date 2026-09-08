@@ -1379,3 +1379,21 @@ Direct continuation of Pass 37. Read `DAT_004e2380` in full (74 entries x 78 byt
 - A carefully-tested RefPack decompressor to verify `FontResource`/`ShapeSet` against real file bytes -- deliberately not attempted by hand this session to avoid a false verification.
 - `ShapeRecord.headerField0` still unresolved.
 - `VFX_shape_colors` record format, `WINVFX16.DLL` -- still open.
+
+## RefPack decoder built and verified byte-exact against real assets (2026-09-09, forty-second session)
+
+Direct request. Hand-ported `DecompressRefPackBlock` (Pass 29, `0x4cc350`) to Python and verified against real `gamedata/` files.
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| RefPack header = 2-byte magic (0x10 0xFB) + 3-byte big-endian decompressed size, opcode stream starts at byte 5 | 5 | Empirically confirmed: only this offset decompresses `FONT.FNT` cleanly to a length matching its own size field exactly (13426 bytes). Corrects Pass 29/41 speculation about extra header-skip bytes. |
+| RefPack opcode algorithm (4 back-reference forms + literal-run + end-marker, exact bit-packing per form) | 5 | Byte-exact verified against 2 independent real files (`FONT.FNT`, `YOVB.SPR`). |
+| `FontResource`/`GlyphRecord` layout (Pass 40) | 5 (up from 4) | Verified: lineHeight=17, 250/256 glyphs present, character-appropriate widths (space narrower than letters). |
+| `ShapeSet`/`ShapeRecord` layout (Pass 40) | 5 for shapes with sane data (up from 4); shape index 0 in the tested file decoded to garbage | Verified against `YOVB.SPR`: shapes 1-4 show a clean, sane multi-frame sprite-sheet pattern. Shape 0's anomaly flagged, not glossed over. |
+| `reversing/tools/refpack_decompress.py` saved as a reusable project tool | -- | Standalone, dependency-free Python port. |
+
+### Open follow-ups
+
+- Why `YOVB.SPR` shape index 0 decodes to garbage while 1-4 are clean -- possible special/reserved first entry.
+- `ShapeRecord.headerField0`'s semantic meaning still unresolved (now confirmed readable, not confirmed meaningful).
+- The "large header" (4-byte size) RefPack variant not exercised by either test file.

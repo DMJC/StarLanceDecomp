@@ -1231,3 +1231,12 @@ VFX_shape_minxy (0x100092dc) / VFX_shape_resolution (0x100092a6)
 gamedata/StarLancer/RESOURCE/FONT.FNT, gamedata/StarLancer/cd1/*.SPR
   -> RefPack-compressed on disk (Pass 29 magic 10 FB), even as loose files --
      must decompress before FontResource/ShapeSet structs (Pass 40) apply
+
+## RefPack decoder built and verified byte-exact against real assets (2026-09-09, forty-second session)
+
+```
+reversing/tools/refpack_decompress.py (new project tool)
+  -> ports: DecompressRefPackBlock (Lancer.exe, 0x4cc350, Pass 29)
+  -> verified against: gamedata/StarLancer/RESOURCE/FONT.FNT (-> FontResource, Pass 40)
+                        gamedata/StarLancer/cd1/YOVB.SPR (-> ShapeSet/ShapeRecord, Pass 40)
+  -> confirms: 5-byte RefPack header (2 magic + 3-byte BE size), full 4-form opcode algorithm

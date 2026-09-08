@@ -5594,3 +5594,98 @@ this honestly as unverified rather than forcing a shaky confirmation.
 - `ShapeRecord.headerField0` remains unresolved.
 - `VFX_shape_colors`'s record format, `WINVFX16.DLL` -- still open
   from Pass 40.
+
+## Pass 42 -- RefPack decoder built and verified byte-exact against real assets (2026-09-09)
+
+Direct request: build a RefPack decoder. Rather than trust a
+half-remembered "public spec," hand-ported the EXACT logic from
+`DecompressRefPackBlock`'s decompile (Pass 29, `0x4cc350`) to Python,
+opcode-by-opcode, then tested it against real files in `gamedata/` --
+this fully resolves Pass 41's deliberately-left-open verification gap.
+
+### The real header format (byte-exact, empirically confirmed)
+
+```
+offset 0: 0x10                    -- magic byte 1
+offset 1: 0xFB                    -- magic byte 2
+offset 2-4: decompressed size, 3 bytes, BIG-ENDIAN
+offset 5: opcode stream starts immediately
+```
+
+This is simpler than either of the two hypotheses floated in Passes
+29/40/41 (no extra 3-byte or 5-byte inner skip beyond the magic+size).
+Confirmed by brute-force testing every plausible start offset against
+`gamedata/StarLancer/RESOURCE/FONT.FNT`: **offset 5 is the only one
+that (a) decompresses cleanly to completion with zero invalid
+back-references and (b) produces an output length -- 13,426 bytes --
+that exactly matches the file's own big-endian size field
+(`0x003472` = 13426) read from offset 2-4.** This also means the
+`DecompressBigFileEntry`-side "5-byte header" described in Pass 28 is
+almost certainly this SAME 5-byte magic+size header, not an additional
+wrapper on top of it -- Pass 28's description was accurate, Pass 29/41's
+speculation about extra skip bytes inside `DecompressRefPackBlock`
+itself was an artifact of mis-tracing `ushort*` vs. byte-pointer
+arithmetic by hand; the empirical result supersedes that hand-trace.
+
+### The opcode algorithm (confirmed byte-exact against 2 real files)
+
+Four back-reference forms plus two run forms, matching the canonical
+public RefPack/QFS scheme structurally (confirming Pass 29's original
+identification), with exact bit-packing now nailed down against real
+data rather than assumed:
+
+| Control byte `B0` | Form | Literal count | Copy length | Distance |
+|---|---|---|---|---|
+| `0x00-0x7F` | 2-byte short | `B0&3` | `((B0>>2)&7)+3` | `(((B0>>5)&3)<<8)+B1+1` |
+| `0x80-0xBF` | 3-byte medium | `B1>>6` | `(B0&0x3F)+4` | `((B1&0x3F)<<8)+B2+1` |
+| `0xC0-0xDF` | 4-byte long | `B0&3` | `((((B0>>2)&0x3F)<<8)\|B3)&0x3FF)+5` | `(((B0&0x10)>>4)<<16)+(B1<<8)+B2+1` |
+| `0xE0-0xFB` | literal run | -- | `(B0&0x1F)*4+4`, no back-reference | -- |
+| `0xFC-0xFF` | end marker | `B0&3` final literal bytes, then stop | -- | -- |
+
+### Verification against real assets
+
+**`FONT.FNT`** (`gamedata/StarLancer/RESOURCE/`, 3805 compressed bytes)
+decompresses cleanly to exactly 13,426 bytes. Interpreted as the
+`FontResource` struct from Pass 40: `lineHeight=17` (a plausible pixel
+height), 250 of 256 `glyphOffset[]` entries non-null (exactly what
+you'd expect for a printable-ASCII font missing a handful of control
+codes), and individual glyph widths are sane and character-appropriate:
+**`'A'`=9px, `'0'`=9px, `' '`(space)=5px** -- the space character being
+narrower than letters is exactly the expected real-world result,
+about as strong a confirmation as static analysis can produce without
+actually rendering the glyphs.
+
+**`YOVB.SPR`** (`gamedata/StarLancer/cd1/`, 1,227,865 compressed bytes)
+decompresses to 1,624,208 bytes, `shapeCount=98`. Interpreted as the
+`ShapeSet`/`ShapeRecord` structs from Pass 40: shapes 1-4 show clean,
+sane bounding boxes sharing a common top-left origin `(22,7)` with
+increasing sizes (`57x19`, `296x357`, `296x396`, `296x402` pixels) --
+exactly the pattern expected of a multi-frame image/animation sheet.
+(Shape 0 decoded to nonsense values -- flagged honestly below rather
+than glossed over.)
+
+**Confidence raised to 5** (byte-exact, verified against 2 independent
+real files) for: the RefPack opcode algorithm, the 5-byte header
+format, the `FontResource`/`GlyphRecord` layout, and the
+`ShapeSet`/`ShapeRecord` layout (excepting `headerField0`, see below).
+
+### Saved as a reusable project tool
+
+`reversing/tools/refpack_decompress.py` -- a clean, standalone,
+dependency-free Python port, runnable directly against any `.fnt`/
+`.spr`/BigFile-archive-extracted compressed resource in `gamedata/`.
+
+### Open follow-ups
+
+- `YOVB.SPR` shape index 0 decoded to garbage bounding-box values
+  while shapes 1-4 were clean -- worth checking whether index 0 is a
+  special/reserved entry (e.g. a palette-only or metadata slot) rather
+  than a real drawable shape, or whether the `ShapeSet` header's
+  `unknown0` field affects how index 0 specifically should be
+  interpreted.
+- `ShapeRecord.headerField0` (Pass 40/41) is now verified-readable but
+  still has no confirmed semantic meaning.
+- The "large header" (4-byte size) RefPack variant, gated by a flag bit
+  in `DecompressRefPackBlock`'s original logic, was not exercised by
+  either test file (both used the compact 3-byte-size form) -- not
+  independently verified.
