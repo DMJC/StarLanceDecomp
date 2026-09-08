@@ -1,0 +1,1656 @@
+# Star Lancer reverse-engineered functions
+
+Implementation-oriented notes derived from `Lancer.exe` (loaded in Ghidra as
+project `Starlancer`, 32-bit x86, MSVC-compiled, `x86:LE:32:default`).
+Names are descriptive rather than recovered source symbols unless an
+embedded string literal or debug path proves otherwise. Every entry here
+should also have a row in `confidence_db.md` — that file is the index,
+this one is the prose detail per METHODOLOGY.md.
+
+This file starts from nothing as of 2026-09-07 (see `confidence_db.md`'s
+status note for why — no pre-existing corpus for this project). Built
+outward from the program entry point.
+
+## `mainCRTStartup` (`0x004d1210`)
+
+### Signature
+
+```c
+void mainCRTStartup(void);
+```
+
+### Behavior
+
+Standard MSVC CRT process entry point. Recognized by shape (this exact
+sequence appears in effectively every MSVC-linked Windows executable of
+this era), not deeply investigated function-by-function:
+
+1. Sets up an SEH exception frame.
+2. Calls `GetVersion()` and stashes the packed OS version into globals
+   (`_DAT_006235c8`/`_DAT_006235c4`/`_DAT_006235c0`/`_DAT_006235bc`).
+3. Heap init (`FUN_004d51c8`) and low-I/O init (`FUN_004d2b56`), each
+   aborting via `FUN_004d133d` (a CRT fatal-error/`_amsg_exit`-style
+   routine) on failure.
+4. argv/environ setup (`FUN_004d606a`, `GetCommandLineA`, `FUN_004d6ab0`,
+   `FUN_004d6863`, `FUN_004d67aa`), global constructors (`FUN_004d04c0`,
+   almost certainly `_initterm` over the `.CRT$XC*` table).
+5. `GetStartupInfoA` to resolve the actual `nCmdShow`.
+6. Calls `WinMain(GetModuleHandleA(NULL), NULL, cmdLine, nCmdShow)`.
+7. Passes `WinMain`'s return value to `FUN_004d04ed` (CRT `exit()`), which
+   does not return.
+
+### Known use
+
+Sole caller of `WinMain`. Nothing calls this except the OS loader (it's
+the PE entry point).
+
+## `WinMain` (`0x004a8b10`)
+
+### Signature
+
+```c
+int WINAPI WinMain(HINSTANCE hInstance, HINSTANCE hPrevInstance,
+                    LPSTR lpCmdLine, int nCmdShow);
+```
+(third and fourth CRT-supplied parameters were optimized to a 3-arg
+`__stdcall`-shaped decompile — `hPrevInstance` is read but never used, its
+slot subsumed; treat the signature above as the semantic one.)
+
+### Confirmation
+
+Two independent pieces of evidence: (1) called from `mainCRTStartup` with
+the CRT's canonical `(hInstance, hPrevInstance, cmdLine, showCmd)`
+convention, immediately before an `exit()`-style tail call; (2) an embedded
+string literal used purely as a memory-allocation debug tag,
+`"C:\lancer\game\winmain.cpp"` (at the `SR_MEM_allocate(0x96000, ..., 0xc0b)`
+call deep in the function body), which is the original source file's path —
+about as strong a confirmation as static analysis gets without a symbol
+table.
+
+### Behavior — bootstrap prologue (well understood, this session)
+
+1. **Single-instance check**: `CreateMutexA(NULL, TRUE, "StarlancerRunning")`
+   (mutex name from `s_StarlancerRunning_00509a98`); if
+   `GetLastError() == ERROR_ALREADY_EXISTS` (0xb7), finds the existing
+   window (`FindWindowA` on class `"WARTHOG_STARLANCER"`, see
+   `RegisterGameWindowClass`) and either brings it to the foreground
+   (`SetForegroundWindow` + `PostMessageA(WM_SYSCOMMAND, SC_RESTORE)`) or,
+   if no window is found, shows a "Game already running" `MessageBoxA`.
+   Otherwise proceeds to full startup.
+2. **Core init**: `SR_MEM_init()` (the game's own custom allocator —
+   imported, not defined in this binary), a `DebugLog_Stub` call opening
+   a `"c:\dbout.txt"`-named debug log (no-effect in this build), then
+   `RegisterGameWindowClass()` (same address, 0x4aa8e0, as the function
+   documented below — the decompiler doesn't surface the implicit
+   `__fastcall` ECX argument at this call site) which gates almost the
+   entire rest of the function behind `if (iVar5 != 0)`: the whole game
+   bails out immediately if window-class registration fails.
+3. **DirectX version gate**: `FUN_004bff10`-logged as `"DirectX Version
+   %03x"`; if the detected version is below `0x700` (DirectX 7), shows an
+   error message box and skips straight to cleanup — the game requires
+   DirectX 7+.
+4. **Command-line parsing**: manually scans `lpCmdLine` for `-`-prefixed
+   switches. Recognized switches (by `_strncmp` against literal strings,
+   exact text not yet extracted from the string table — only lengths seen:
+   4, 4, 3, and a `-credits` (7 chars) and `-greyscale` (9 chars) both
+   explicitly named): one sets a numeric value via `FUN_004cf460`
+   (`atoi`-shaped) into `DAT_00509544` with a variable-width digit-count
+   skip (looks like a `-mission<N>` or similar numeric-suffixed flag),
+   `-credits` sets `DAT_00595d6c=1`, `-greyscale` sets two globals to
+   `0x20000`.
+5. **Path setup**: builds `ships\`, `missiles\`, `guns\`, `lights\`,
+   `add_ons\`, and `starlancer.ini` paths relative to the executable's
+   directory (via `SafeFormatString`), matching the directory listing seen
+   directly in `gamedata/StarLancer/` (`SHIPS`, `MISSILES`, `GUNS`,
+   `ADD_ONS`, `starlancer.ini` — case-insensitive match on a
+   case-preserving filesystem, consistent).
+6. **Resource load**: loads a resource file via `FUN_004c7e20` (fatal
+   error `"main init: load failed on resource"` on failure, code `0x4fd`)
+   — almost certainly `RESOURCE.HOG` (present in the game directory) but
+   not yet directly confirmed by a path string read.
+7. **INI config load**: reads `starlancer.ini`'s `[Device]` section
+   (resolution width/height default `0x280`×`0x1e0` = 640×480, windowed
+   flag, gamma default 100, texture/geometry detail defaults, lightmap
+   toggle), `[Multiplayer]` section (protocol, IP address, modem number,
+   comm port), and `[Sound]` section (3D provider, FX/music/speech/master
+   volume defaults) via repeated `GetPrivateProfileIntA`/
+   `GetPrivateProfileStringA` calls against the built INI path. Matches
+   `starlancer.ini`'s presence in the game directory directly.
+8. **Display-mode cache**: `FUN_004a89c0` loads `dmodes.bin` (see
+   `confidence_db.md`'s Data formats section) to decide whether to trust a
+   cached device-capability list or force a redetect.
+
+### Behavior — post-bootstrap state machine (NOT yet understood)
+
+Past the INI/display-mode load, `WinMain` becomes an enormous
+(~400-line) `goto`-heavy state machine driven by globals like
+`DAT_00562dc8` (looks like "current mission index" — compared against
+literal mission numbers `0x19`=25, `3`, `0x1d`=29, `0xfb`=251 with a
+matching `mission%d.dte`/`mission251.dte`/`mission311.dte` path pattern),
+`DAT_005883fa`/`DAT_0058832c` (player slot / player count in a
+multiplayer context — arrays indexed up to 8, matching an 8-player
+multiplayer cap), `DAT_005d608c` ("zone check" result, branches on
+values 1-4 doing `DAT_00582e8c`="deathmatch flag" setup), and
+`DAT_005dc1e8` (looks like a host/client or single/multiplayer role flag
+— gates very different code paths, e.g. only the `==1` path iterates
+`DAT_005db83c` "number of players" doing per-player setup).
+
+This is explicitly **not** understood yet — it was skimmed while tracing
+the bootstrap sequence, not read line-by-line. It is the largest single
+remaining unknown reachable directly from the program entry point and is
+the natural next subsystem to tackle (see `dependency_graph.md`'s
+coverage note and `confidence_db.md`'s open follow-ups).
+
+## `RegisterGameWindowClass` (`0x004aa8e0`)
+
+### Signature
+
+```c
+bool __fastcall RegisterGameWindowClass(HINSTANCE hInstance);
+```
+
+### Behavior
+
+Builds and registers a `WNDCLASSA`: style `0xb`
+(`CS_VREDRAW|CS_HREDRAW|CS_DBLCLKS`), `lpfnWndProc = WindowProc`,
+`hIcon = LoadIconA(hInstance, MAKEINTRESOURCE(0x6f))`, default arrow
+cursor, `hbrBackground = GetStockObject(BLACK_BRUSH)` (stock object 4),
+class name `"WARTHOG_STARLANCER"`. Returns whether `RegisterClassA`
+succeeded. Also stashes `hInstance` into `DAT_005d561c` as a global.
+
+### Known use
+
+Called once, early in `WinMain`'s success path (guarded behind the
+DirectX version check having passed).
+
+## `WindowProc` (`0x004a8300`)
+
+### Signature
+
+```c
+LRESULT CALLBACK WindowProc(HWND hWnd, UINT msg, WPARAM wParam, LPARAM lParam);
+```
+
+Not previously a defined function in the Ghidra project (only reachable
+via the `&LAB_004a8300` function-pointer literal in
+`RegisterGameWindowClass`) — created as a function this session.
+
+### Behavior
+
+Standard game window procedure, dispatching on `msg`:
+
+- `WM_DESTROY` (2): `ReleaseCapture()` + `PostQuitMessage(0)`.
+- `WM_ACTIVATE` (6): if the window has a valid engine-side handle
+  (`DAT_00588730`, checked against a `!=0` and a flag at `+0x15f8`) and
+  the low word of `wParam` is `WA_INACTIVE` (0), sets
+  `DAT_00595d74=1` and calls `FUN_004a8260` (deactivation hook, not yet
+  decompiled); otherwise calls `FUN_004bd780` (activation hook, not yet
+  decompiled).
+- `WM_PAINT` (0xf): `BeginPaint`/`EndPaint` with no drawing (game renders
+  via its own D3D/DirectDraw surface, not GDI).
+- `WM_SETCURSOR` (0x20): calls `FUN_004a8110` unless a global flag
+  `DAT_00509548` is set.
+- `WM_CHAR` (0x102): feeds a 100-entry keystroke ring buffer at
+  `DAT_005d547c`, indexed by `DAT_00595d70`, with an optional filter
+  against a 9-byte exclusion list at `DAT_0050954c` once a mode flag
+  (`DAT_005d6088`) is set.
+- `WM_SYSCOMMAND` (0x112), masked to the low nibble-cleared command:
+  - `SC_SIZE`-family (`0xf010`): swallowed (returns 0) unless
+    `DAT_005e8148` is set.
+  - `SC_CLOSE`-family? (`0xf060`): sets `DAT_005d60bc=1` (looks like a
+    "close requested" flag) and swallows the message.
+  - `SC_RESTORE` (`0xf120`): if the engine window handle
+    `DAT_00588730` is non-null, clears a flag bit
+    (`*(handle+0x34) &= ~0x40`); if not already restored
+    (`DAT_005d60b8==0`), calls `SetWindowLongA(GWL_STYLE, DAT_00595d78)`
+    + `OpenIcon` + `FUN_004a8110`, then falls through to
+    `FUN_004bd780`.
+- `WM_ENTERMENULOOP`/`WM_EXITMENULOOP`/`WM_ENTERSIZEMOVE`/
+  `WM_EXITSIZEMOVE` (`0x211/0x212/0x231/0x232`): sets
+  `DAT_005ddd28=1` and calls `FUN_004bd780`.
+- Self-posted `WM_USER` (`0x400`, `pHVar3 == hWnd`-gated): recomputes
+  `DAT_005ddd28` from `GetActiveWindow()`/`IsIconic()` and re-posts
+  itself — this is a polling mechanism for window-active state, driven
+  by the message loop rather than a timer.
+- Everything else (including the fallthrough at the bottom of the
+  `0x211..0x400` range) calls `DefWindowProcA`.
+
+### Known use
+
+Assigned as `WNDCLASSA.lpfnWndProc` in `RegisterGameWindowClass`; invoked
+by the Windows message dispatcher, not called directly by game code.
+
+## `GetVersionInfoAndInstanceTitle` (`0x004a8160`)
+
+### Signature
+
+```c
+void __fastcall GetVersionInfoAndInstanceTitle(char *outBuffer);
+```
+
+### Behavior
+
+Two unrelated things happen in sequence, and the second one clobbers any
+effect of the first:
+
+1. Reads the running EXE's own Win32 version resource
+   (`GetFileVersionInfoSizeA`/`GetFileVersionInfoA` on the literal string
+   `"lancer.exe"`, then `VerQueryValueA(..., "\\StringFileInfo\\")`) to
+   extract an 8-byte language/codepage-ish value, builds a
+   `"\StringFileInfo\<value>\FileVersion"` query string via
+   `SafeFormatString`, queries that, and if successful formats
+   `"StarLancer (BETA) Build <version>"` into `outBuffer` — this whole
+   block is skipped if any `VerQueryValueA` call fails.
+2. **Unconditionally**, regardless of step 1, copies the literal string
+   `"Microsoft StarLancer"` into `outBuffer`, overwriting whatever step 1
+   wrote.
+
+### Known use
+
+Called once in `WinMain`, immediately before
+`FindWindowA("WARTHOG_STARLANCER", outBuffer)` for the single-instance
+"already running" check — `outBuffer` (the caller's `local_88`) ends up
+being window-title text for the `FindWindowA` lookup, meaning the
+build-version formatting work in step 1 is currently provably dead code
+in this binary. Flagged as a real quirk, not a decompiler artifact, since
+both writes target the exact same output pointer with no intervening
+branch that could explain it as reachable-but-conditional.
+
+## Display-mode/device-cache loader (`0x004a89c0`)
+
+### Signature
+
+```c
+int LoadDisplayModeCache(void);  // tentative name, not yet applied in Ghidra
+```
+
+### Behavior
+
+Opens `dmodes.bin` (via `FUN_004d02ef`, an `fopen`-with-mode-`0x40`-ish
+wrapper) relative to the current directory. Reads a `u32` magic and
+checks it equals `0x102` (fails → return 1, "need full redetect"). Reads
+a `u32` mode count into `DAT_005d5620`, then that many 16-byte records
+into `DAT_005d5750`. If `DAT_005d60c4==0` (a "trust cache" flag,
+presumably cleared by a prior `-` command-line switch or an earlier
+session's redetect), cross-checks the cached mode count/records against
+the live-enumerated display mode list (`FUN_004cc520` for the count,
+comparing four `int`-sized fields per 16-byte record) — any mismatch
+returns 2 ("cache stale"). On full success (or if the trust-cache flag
+skipped the cross-check), reads a SECOND count field into
+`DAT_005d5478` and a second, much larger table (0x144c bytes per record)
+into `DAT_00595da0`, then returns 0.
+
+### Data format cross-reference
+
+Directly checked the real `gamedata/StarLancer/dmodes.bin`'s first 16
+bytes: `02 01 00 00 01 00 00 00 02 10 00 00 d8 68 00 00`. This confirms
+`magic=0x00000102` (matches the `!=0x102` failure check exactly) and
+`mode_count=1`, followed by one 16-byte record
+(`0x00001002, 0x000068d8, 0, 0`). The record's individual field meanings
+are NOT determined — the values don't read naturally as a
+width/height/bpp/refresh tuple, so no per-field names are recorded pending
+further evidence (e.g. finding the code that WRITES this file during
+detection, which would show field-by-field construction order).
+
+### Known use
+
+Called once from `WinMain`, gating a 3-way branch: 0 → proceed silently,
+1 → run the "not enough… DirectX Version" error-and-fallback path (shares
+a branch target with the earlier DirectX-version check), 2 → tear down
+and exit (`CloseHandle`+`DestroyWindow`, then fall through to cleanup).
+
+---
+
+# Second pass (2026-09-08): SurrenderLib diagnostics + remaining bootstrap helpers
+
+## `SR_printf` (`0x004c3640`)
+
+### Signature
+
+```c
+int SR_printf(const char *format, ...);
+```
+
+Real name confirmed directly: the function's own null-format-string guard
+clause passes the literal string `"SR_printf: Null format string
+pa[ssed]"` to `ReportAssertionFailureEx` — a function naming itself in its
+own error text, about as strong as static confirmation gets.
+
+### Behavior
+
+The engine's (SurrenderLib's) central logging primitive:
+
+1. If `format` is NULL, calls `ReportAssertionFailureEx` (fatal).
+2. Formats into a fixed global buffer (`DAT_005e6750`) via `FUN_004d05e0`
+   (an unidentified vsprintf-shaped formatter — not itself decompiled).
+3. Always forwards the formatted text to `DebugLog_Stub` — a no-op in
+   this release build (see below), so this step has no observable effect
+   in the shipped binary.
+4. If an output-redirect callback is installed (`DAT_005e82e4`, function
+   pointer), calls it with no visible arguments (likely takes the global
+   buffer implicitly or via a fixed calling convention the decompiler
+   didn't capture); otherwise falls back to `OutputDebugStringA`.
+5. Returns the formatted string's length.
+
+### Known use
+
+Called by `ReportAssertionFailure`/`ReportAssertionFailureEx` to actually
+emit their assembled fatal-error text before crashing. Given this is
+described as "the" printf-equivalent for the whole engine, it is very
+likely called from many more places across the 2434-function binary that
+haven't been examined yet — worth re-checking its caller list as more of
+the binary is covered.
+
+## `ReportAssertionFailure` (`0x004c37b0`, 3-arg) / `ReportAssertionFailureEx` (`0x004c3710`, 4-arg)
+
+### Behavior
+
+SurrenderLib's fatal-error/assert-and-crash pair, confirmed by two
+independent embedded source-path strings:
+`C:\lancer\surrender\surrenderlib\...` (this is the engine's real
+internal library name — "Surrender" — matching the `SR_` prefix seen on
+imports like `SR_MEM_init`/`SR_MEM_allocate` and the
+`SR_driver_enumcards` export).
+
+Both functions:
+
+1. Allocate a 1KB scratch buffer via `SR_MEM_allocate`.
+2. If a corresponding callback is installed (`DAT_005e82e8` for the
+   3-arg form, `DAT_005e82ec` for the 4-arg form), invoke it — this looks
+   like a caller-installable "do cleanup before we crash" hook.
+3. Format `"Debug assertion in module %s line %d ..."` (exact literal
+   text and full argument list not extracted from the string table this
+   pass) via `SafeFormatString`.
+4. Route the message through `SR_printf`.
+5. Show a `MessageBoxA` titled `"FATAL: SR Assertion Failed"` on the
+   active window.
+6. Free the scratch buffer.
+7. Execute `swi(3)` — x86 `INT 3` (`__debugbreak`) — which does not
+   return; this is a deliberate crash/debugger-trap, not a normal error
+   return path.
+
+### Known use
+
+`ReportAssertionFailureEx` is called directly from `WinMain`'s resource
+and MSSpeech load-failure paths (`"main init: load failed on resource"`,
+code `0x4fd`; `"HudInit: load failed on msspeech"`, code `0x5f8`).
+`ReportAssertionFailure` (3-arg) is also self-called by `SR_printf`'s
+own null-format-string guard. Given the naming ("Debug assertion") this
+is almost certainly SurrenderLib's general-purpose `assert()`-equivalent,
+reached from many more call sites throughout the binary that haven't
+been surveyed yet.
+
+## `SetAssertionCallback` (`0x004c3620`) / `SetAssertionCallbackEx` (`0x004c3630`)
+
+Trivial one-line setters (`DAT_005e82e8 = param; return;` and
+`DAT_005e82ec = param; return;` respectively), confirmed by direct xref
+to be exactly the globals `ReportAssertionFailure`/`ReportAssertionFailureEx`
+conditionally invoke before crashing. Their own callers are not yet
+traced — it's unknown who installs these hooks or when.
+
+## `CreateGameWindow` (`0x004a85a0`)
+
+```c
+void CreateGameWindow(void);
+```
+
+Builds the window title via `GetVersionInfoAndInstanceTitle`, then calls
+`CreateWindowExA(0, "WARTHOG_STARLANCER", title, 0x800000, 0, 0, 640, 480,
+NULL, NULL, hInstance, NULL)`, storing the resulting `HWND` in
+`DAT_005d60b0` (the same global `WinMain`'s single-instance check reads).
+Immediately zeroes the window's `GWL_STYLE` afterward — the real
+windowed/fullscreen style is applied later, once `starlancer.ini`'s
+`[Device]` settings are known.
+
+## `LoadLanguageStrings` (`0x00490dc0`)
+
+```c
+void LoadLanguageStrings(void);
+```
+
+Loads `LANGUAGE.DLL` (present in `gamedata/StarLancer/`) via
+`LoadLibraryA`. Enumerates every string-table resource it contains by
+calling `LoadStringA` with an incrementing resource ID starting at 1
+until a call returns 0 (no more strings) — this is a full-enumeration
+pattern, not a fixed known-ID list. Allocates one contiguous buffer
+(`SR_MEM_allocate`, tagged `C:\lancer\game\language.cpp`) sized to hold
+every string's bytes plus null terminators, copies them all in, and
+builds a parallel `int[]` of offsets into that buffer (effectively a
+`char*[]`-equivalent lookup table, one entry per string ID).
+
+Separately, reads `LANGUAGE.DLL`'s own Win32 version resource (same
+`GetFileVersionInfoA`/`VerQueryValueA` pattern as
+`GetVersionInfoAndInstanceTitle`) and scans a table of 5-byte records at
+`DAT_0050318c` (repeatedly incrementing a pointer by 5 and comparing 4
+bytes via `FUN_004daef0` against the version string) up to some bound
+(`0x5031a9`), storing a matching index into `DAT_00563a14`. **This
+trailing scan's purpose is not understood** — plausibly a
+language-DLL-version compatibility check, but not confirmed; flagged as
+an open follow-up rather than guessed at further.
+
+### Known use
+
+Called once, early in `WinMain`'s success path (right after
+`RegisterGameWindowClass`/`CreateGameWindow`, before the DirectX version
+check completes). No other callers found yet.
+
+## `DetectDirectXVersion` (`0x004778c0`)
+
+```c
+void __fastcall DetectDirectXVersion(int *pddVersionOut, int *pOsPlatformOut);
+```
+
+(Parameters are passed via the implicit `__fastcall` `ECX`/`EDX`
+registers, which the decompiler doesn't surface at the `WinMain` call
+site — inferred from the function's own parameter usage, not from a
+visible argument list at the call.)
+
+### Behavior
+
+A capability-detection ladder that writes an increasing "tier" value
+into `*pddVersionOut` as each successive DirectX feature check succeeds,
+bailing early (leaving a lower tier value) the first time something
+fails:
+
+1. `GetVersionExA` — writes `*pOsPlatformOut` (1=NT, 2=9x) and rejects
+   Windows 9x below version 4 outright (`*pddVersionOut = 0`). On NT4
+   specifically (not later NT), caps out at DirectInput availability
+   (tier `0x300`) without ever trying DirectDraw — presumably an
+   NT4-specific compatibility carve-out.
+2. `LoadLibraryA("DDRAW.DLL")` + `GetProcAddress("DirectDrawCreate")` +
+   call it → tier `0x100`.
+3. `QueryInterface` to a second DirectDraw interface (likely
+   `IDirectDraw2`) → tier stays `0x100` on success (no tier bump coded
+   for this specific step, just a capability gate).
+4. `LoadLibraryA("DINPUT.DLL")` + `GetProcAddress("DirectInputCreateA")`
+   → tier `0x300`.
+5. Builds a `DDSURFACEDESC`-shaped structure (`dwSize=0x6c`, `dwFlags=1`
+   i.e. `DDSD_CAPS`, caps `0x200` i.e. `DDSCAPS_PRIMARYSURFACE`), calls
+   `SetCooperativeLevel` (vtable `+0x50`) then `CreateSurface` (vtable
+   `+0x18`) → tier `0x500` on success.
+6. `QueryInterface`s the created surface to a further interface → tier
+   `0x600`.
+7. `CoCreateInstance` of a DirectMusic CLSID → tier `0x601`.
+8. `GetProcAddress(hDDrawDll, "DirectDrawCreateEx")` existing AND
+   succeeding when called → tier `0x700` (DirectX 7 — the actual
+   minimum `WinMain` requires; every step above 0x700 in the ladder is
+   effectively just "DirectX 7 is present").
+
+Every failure path calls `OutputDebugStringA` with a specific
+`"Couldn't <thing>"` message (these are all present as string literals
+and give a clean, readable trace of exactly which DirectX component was
+missing) before returning the tier value reached so far.
+
+### Known use
+
+Called once from `WinMain`, immediately before the
+`"DirectX Version %03x"` debug log line and the `< 0x700` fatal-error
+branch. The returned tier's exact numeric thresholds (`0x700` = DX7)
+match `WinMain`'s own check exactly, which is the strongest evidence this
+function's return value IS the "DirectX version" `WinMain` logs.
+
+## `OpenBigFile` (`0x004c7e20`) / `CloseBigFile` (`0x004c7f20`)
+
+```c
+BigFileHandle *OpenBigFile(const char *path);
+void CloseBigFile(BigFileHandle *handle);
+```
+
+Real subsystem name confirmed: both allocate their handle struct
+(`SR_MEM_allocate`) tagged with the embedded debug path
+`C:\lancer\game\bigfile.cpp`.
+
+### Behavior — `OpenBigFile`
+
+1. Allocates a 0x24-byte handle struct.
+2. Opens `path` via `FUN_004d02ef` (an `fopen`-with-mode wrapper already
+   seen used by the `dmodes.bin` loader) — stores the `FILE*`-equivalent
+   at handle offset 0.
+3. ALSO opens the same path as a raw Win32 `HANDLE` via `CreateFileA`
+   (offset 1) — the handle keeps both a buffered stream handle and a raw
+   Win32 handle simultaneously; their respective roles (one likely for
+   sequential reads via the CRT wrapper, the other perhaps for
+   memory-mapping large assets later) aren't determined yet.
+4. Reads a 16-byte block into handle offset 2 (fields not decoded).
+5. Reads a 4-byte magic (`FUN_004c7df0`, a dedicated "read one int"
+   helper) and checks it equals `0x42494946`/`0x42494746`-shaped FourCC
+   spelling "BIGF" — fails (frees handle, returns NULL) if not.
+6. Reads two more header ints (offsets 7 and 8) — the second is used as
+   a byte count to allocate and read a directory/TOC block (offset 6).
+
+### Behavior — `CloseBigFile`
+
+Symmetric teardown: closes the buffered stream (`FUN_004d013c`, the
+`fclose` wrapper), frees the TOC block if allocated, closes the raw
+`HANDLE` if opened, frees the handle struct itself.
+
+### Known use
+
+`OpenBigFile` is called from `WinMain` on the main resource archive
+(fatal error `"main init: load failed on resource"` on failure) and
+again later for an MSSpeech-related resource (`"HudInit: load failed on
+msspeech"`) — these are two SEPARATE archive files, not the same handle
+reused. Matches real files present in the game directory: `RESOURCE.HOG`
+/ `Resource.FAT` (and the CD-image containers `cd1.hog`/`cd2.hog`).
+Individual TOC-entry layout is not yet decoded — this is purely the
+container open/close lifecycle.
+
+## `ShowEulaDialog` (`0x004aacf0`)
+
+```c
+int ShowEulaDialog(void *param);
+```
+
+Hides the cursor, loads `EBUEULA.DLL` (present in the game directory),
+resolves and calls its exported `EBUEula` function (name confirmed
+directly via the `GetProcAddress` literal string) with a registry-path
+string, an app-name string loaded from string resource ID 1, a fixed 0,
+and the caller's `param`. Restores the cursor and frees the library
+before returning the EULA dialog's result.
+
+## `InitializeHighResTimer` (`0x004a6e70`)
+
+```c
+void InitializeHighResTimer(void);
+```
+
+Guarded one-shot init (flag `DAT_00595c58`): zeroes an 80-byte global
+block, then calls `timeBeginPeriod(1)` to request 1ms multimedia timer
+resolution. Nothing more to it.
+
+## `LoadInstallPathsFromRegistry` (`0x004ad480`)
+
+```c
+void LoadInstallPathsFromRegistry(void);
+```
+
+Opens `HKLM\Software\Microsoft\Microsoft Games\<subkey>` (exact subkey
+name not extracted from the string table this pass — the visible string
+fragment is `"Software\Microsoft\Microsoft Gam..."`, truncated in the
+decompile output) and reads `InstallType`, `CDPath`, and
+`InstallationDirectory` values, building two path globals
+(`DAT_005d60ec` = CD path, `DAT_005d6b38` = install dir) each with a
+trailing backslash appended via an inlined strcat-equivalent loop. If
+`InstallType == '3'`, additionally populates two more path globals
+(`DAT_005d6a28`, `DAT_005d6928`) from the install directory — plausibly
+per-disc paths (the game directory does contain real `cd1`/`cd2`
+subdirectories), but this specific mapping is NOT confirmed, just
+plausible. If the registry key is missing entirely, falls back to
+`GetCurrentDirectoryA` and populates all four path globals from that
+single directory instead.
+
+### Known use
+
+Called once from `WinMain`'s bootstrap, before the resource/BigFile
+load — the paths it resolves are presumably what later path-building
+(`SafeFormatString`-based `%sships\` etc.) is relative to, though that
+connection hasn't been traced with an xref yet.
+
+## `LoadPlayerProfile` (`0x004751b0`)
+
+```c
+void LoadPlayerProfile(void);
+```
+
+Zeroes a large block of profile/campaign-progress globals and sets
+several defaults, most notably **`DAT_00562dc8 = 1`** — this
+independently corroborates `WinMain`'s own heavy use of the same global
+as "current mission index" (two functions treating the same address the
+same way, from different parts of the binary, without either one
+calling the other — real corroborating evidence, not just a repeated
+guess).
+
+Attempts to open `profile.bin` (present in the game directory). On
+success: copies the loaded data into the zeroed globals region and
+reopens the file a second time (via a different global file-handle slot)
+to read a 208-byte (`0xd0`) fixed record via `FUN_004d0003` (an `fread`
+wrapper) into `DAT_00562cf8` — the record's own field layout is not
+decoded. On failure to open at all: falls back to
+`FUN_00475390()` (not decompiled yet — likely
+`CreateDefaultProfile`/`SaveProfile`).
+
+### Known use
+
+Called once from `WinMain`'s bootstrap sequence.
+
+## `EnumDisplayCardsFromDriver` (`0x004cc520`)
+
+```c
+int __fastcall EnumDisplayCardsFromDriver(const char *driverDllPath,
+                                           void *param2, void *param3);
+```
+
+Generic "load a display-driver DLL, call one specific export, unload"
+wrapper: `LoadLibraryA(driverDllPath)`, resolves and calls the export
+named `"SR_driver_enumcards"` (name confirmed directly via the
+`GetProcAddress` literal string — also confirms the engine's `SR_`
+naming convention extends to driver-side exports, not just the main
+EXE), then `FreeLibrary`s the DLL and returns the call's result.
+
+### Known use
+
+This is the "enumerate the live display modes" step the `dmodes.bin`
+cache loader (documented above) calls to cross-check its cached mode
+list for staleness — resolves a dependency-graph gap left open in the
+first pass.
+
+---
+
+# Third pass (2026-09-08): first dive into `WinMain`'s state machine
+
+## `RunMenuScreenLoop` (`0x004289d0`)
+
+```c
+void __fastcall RunMenuScreenLoop(int startingScreenId);
+```
+
+The front-end menu system's top-level dispatcher. Stores the starting
+screen ID into `DAT_0051dac4`, then loops: each iteration resets a small
+per-screen scratch block (`DAT_00588730+4..0x18`, zeroed, plus a default
+per-frame callback installed at `+0x88`), then `switch`es on the current
+screen ID to call exactly one of 12 handler functions, and continues
+looping as long as the called handler returns 0.
+
+Screen ID → handler table (none of these 12 handlers have been
+decompiled yet — this is purely the dispatch shape):
+
+| ID | Handler | Notes |
+|---:|---|---|
+| 0 | `FUN_00428b60` | |
+| 1 | `FUN_0042a620` | |
+| 3 | `FUN_0042dab0` | |
+| 7 | `FUN_00437010` | Also called directly from `WinMain`'s own state machine when `DAT_00562dc8==0x1d` (29) — likely a specific unlockable screen (credits? epilogue?) tied to a specific mission number. |
+| 8 | `FUN_0043ca30` | |
+| 10 | `FUN_0043ca50` (sets `DAT_0051d54c=1` first) | |
+| 11 | `FUN_0043ca50` (sets `DAT_0051d54c=0` first) | Same handler as ID 10 — the flag almost certainly selects a save-vs-load (or similar binary) mode for one shared screen. |
+| 12 | `FUN_00430490` | |
+| 13 | `FUN_00431730` (also zeroes `DAT_0051d5f4`/`DAT_005201a4` first) | |
+| 14 | `FUN_00432fc0` | |
+| 15 | `FUN_0042e9b0` | |
+| 16 | `FUN_0042b690` | |
+| 0x11 | `FUN_0044b950` (sets `DAT_0051d54c=1` first) | |
+| 0x12 | `FUN_0044b950` (sets `DAT_0051d54c=0` first) | Same handler as ID 0x11 — same save/load-style pattern as the 10/11 pair. |
+| other | (no-op, returns 3) | |
+
+### Known use
+
+Called from multiple points inside `WinMain`'s post-bootstrap state
+machine with different starting screen IDs (0 appears to be the main
+entry from mission-end/menu-return paths). The individual screen
+handlers are the natural next layer to open — this is the entire
+front-end/menu UI of the game and currently totally opaque past the
+dispatch shape.
+
+## `RunShipInteriorVRLoop` (`0x00439fb0`)
+
+```c
+void RunShipInteriorVRLoop(void *startingRoomNode);
+```
+
+**This is the carrier-interior full-motion-video navigation system** —
+the "walk around your ship between missions, watch FMV, click hotspots
+to move to the next room" sequence Star Lancer is well known for.
+Source-tagged `C:\lancer\game\interface.cpp`.
+
+### Data model (inferred from usage, NOT independently struct-typed yet)
+
+Each "room" is represented by a node structure, pointed to by
+`DAT_0051d478` (current room) and passed in as `param_1` (starting
+room). Fields referenced by offset:
+
+| Offset | Inferred meaning |
+|---|---|
+| `+8` | Pointer to the room's `.bik` movie filename (or 0 to signal "end of chain"/immediate menu return — checked before opening a movie) |
+| `+0xc` | An alternate/secondary filename pointer, checked separately from `+8` in some paths (possibly a "with sound" vs "silent" variant, or an alternate resolution asset) |
+| `+0x12` | `short` count of hotspot rectangles |
+| `+0x14` | Array of pointers to `{x, y, w, h}` `int16` hotspot rectangles; each rectangle's own 4th `int16` (past x/y/w/h, i.e. `+8` within the rect) doubles as a "next room" pointer array parallel to it (`*(undefined **)(DAT_0051d478 + iStack_a8*4 + 0x14)` reassigns `DAT_0051d478` directly to the array entry — so the "hotspot array" is actually an array of pointers to NEXT-ROOM node structs, not raw rectangles; the rectangle is read through the first 4 shorts of whatever it points to) |
+| `+0x28` | `short` "room type" code — observed values 0,1,2,3,4,5,6,7,9, each with distinct handling in the main loop (described below) |
+| `+0x2a` | `short`, checked against `-1` to decide whether to play a UI sound on room transition |
+
+### Behavior
+
+Per-frame: polls input (`FUN_004aab20`, `FUN_004bd490`, `FUN_004bd3a0`,
+`FUN_004bd570`), and hit-tests the current mouse position
+(`DAT_0051db34`/`DAT_0051dacc`, updated from raw mouse delta each frame)
+against every hotspot rectangle of the current room. On a click (mouse
+button state tracked via `bStack_87`/`bStack_88` high bits) landing
+inside a hotspot (or matching some other trigger conditions involving
+`DAT_0051dab0`/`DAT_00520138`/`DAT_005d5e80`), transitions to that
+hotspot's linked room: closes the current Bink video (`_BinkClose`),
+compares the new room's movie filename against known special names
+(e.g. the literal `"rel_bunkroom2briefing_door.bik"`) to decide whether
+to trigger a door-open sound effect via the Miles Sound System
+(`_AIL_init_sample`/`_AIL_set_named_sample_file`/`_AIL_start_sample`),
+resolves and opens the new room's `.bik` file (`FUN_004c83f0` "find
+resource" + `_BinkOpen`, fatal via `ReportAssertionFailureEx` if either
+step fails), and continues.
+
+The room-type code at `+0x28` selects special transition behavior in
+several places (values 1, 2, 5, 6, 7, 9 each have distinct blocks in
+`WinMain`-adjacent code — not further decoded this pass) — e.g. type 7
+reloads a DIFFERENT pair of room-graph roots depending on
+`DAT_00562dc8 < 0x13` (mission-index threshold, matching the "current
+mission" global identified earlier), strongly suggesting two parallel
+ship-layout graphs (an early-campaign carrier layout and a later one —
+plausible given campaign narrative progression, not confirmed).
+
+Also handles a "reverse" playback mode (`_BinkGoto` back to a movie's
+start frame + `_BinkCopyToBuffer` with a flipped/reverse flag
+`DAT_0051dab4 | 0x80000000`) for some transitions, and maintains a
+mouse-idle/cursor-pulse animation state (`DAT_005d6c3c`/`DAT_0051d48c`/
+`DAT_00520244`) independent of room navigation.
+
+### Known use
+
+Not yet traced to a specific caller — very likely invoked from
+`WinMain`'s main state loop or from one of `RunMenuScreenLoop`'s 12
+screen handlers when transitioning from "menu" to "walk around the
+ship" mode. This is one of the richest, most gameplay-defining
+subsystems found so far and a strong candidate for continued
+investigation.
+
+## `EnsureCorrectCDMounted` (`0x0042fe00`)
+
+```c
+void __fastcall EnsureCorrectCDMounted(int requiredCdNumber);
+```
+
+The 2-disc CD-swap-prompt system.
+
+### Behavior
+
+If the game is a full hard-drive install (`DAT_005d62c4 != 0`, set by
+`LoadInstallPathsFromRegistry`), skips straight to opening the needed
+archive from the single install directory. Otherwise:
+
+1. Checks whether the currently-mounted disc (`FUN_004ac6c0()`, not
+   decompiled — presumably reads a volume label or a marker file) already
+   matches `requiredCdNumber`.
+2. If not, enters a poll loop (input pump + `FUN_0043eb30`, presumably
+   "is the right disc now present" combined with a "please insert disc"
+   UI) until it detects the right disc or the user cancels
+   (`FUN_004bd570(1)`).
+3. Once the right disc is present, switches the working directory to
+   that disc's path (`DAT_005d6a28` for disc 1, `DAT_005d6928` for disc
+   2 — both set up by `LoadInstallPathsFromRegistry`), builds
+   `"cd<N>.hog"` via `SafeFormatString` (format string confirmed
+   directly), and opens it via `OpenBigFile` (closing any
+   previously-open archive first via `CloseBigFile`).
+4. Fatal errors (`"Can't open HOG resource file: %s"` →
+   `ReportAssertionFailureEx`) if the archive still can't be opened
+   after all that.
+
+### Known use
+
+Called directly from `WinMain`'s post-bootstrap state machine at
+several points (visible in `WinMain`'s own decompile as
+`FUN_0042fe00(...)` calls preceding mission loads) — matches the real
+`cd1.hog`/`cd2.hog` files present in the game directory. Also called
+directly from `RunMissionBriefingScreen` (see below).
+
+---
+
+# Fourth pass (2026-09-08): `VRRoomNode` struct confirmed, `RunMissionBriefingScreen`
+
+## `VRRoomNode` struct (44 bytes)
+
+Verified by directly reading four real instances from process memory via
+`read_memory` and checking every field against how `RunShipInteriorVRLoop`
+actually dereferences them — not inferred from code alone. Created as a
+real struct type in the Ghidra project and applied at all 15 known
+root-node addresses.
+
+```c
+struct VRRoomNode {
+    int16_t hotspotX, hotspotY, hotspotW, hotspotH; // +0x00: this node's
+        // own clickable rectangle, as read by its PARENT when hit-testing
+        // the mouse against it as a destination. All-zero on entry/root
+        // nodes (nothing points to them as a clickable hotspot).
+    char *moviePath;      // +0x08: primary .bik filename for this room
+    char *moviePathAlt;   // +0x0c: nullable; sometimes equals moviePath,
+        // sometimes NULL — exact distinction not determined
+    int16_t unk10;        // +0x10: values 199-211 observed; meaning unknown
+    int16_t numTargets;   // +0x12: 0-4 observed (max possibly 5, matching
+        // the fixed array size below, but never seen filled to 5)
+    VRRoomNode *target[5]; // +0x14..+0x24: FIXED 5-slot array regardless
+        // of numTargets — unused trailing slots are NULL. (This was
+        // discovered by cross-checking a numTargets=1 node, which had
+        // 4 trailing zero slots, against a numTargets=4 node, which had
+        // only 1 trailing zero slot — 4+16 == 16+4 == 20 bytes either
+        // way, confirming a constant 5*4-byte array rather than a
+        // variable-length trailing array.)
+    int16_t roomType;     // +0x28: values 0,1,2,3,4,5,6,7,9 observed in
+        // RunShipInteriorVRLoop's dispatch — semantics not decoded
+    int16_t soundFlag;    // +0x2a: -1 in every sample read so far
+}; // sizeof == 44 (0x2c) bytes, ALWAYS — confirmed across all samples
+   // regardless of numTargets, since the target array itself is fixed-size
+```
+
+### Verified instances (this session)
+
+| Address | numTargets | moviePath | Notes |
+|---|---:|---|---|
+| `0x50b2b8` (early-campaign root, `DAT_0050b2b8`) | 3 | `"b2iloop.bik"` (bunkroom idle loop, plausible) | hotspot rect all-zero (it's a root) |
+| `0x50aef8` | 1 | (not read) | moviePathAlt = NULL |
+| `0x50b288` | 3 | (not read) | |
+| `0x50b348` | 4 | (not read) | The node that forced correcting the 3-slot-array theory to 5-slot |
+| `0x506ad0` (late-campaign root, `DAT_00506ad0`) | (typed, not read) | | |
+
+### Known use
+
+Used throughout `RunShipInteriorVRLoop`. 15 root/near-root addresses are
+now struct-typed in Ghidra: the 12 campaign-pair roots referenced across
+`RunShipInteriorVRLoop`/`RunMissionBriefingScreen`/`WinMain`
+(`DAT_0050b2b8`/`DAT_00506ad0`, `DAT_0050b318`/`DAT_00506e30`,
+`DAT_0050aec8`/`DAT_00506c80`, `DAT_0050b678`/`DAT_00506d10`,
+`DAT_0050b3a8`/`DAT_00506f20`, `DAT_0050b168`/`DAT_00506dd0`) plus the 3
+child nodes read directly this session. Only 5 of these 15 have actually
+had their bytes read and manually verified — the rest are typed on the
+assumption they share the same layout (a safe assumption given the
+uniform access pattern in the code, but not independently confirmed
+node-by-node).
+
+## `RunMissionBriefingScreen` (`0x00437010`)
+
+```c
+int RunMissionBriefingScreen(void); // RunMenuScreenLoop dispatch, ID 7
+```
+
+Real internal name confirmed via its own error strings:
+`"InterfaceBriefing resource: error searching/loading %s"`.
+
+### Behavior
+
+Plays the per-mission briefing video: builds an in-function array of
+literal briefing filenames (`"new_m01.bik"`, `"new_m15.bik"`,
+`"new_m16.bik"`, `"new_m18.bik"` through `"new_m28.bik"` — note the gap,
+`new_m02`-`new_m14` and `new_m17` are NOT in this particular array,
+meaning either they don't have distinct briefings or are handled by a
+different path not seen here) and indexes it by `DAT_00562dc8` (current
+mission index) via `SafeFormatString(..., "%s.bik", array[DAT_00562dc8])`
+— this is the THIRD independent function found treating `DAT_00562dc8`
+as the mission index (alongside `WinMain` and `LoadPlayerProfile`),
+raising confidence in that identification further.
+
+In parallel, plays a speech/subtitle track using the format string
+`"ms_speech_enrbr_tag_%02d_ut"` (`DAT_00562dc8` again) — "enrbr" reads
+naturally as "enroute briefing". Mission `0x1d` (29) is special-cased
+throughout (a separate, simpler code path with no speech-tag lookup) —
+this matches a special-case for mission `0x1d` also seen in `WinMain`
+and `RunMenuScreenLoop`'s screen-ID dispatch, suggesting mission 29 is
+some kind of non-standard mission (an epilogue, a cutscene-only
+"mission", or similar — not confirmed).
+
+Polls for "briefing skipped/finished" every frame; on completion, calls
+`EnsureCorrectCDMounted` (confirming its real call site), then hands off
+directly into the ship-interior VR system by setting the global
+`DAT_0051d478` (the same global `RunShipInteriorVRLoop` reads as its
+current-room pointer) to `&DAT_0050b2b8`, or `&DAT_00506ad0` if
+`DAT_00562dc8 < 0x13` (19) — i.e. an early-campaign vs late-campaign
+ship-interior layout, selected purely by mission number. This is the
+first concrete, traced link between the menu/briefing system and the VR
+room-navigation system.
+
+### Known use
+
+Called as `RunMenuScreenLoop`'s screen-ID-7 handler. Also referenced by
+address directly elsewhere (mission `0x1d`'s special-case branches in
+both `WinMain` and `RunMenuScreenLoop`'s own dispatch treat ID 7 /
+this function specially).
+
+## Ship-interior room map
+
+Cross-referencing `RunShipInteriorVRLoop`'s `roomType`-keyed dispatch
+branches (values 1, 2, 5, 6, 7, 9) against the six `VRRoomNode` root
+pairs found so far, and reading each hub's own `moviePath` string,
+produces a clean map:
+
+| `roomType` | Hub node pair (late/early campaign) | `moviePath` | Guessed room |
+|---:|---|---|---|
+| 1 | *(none — calls back into `RunMenuScreenLoop` directly)* | — | Exit to front-end menu |
+| 2 | `0x50aec8` / `0x506c80` | `"itac2rot.bik"` | "ITAC" / "ROT" room (exact identity unclear) |
+| 5 | `0x50b678` / `0x506d10` | `"pod2rot2.bik"` | Escape-pod bay ("POD") |
+| 6 | `0x50b3a8` / `0x506f20` | `"lockzomo.bik"` | Locker room ("LOCK") |
+| 7 | `0x50b318` / `0x506e30` | `"tv2brd.bik"` | Briefing room ("BRD" — matches `RunMissionBriefingScreen`'s own `brd_`-prefixed assets) |
+| 9 | `0x50b168` / `0x506dd0` | `"cd_cd2d.bik"` | Corridor ("CD") |
+| *(entry)* | `0x50b2b8` / `0x506ad0` | `"b2iloop.bik"` / `"rel_ladd_bunk.bik"` | Bunkroom (idle loop / ladder-descent intro) |
+
+This paints a coherent hub-and-spoke ship interior: bunkroom, locker
+room, briefing room, a corridor, an escape-pod bay, and one more room
+abbreviated `ITAC`/`ROT` — consistent with a carrier-based flight sim's
+between-mission routine (wake up, suit up, get briefed, launch).
+
+**Caveat**: the room-NAME interpretations (locker room, escape-pod bay,
+etc.) are abbreviation guesses from the `.bik` filenames, not confirmed
+against any authoritative source (in-game UI text, manual, credits).
+The mapping of `roomType` → hub pair itself is a direct code fact
+(Confidence 2); the English room names are Confidence 1.
+
+---
+
+# Fifth pass (2026-09-08, same day): full graph walk of the ship interior
+
+Walked the `VRRoomNode` graph outward from all 6 hub pairs, ~2-3 levels
+deep, reading ~85 distinct node addresses directly from process memory
+(`read_memory`, one node at a time — Ghidra scripting is disabled in
+this environment, `GHIDRA_MCP_ALLOW_SCRIPTS` is unset, so this was done
+by hand rather than with a traversal script). Not exhaustive — roughly
+20-25 further addresses were seen as targets but not yet read.
+
+## Doorway (`roomType != 0`) nodes found
+
+Every node below, once reached, unconditionally jumps to its `roomType`'s
+hub pair — its own `target[]` array is not used for this (frequently
+self-referential or left `NULL`/inconsistent with `numTargets`, since
+it's dead data once the jump fires):
+
+| Address | roomType | Jumps to | Own target[] (mostly vestigial) |
+|---|---:|---|---|
+| `0x506b00` | 1 | exit to `RunMenuScreenLoop` | `0x506f80` |
+| `0x50b408` | 2 | `0x50aec8`/`0x506c80` (ITAC/ROT) | self (`0x50b408`) |
+| `0x506c50` | 2 | (early variant) | self (`0x506c50`) |
+| `0x50b378` | 5 | `0x50b678`/`0x506d10` (pod bay) | `0x50b678` (the hub itself) |
+| `0x50b6a8` | 5 | (twin of above) | `0x50b678` |
+| `0x50acb8` | 5 | (twin of above) | `0x50b678` |
+| `0x50b0a8` | 5 | (twin of above) | `0x50b678` |
+| `0x50b3d8` | 6 | `0x50b3a8`/`0x506f20` (locker room) | `0x50b3a8` (the hub itself) |
+| `0x50b618` | 6 | (twin, no targets at all) | — |
+| `0x50b2e8` | 7 | `0x50b318`/`0x506e30` (briefing) | `0x50a988` |
+| `0x506e00` | 7 | (early variant) | self (`0x506e00`) |
+| `0x50a958` | 1 | exit to menu (twin of `0x506b00`, late-campaign side) | `0x50bbe8`, `0x50bc18` |
+| `0x50aa78` | 9 | `0x50b168`/`0x506dd0` (corridor) | *(numTargets=1 but the slot is NULL — an inconsistent/dead entry)* |
+| `0x506da0` | 9 | (early variant) | *(NULL)* |
+| `0x506e90` | 6 | (early variant) | `0x506f20` (the hub itself) |
+| `0x506ec0` | 6 | (early variant, twin) | `0x506ef0` |
+
+## Structural conclusions
+
+1. **The graph is one connected whole**, not six separate per-hub
+   trees. Nodes discovered while exploring one hub's subtree
+   repeatedly turn out to already be known from a different hub's
+   subtree — e.g. `0x50af28` (a child of the ITAC/ROT hub `0x50aec8`)
+   points straight back to `0x50aef8`/`0x50b288`/`0x50b348`, which are
+   the ENTRY room's own direct children. The whole ship is meant to be
+   walked freely, not menu-tree-navigated.
+2. **"Twin doors" are real and common**: the same logical destination
+   is reachable from multiple distinct physical door nodes with
+   identical `roomType`/target data (see the table above — 4 separate
+   `roomType=5` doors alone). This models several different
+   corridors/rooms each having their own doorway into a shared hub,
+   not a data-authoring duplicate-bug.
+3. **Early-campaign ship access is deliberately tiny**: for
+   `DAT_00562dc8 < 0x13`, the entry hub and 4 of the 5 special hubs
+   (everything except briefing) share the IDENTICAL 3-target set
+   (`0x506b30`, `0x506b60`, `0x506b00`) and identical `moviePathAlt`
+   (`0x507120`) — only the incoming transition movie differs per hub.
+   One level deeper, `0x506b60` shares the exact same 4-target set as
+   the early briefing hub itself. The entire early-campaign explorable
+   ship is therefore a loop of roughly 7-8 nodes — briefing room, a
+   shared corridor, and an exit door — while the late-campaign ship
+   (documented above) is a much richer, cross-linked structure. This
+   reads as a deliberate progression gate (you don't get full access to
+   your ship until later in the campaign), not a coincidence.
+4. **`unk10` is NOT a narrow ID field** as first suspected from a small
+   sample — values observed this pass range from ~195 to 965. A
+   per-node duration/frame-count is a plausible guess given that
+   spread, but unverified.
+
+## Coverage: COMPLETE
+
+Finished the walk in a follow-up round: read the remaining ~45 queued
+addresses in two more batches, down to zero new leaves — every `target`
+pointer discovered now resolves to an already-visited node. Final
+count: **~120 distinct `VRRoomNode` addresses in the late-campaign
+graph, ~24 in the early-campaign graph** (~145 total), all read by hand
+via `read_memory` (Ghidra scripting is disabled in this environment).
+
+### New findings from finishing the walk
+
+- **A genuine `roomType == 3` instance** found at `0x50ad48` — the
+  earlier full decompile of `RunShipInteriorVRLoop` showed this value
+  checked separately from the 1/2/5/6/7/9 hub-jump set (a "replay
+  current movie without changing rooms" branch, and a distinct
+  hover/idle-state check) but no concrete node with this value had been
+  seen until now.
+- **A third `roomType == 1` "exit to menu" door**, `0x50bbb8` — joining
+  `0x506b00` (early-campaign) and `0x50a958` (late-campaign) already
+  documented. Confirms multiple physical exit points exist, consistent
+  with the "twin door" pattern seen for the other hub types.
+- **Nodes with genuinely empty target arrays despite the field format
+  implying entries**: `0x50ada8` (`roomType=2`, `numTargets=0`, all
+  target slots zero) and `0x50ab98`/`0x50b1c8` (`roomType=6`,
+  `numTargets=3` claimed but all three slots zero) — reinforcing that a
+  door node's `target[]` data is genuinely dead/unreliable once
+  `roomType` triggers a hub jump, not just "usually self-referential."
+- **A door with no movie at all**: `0x50b7c8` (`roomType=6`) has both
+  `moviePath` and `moviePathAlt` as NULL pointers — the transition into
+  the locker-room hub from this specific spot plays no video, presumably
+  an instant cut.
+- No new areas, hub types, or major structural surprises — the last
+  ~45 nodes were entirely corridor/connector nodes feeding back into the
+  already-mapped 6-area structure, confirming the earlier structural
+  conclusions rather than revising them.
+
+---
+
+# Sixth pass (2026-09-08, same day): the 12 menu-screen handlers
+
+Completed `RunMenuScreenLoop`'s entire dispatch table (see
+`confidence_db.md` for the full per-screen summary table). Each handler
+is individually huge (100-700+ decompiled lines, dominated by hardcoded
+pixel-position tables for UI widgets) — documented here at the
+structural/purpose level per METHODOLOGY's tiered approach, not
+field-by-field. Two finds are worth calling out in more detail:
+
+## `RunMainMenuScreen` (`0x00428b60`) — a hidden mission-select cheat code
+
+The main title screen, past its 3 straightforward menu-button hotspots
+(→ New Game setup, Multiplayer setup, Options), contains an unusual
+12-deep chain of nested `if`-checks against what looks like a keyboard
+or input-queue poll function (`FUN_004bd570(1)`, called identically at
+every step — no visible argument distinguishing *which* key). Failing
+at any step sets a debug/status code (`_DAT_00588400 = 0..11`) and
+aborts the sequence; succeeding all 12 arms a flag (`DAT_005d5641`)
+that puts subsequent input into a different mode: the next several
+inputs are accumulated (mod-10 arithmetic, combined with the CURRENT
+mission index `DAT_00562dc8` if it's under 10) into a 2-digit number
+that is then written directly into `DAT_00562dc8`.
+
+This has every hallmark of a classic era-appropriate developer/QA
+**mission-select cheat code** — type a specific sequence to unlock
+direct entry to any mission number. The exact key sequence itself
+isn't recoverable from static analysis (the decompiler doesn't expose
+which key each `FUN_004bd570(1)` check is actually testing — that
+information likely lives in `FUN_004bd570`'s own implementation or a
+lookup table it references, not examined this pass). Confidence 2 for
+the mechanism's shape (directly observed), Confidence 1 for the "this
+is a cheat code" interpretation (very likely, not proven) — a good
+candidate for live-verification per METHODOLOGY's live-debugging
+guidance if anyone wants to actually find the key sequence.
+
+## `RunSaveGameBrowserScreen` (`0x00431730`) — save file format
+
+Confirms the on-disk save format: files are named
+`saves\<pilotname>GAME_<NN>.IFF` (matches the classic Origin/EA-era IFF
+chunk convention also seen in the BigFile/.HOG format's own FourCC
+magic-number style) and contain at least two identifiable chunks by
+their FourCC magic: `0x45564153` = `"SAVE"` and `0x5353494d` = `"MISS"`
+(read via `FUN_004909d0`/`FUN_00490c40`, an IFF-chunk-seeking helper
+family not itself decompiled). Each slot's browser entry shows a
+thumbnail (decoded via `FUN_0045e8d0`) and a formatted timestamp
+(`"<hour>:<minute> <weekday, month day, year>"`, built from the file's
+own last-write time via `GetFileTime`/`FileTimeToLocalFileTime`/
+`FileTimeToSystemTime`/`GetDateFormatA` — the DISPLAYED date is the
+file's filesystem timestamp, not something stored inside the save
+data itself). Lists up to 10 slots with scrolling. Also directly
+callable mid-flow from `RunSaveLoadScreen` (screens 10/11), not just
+reachable as screen 13 on its own.
+
+## `RunMultiplayerSetupScreen` (`0x00432fc0`) — Zone.com integration
+
+Confirms Star Lancer's online multiplayer used the **MSN Gaming Zone**
+matchmaking service: a `ShellExecuteA(NULL, "open",
+"http://www.zone.com/starlancer", NULL, NULL, SW_MAXIMIZE)` call is
+made directly when the player selects the "Zone.com" connection option,
+launching the user's default web browser. A real, historically-grounded
+detail rather than a guess — the URL string is embedded verbatim.
+Alongside Zone.com, the screen offers Direct-connect, Host, Join, and a
+scrollable list of discovered network sessions (a `0x14`-stride record
+array) connected to via `FUN_004bc720`.
+
+## `RunVideoOptionsScreen` (`0x0042e9b0`) — confirms the dmodes.bin table
+
+Directly manipulates the SAME device/mode table
+(`DAT_00595fe8`/`DAT_00595fec`/`DAT_00595ff0`) that the `dmodes.bin`
+cache loader (documented two sessions ago, address `0x4a89c0`)
+populates at startup — this screen is the UI for cycling through that
+table's entries (device index / resolution mode index) and committing a
+choice, which cross-confirms that table's role as "the enumerated list
+of available display devices and modes" rather than something else.
+Also writes `starlancer.ini`'s `[Device]` `gamma` and `Transitions`
+keys directly, and cycles texture detail, geometry detail, lightmap,
+and 3D-acceleration-provider settings (all of which `WinMain`'s
+bootstrap reads back at next launch).
+
+## `RunControlsOptionsScreen` (`0x0042b690`) — key/joystick binding
+
+Confirms `starlancer.ini`'s `[KeyConfig]` section keys: `ForceFeedback`,
+`JoystickInvert`, `HatEnable`, `TwistEnable`, `controller` (an integer
+0/1/2, almost certainly keyboard/joystick/other-device selection given
+the surrounding force-feedback and hat-switch context). Implements a
+full interactive key-rebind flow: select a control, press a new
+key/button, the binding table (`DAT_004e2380`, one entry per control)
+is updated, with conflict detection against other already-bound
+controls (prompting a confirm-overwrite dialog via `FUN_0042aa80` when
+a collision is found).
+
+## `RunMultiplayerLobbyScreen` (`0x0044b950`) — host/client game setup
+
+The multiplayer pre-game lobby, shared between host and client via the
+same `DAT_0051d54c` mode flag `RunSaveLoadScreen` also uses (1=host,
+0=client — this flag-reuse-for-role/mode pattern is now confirmed
+across two independent screen pairs). Host mode lets the player pick a
+mission from a lookup table (`DAT_0050c798`, cross-indexed against the
+now-familiar `DAT_00562dc8` mission-index global) and toggle game
+options; both host and client see a player roster
+(`DAT_005db8f4`, the same per-player array/stride already seen in
+`WinMain`'s own multiplayer section) with ready-state and
+team/ship-type flags, and a scrollable/paged player list (handles more
+players than fit on screen at once via a scroll offset,
+`DAT_00524a48`).
+
+---
+
+# Seventh pass (2026-09-08, same day): save-game IFF reader + mission file format
+
+## The `IffFile` class (`0x0045e8d0`, `0x00490930`, `0x004909d0`, `0x00490c40`, `0x00490980`)
+
+A generic, reusable `__thiscall` C++ class implementing the classic
+**IFF (InterChange File Format)** container standard — confirmed two
+independent ways: the magic constant `0x4d524f46` decodes byte-for-byte
+to the ASCII string `"FORM"` (IFF's standard top-level container tag),
+and `IffFile_Read`'s own guard-clause error strings describe exactly
+the checks present in its decompile (`"Attempted read from unopened
+file: %s"`, `"Attempt to read 0 bytes: %s"`, `"Read from NULL pointer:
+%s"`, `"Read failed on file: %s"`).
+
+### Methods
+
+```c
+bool  IffFile_Open(IffFile *this, const char *filename);
+bool  IffFile_FindFormChunk(IffFile *this, uint32_t formType, int unused);
+bool  IffFile_FindChunk(IffFile *this, uint32_t chunkId, int unused);
+int   IffFile_Read(IffFile *this, void *dest, int numBytes);
+void  IffFile_CloseChunkStack(IffFile *this);
+```
+
+`IffFile_FindFormChunk` searches forward from the current read position
+for a nested `FORM`-type container whose 4-byte form-type tag matches
+`formType` — correct IFF semantics, since `FORM` chunks are containers
+that nest. `IffFile_FindChunk` searches for a plain LEAF data chunk
+(explicitly requiring the chunk NOT be a `FORM`) whose raw chunk ID
+matches `chunkId` — also correct, since leaf chunks hold data, not
+sub-containers. This distinction being implemented correctly is good
+evidence this is a faithful, standards-following IFF parser rather than
+an ad-hoc reinvention.
+
+### Known use
+
+`LoadGame` (below) is the confirmed real-world user. The class is
+generic enough that other callers likely exist elsewhere in the binary
+(not traced this pass — `IffFile_Open`'s caller list showed one other
+address, `FUN_004315c0`, not itself investigated).
+
+## `LoadGame` (`0x00475430`)
+
+```c
+void LoadGame(const char *saveFilePath);
+```
+
+Opens a save file via `IffFile_Open`, locates its `FORM "SAVE"`
+container (`0x45564153` decodes to `"SAVE"`), then iterates a 5-entry
+field table (`PTR_DAT_00500a24`) calling `IffFile_FindChunk`+
+`IffFile_Read` per tagged field — a standard "read N named fields out
+of a form" IFF-consumer pattern. Afterward, restores a ~34-field
+campaign/difficulty-state block (`DAT_0052a3f0` through `DAT_0052a480`)
+from a parallel staging area (`DAT_00562f7x`) that was populated by the
+field reads above.
+
+This state block is the SAME one `WinMain`'s bootstrap zeroes to
+defaults and `LoadPlayerProfile` also touches — three independent
+functions now agree on its role as persistent
+campaign/difficulty/settings state, reached via three different paths
+(fresh boot defaults, profile load, save-game load).
+
+### Known use
+
+Called from `RunSaveGameBrowserScreen`'s "load selected slot" case.
+
+## Mission file format (`.dte`) — the complete load chain
+
+Traced end-to-end: player selects a mission on the in-universe star map
+→ mission file is located and parsed → gameplay begins. Files live at
+`.\missions\mission<N>.dte`, confirmed by three literal embedded paths
+(`mission29.dte`, `mission251.dte`, `mission311.dte`) plus general
+`mission%d.dte`/`%s.dte` format strings, and an Open-File-dialog filter
+string `"StarLancer DTE Files (*.dte)"` confirms "DTE" as the real
+extension name (though not what the acronym stands for — not found in
+the string table).
+
+### `RunMissionSelectMapScreen` (`0x0044f3d0`)
+
+The in-universe "star map" screen — reached from the ship-interior VR
+loop's `roomType=5` hub destination (previously identified only as
+"pod bay", now clarified: the pod-bay area is apparently where the star
+map/mission-select interface lives, e.g. a briefing table or holo-map
+in that room). Offers 3 mission branches (`mission30`/`31`/`32`,
+hotspot-selected against a small area-rect table) plus a special
+`mission29` path, then hands off to `InitializeMissionGameplay` with
+`DAT_00562dc8` set to the chosen mission number — the FOURTH
+independent function now confirmed to treat this global as the mission
+index.
+
+### `InitializeMissionGameplay` (`0x004934f0`)
+
+Sets up cockpit/HUD/radar rendering state (camera frustum corners,
+crosshair layout, whiteout/damage-flash mesh) and resolves a large
+"previous mission outcome code → next mission-select code" branch table
+(a `switch` over values 0-0xff read from a per-player result field) —
+this looks like the actual campaign branching logic (which mission
+comes next depends on how the previous one ended), not decoded
+field-by-field this pass. Calls `LoadMissionFile` and fatal-errors
+(`"The mission number is invalid!!!!"`) if it returns 0.
+
+Also confirmed as one leg of a recurring
+`InitializeMissionGameplay`/`FUN_00494040`/`FUN_004942b0` trio — this
+exact 3-call sequence appears repeatedly across `WinMain`'s own state
+machine and inside `RunMainMenuScreen`'s idle/attract-mode loop, always
+wrapped around a temporary `DAT_00562dc8` override. This trio is almost
+certainly "load mission / run mission gameplay / unload mission" — the
+real top-level entry into actual flying/combat gameplay, reached from
+at least 3 independent call sites. `FUN_00494040` (run) and
+`FUN_004942b0` (unload) are NOT yet decompiled — the single highest-value
+remaining target if gameplay itself (as opposed to the menu/briefing
+shell around it) becomes the next focus.
+
+### `LoadMissionFile` (`0x00451d90`) — the real `.dte` parser
+
+```c
+void *LoadMissionFile(void);  // returns the loaded buffer, or NULL
+```
+
+1. Calls `LoadResourceFileBuffer` to load the entire `.dte` file into
+   one memory buffer (capped at `0xfa000` = 1,024,000 bytes).
+2. Calls `ReadMissionDirectoryEntry` exactly **27 times** in a fixed
+   sequence, each call consuming one directory entry from the front of
+   the buffer and storing a resolved pointer into a distinct global
+   (`DAT_00525fa8`, `DAT_00525f3c`, `DAT_005294f8`, `DAT_0052951c`,
+   `DAT_005267cc`, `DAT_005294e0`, `DAT_00525f88`, `DAT_005267c0`,
+   `DAT_005267d0`, `DAT_005256c8`, `DAT_005294d8`, `PTR_DAT_004ef2fc`,
+   `DAT_005294fc`, `DAT_00529500`, `DAT_00525f18`, `DAT_005256b8`,
+   `DAT_00525fb0`, `DAT_005294ec`, `DAT_00525fb4`, `DAT_0052950c`,
+   `DAT_00525fa0`, a local 6-byte buffer, `DAT_00525278`,
+   `PTR_DAT_004ee7d8`, `DAT_00525f9c`, `DAT_00525f90`, `DAT_0052570c`
+   — 27 in total). None of these tables' internal layouts are decoded
+   this pass — only their existence and storage location.
+3. Runs 5 finalization passes (`FUN_0045cb40`, `FUN_00452010`,
+   `FUN_00453050`, `FUN_00457c10`, `FUN_0045cbc0`) — plausibly
+   resolving cross-references between the just-loaded tables (e.g.
+   linking a ship spawn record to its AI script), not investigated.
+
+### `.dte` directory-entry format (confirmed via `ReadMissionDirectoryEntry`, `0x00452a20`)
+
+Each directory entry is exactly 8 bytes:
+
+```
+offset 0 (4 bytes): header word
+    bits 0-15  = type/ID (stored as the entry's "type" output)
+    bit 24     = flag -> sets global DAT_00525f9a
+    bit 25     = flag -> sets global DAT_00525fa4
+    bit 26     = flag -> sets global DAT_005267c6
+    bit 27     = flag -> sets global DAT_005294e8
+offset 4 (4 bytes): relative offset, ADDED to the buffer's base address
+    to produce an absolute pointer, written to the caller's output slot
+```
+
+A flat, single-buffer format with an upfront table of contents — no
+filesystem-style nesting (unlike the save-game format, which reuses the
+general-purpose `IffFile` class). The 4 header flag bits look like
+mission-wide capability/feature flags (e.g. "this mission uses feature
+X"), set globally rather than per-entry-type, but their specific
+meanings aren't determined.
+
+### `LoadResourceFileBuffer` (`0x0045a300`)
+
+Loads a named resource either from a loose file directly on disk
+(`FUN_0045a3e0`, only taken if `FUN_004ad6e0()` — an "is this a real
+installed copy with direct file access" check, not decompiled — returns
+true) or from the `RESOURCE.HOG` archive via `LoadNamedResource`,
+always copying the result into a freshly `malloc`'d buffer sized to the
+actual bytes read. Generic infrastructure, not mission-specific — used
+here for `.dte` files but presumably for other resource types too.
+
+### `LoadNamedResource` (`0x004c5bd0`) / `HOG_BigRead` (`0x004c7f60`)
+
+The engine's central "load a named resource from the archive"
+primitive. **Real name confirmed directly** — `HOG_BigRead` contains
+its own embedded error strings `"HOG bigread2: error loading '%s'"` and
+`"HOG bigread: error loading '%s'"`, the function naming itself exactly
+as `bigfile.cpp`'s other functions (`OpenBigFile`/`CloseBigFile`) are
+tagged with that same source file.
+
+Behavior: strips a 2-character extension suffix if present (plausibly a
+language or resolution variant tag, not confirmed) and any directory
+path from the requested name, first tries a loose-file-on-disk override
+(`FUN_004c8370`), then falls back to scanning the currently-open `.HOG`
+archive's directory (via the handle `OpenBigFile` set up) for a
+matching entry name and reading it into an `SR_MEM_allocate`'d buffer.
+`LoadNamedResource` is a one-line convenience wrapper taking an
+implicit-register filename argument.
+
+This function is called constantly — from menu screens, the ship-interior
+VR loop (loading `.bik` movies), and now mission loading — making it
+THE central asset-loading choke point for the entire game. A natural
+target for a future "enumerate every resource type the game loads"
+pass if that's ever wanted (would mean surveying its many call sites
+rather than the function itself, which is already well understood).
+
+---
+
+# Eighth pass (2026-09-08, same day): flight/combat gameplay core loop
+
+Completed the "load/run/unload mission" trio identified last session as
+the real top-level gameplay entry point, then went one level deeper
+into the per-frame update structure. `UpdateMissionFrame` in particular
+is large (400+ decompiled lines) and documented here structurally, not
+field-by-field, per METHODOLOGY's tiered approach — full algorithmic
+decoding of the per-object combat/damage logic would require first
+recovering the ship/object struct itself, flagged as a substantial
+follow-on subsystem.
+
+## `RunMissionGameplay` (`0x00494040`) — confirmed as the flight/combat main loop
+
+Confirmed unambiguously: a sequence of `DebugLog_Stub` calls at the
+very end of the function use tags that read like real subsystem
+shutdown labels — `"uncolour hud target"`, `"destroy lockring"`,
+`"dockring exit"`, `"chaff exit"` — exactly the kind of per-system
+teardown trace a game's main loop would emit in a debug build.
+
+### Structure
+
+```c
+void RunMissionGameplay(void) {
+    // one-time setup: HUD/cockpit modes, per-player-slot reset, etc.
+    ...
+    lastTick = currentTick;
+    while (true) {
+        while (true) {
+            if (!PumpInput())          // FUN_004aab20, 0 = quit requested
+                goto teardown;
+            elapsed = currentTick - lastTick;
+            for (i = 0; i < elapsed; i++)
+                UpdateMissionTick();          // fixed-timestep sim
+            if (multiplayer)
+                for (i = 0; i < elapsed; i++)
+                    NetworkTick();             // FUN_00477670, NOT YET IN DB
+            lastTick = currentTick;
+            if (paused) break;                // DAT_0057e04c
+            if (UpdateMissionFrame() != 0 || DAT_00588338 != 0)
+                goto teardown;
+        }
+        if (CheckMissionExitState() != 0)
+            break;
+    }
+teardown:
+    ... // the DebugLog_Stub-tagged cleanup sequence
+}
+```
+
+This is a textbook fixed-timestep-simulation-plus-variable-rate-render
+split: `UpdateMissionTick` runs at a fixed simulation rate (however many
+ticks have actually elapsed, catching up if rendering fell behind),
+while `UpdateMissionFrame` runs once per iteration of the render loop
+regardless of how much sim time passed.
+
+## `UnloadMission` (`0x004942b0`)
+
+Confirmed the same way, via matching `DebugLog_Stub` tags:
+`"deathmatch exit"`, `"bmo destroy"`, `"radarmesh destroy"`,
+`"end samples"`, `"streamer stop"`, `"end 3d samples"`, `"speech free"`,
+`"samples free"`, `"mission destroy"`. The last tag precedes a call to
+`FreeMissionFile` (`0x45a530`) — confirming this is the direct
+counterpart to `LoadMissionFile`, closing the "load/run/unload" trio as
+a clean, symmetric triple.
+
+## `UpdateMissionTick` (`0x00477850`) — fixed-timestep simulation step
+
+A thin dispatcher, not the real physics: increments a frame counter,
+every 100th tick decrements a difficulty-related countdown
+(`DAT_0052a474`), then calls `FUN_004774d0` (not decompiled this pass —
+given this wrapper does nothing else of substance, `FUN_004774d0` is
+almost certainly where the actual per-tick physics/AI simulation lives,
+making it the single highest-value remaining target for anyone wanting
+real flight/combat mechanics rather than the surrounding structure).
+In multiplayer, calls a different pair of sub-steps
+(`FUN_0049ceb0`/`FUN_0049cf40`) instead.
+
+## `UpdateMissionFrame` (`0x004924b0`) — per-rendered-frame gameplay update
+
+The largest function opened this session. Confirmed structural pieces:
+
+1. **Frame-rate-adaptive detail throttle**: keyed off the graphics
+   detail setting (`DAT_005d54e0`, 0/1/2), picks a target FPS band
+   (30-40 / 30-40 / 40-60) and adjusts a global throttle value
+   (`_DAT_005e829a`) up or down to hit it — likely gates some
+   per-frame-optional visual effect elsewhere.
+2. **Mission-timeout/cutscene state machine**: a `switch` on
+   `DAT_00539a34` (observed case values 7, 8, 0x1a, 0x1b, 0x1c, 0x1d),
+   each computing a tick deadline relative to `DAT_00539aa4`/
+   `DAT_005883b0` and auto-triggering a mission-exit flag
+   (`DAT_0052a414` or a network-specific path via `FUN_004775d0`) once
+   the deadline passes. This is plausibly the "mission ends N seconds
+   after the last enemy is destroyed" kind of logic common to combat
+   sims, but the specific state values' meanings aren't decoded.
+3. **Per-object damage-severity visual banding**: for each active ship
+   object, computes an armor-percentage-like ratio from several struct
+   fields, buckets it into 4 severity levels via 50%/70%/90%
+   thresholds, and — only on a level CHANGE — calls `FUN_00494400`
+   (not decompiled; presumably swaps a damage-decal or smoke-emitter
+   visual state).
+4. **Random engine-smoke particles**: for ships already in a specific
+   damage state, a `rand()%10==0` roll spawns a particle effect via
+   `FUN_0046bd00` scaled by ship size (`piVar7[0x167]`).
+5. **End-of-mission player-status polling**: iterates all active player
+   slots checking a status/flags bitmask, and once every player has
+   exited, logs the final state via several `DebugLog_Stub` calls
+   (`"exiting mission: player strategy %d"`, `"...player status %d"`,
+   `"...player flags %d %d"`) before allowing the mission to end.
+6. **A handful of object-CLASS special cases**: object type IDs `0x6d`,
+   `0xa8`, `0x44`, and `0xd` each get distinct handling (adjusting some
+   kind of size/scale field for `0x6d`/`0xa8`, a target-lock/warning
+   check for `0xd`) — these read like capital-ship, weapon-emplacement,
+   or similarly distinguished object classes, but which is which is NOT
+   determined.
+
+None of this function's ~200 remaining sub-calls (`FUN_00474b40`,
+`FUN_004c3570`, `FUN_0049b390`, etc.) were individually investigated —
+this is a structural map of the function's shape, not a full behavioral
+decode. The underlying per-object struct (`piVar7` in the decompile,
+dereferenced at dozens of distinct offsets up to `+0x1a3` and beyond)
+has no recovered type — recovering it properly is flagged as a
+substantial follow-on subsystem in its own right, comparable to the
+`Actor`/`FighterActor` struct-recovery work documented for the sibling
+`wc3remake` project.
+
+## `CheckMissionExitState` (`0x00491fc0`)
+
+Handles a small state code (`DAT_0057daa4`) controlling how
+`RunMissionGameplay`'s outer loop terminates when the pause flag is
+set:
+
+| Value | Behavior |
+|---:|---|
+| 5 | Sets a restart flag (`DAT_005d60b9=1`), signals loop-done |
+| 6 | Signals loop-done, no restart |
+| 7 | Sets `DAT_00588394=4` (an outcome code also checked by other screens, e.g. `RunMissionBriefingScreen`), signals loop-done |
+| other | Normal per-frame housekeeping (screen-shake/gamma-change application, clearing a "current target" global `DAT_005027b8`) — loop continues |
+
+---
+
+# Ninth pass (2026-09-08, same day): physics/AI simulation step + ship-object struct
+
+## `ProcessMissionSimulationTick` (`0x004774d0`) — the real per-tick simulation dispatcher
+
+`UpdateMissionTick` (documented last session) turned out to be a thin
+wrapper; this is where the actual per-tick work happens. Rate-limited
+to run only once every 4 calls (a counter at `DAT_00588718`). When it
+does run:
+
+1. Re-polls input (`FUN_004bd490`/`FUN_004bd300`/`FUN_004bd3a0`).
+2. Iterates every active object in the main object array
+   (`DAT_00587ce0`, count `DAT_00539aa0+1` — the SAME array
+   `UpdateMissionFrame` iterates, confirming this is the game's single
+   flat list of live ships/objects), skipping any whose flags
+   (`object+8`) have bit `0x420` set.
+3. For each active object, calls `UpdateObjectPhysicsAndTimers`, then
+   `UpdateShieldQuadrants`, then `UpdateWeaponFiring`.
+4. A round-robin mechanic (`DAT_00562ffc`, advancing by one object
+   per tick and wrapping) gives ONE object extra processing each tick
+   — calls `FUN_004c2690` twice on it. Shape suggests a cost-spreading
+   technique (e.g. refreshing an expensive per-object LOD or AI
+   evaluation across many ticks instead of every ship every tick), not
+   confirmed.
+5. A small special case for the local player's active target
+   (checking `**(short**)(object+0x684)==100`).
+
+## `UpdateObjectPhysicsAndTimers` (`0x00476c90`)
+
+Per-object update combining three distinct responsibilities:
+
+**1. Physics transform commit.** If bit 0 of the flags dword at
+`object+4` is set, copies a 72-byte (18-float) block from `object+0x5c`
+to `object+0x14`, then updates the flags (clearing bits 0/1/3, setting
+bits 1/2). Reads as a double-buffered "pending → current" physics
+transform commit (position + orientation + velocity would be a natural
+72-byte/18-float shape), though this is inferred from the copy/flag
+pattern alone, not independently confirmed.
+
+**2. Weapon/shield energy regeneration with 3 curve modes**, selected
+by `object+0xb4`:
+- Mode 1: clamp the accumulated value to a capacity limit; zero out on
+  overflow or when it drops to/below zero.
+- Mode 2: repeatedly subtract the capacity limit while the value
+  exceeds it (a wrap/modulo-like reload cycle).
+- Mode 3: a different wrap variant, feeding the wrapped remainder into
+  `FUN_00499f40` (not decompiled).
+
+After the regen step, scans a per-capacity-index sub-table (reached via
+`object+0xa4` → `+0x220`, stride `0x28` outer / `0xc` inner) for
+entries whose stored value falls into the specific integer range the
+regen value just crossed, firing one of two events (`FUN_0047c7b0(0)`
+or `FUN_0047c800()`, neither decompiled) based on an entry-type field.
+This reads as a generic "fire an event when a regenerating value passes
+a threshold" mechanism — plausibly used for weapon-ready or
+shield-recharged notifications, not confirmed.
+
+**3. Recurses into attached child objects** (`object+0xf8`=count,
+`+0x100`=array of pointers), for any child whose own flags satisfy
+`(flags & 0xa0)==0 && (flags & 0x800)!=0`, marking the PARENT with bit
+`0x800` in the process. Models attached sub-objects (turrets, docked
+craft) receiving the same physics/timer update as their parent, driven
+by an explicit worklist/stack rather than recursion in the C sense
+(the decompiled function uses a local 500-entry array as a manual
+stack).
+
+## `UpdateShieldQuadrants` (`0x00476fc0`) — tentative name
+
+Skips objects with flag bit 1 (`object+8 & 2`) set. If a mode byte at
+`object+0xb95` equals 5 (plausibly "docked" or "disabled"), zeroes 4
+floats at `object+0x5f0` through `object+0x5fc` and returns
+immediately. Otherwise, ramps those same 4 floats toward a capacity
+limit derived from the object's class-definition pointer (`object+0x10`),
+scaled by elapsed time and two more per-object floats
+(`object+0x73c`/`object+0x664`). The LOCAL player's object
+(`object+4 == DAT_005883fa`) gets extra handling for array indices 2
+and 3 specifically, referencing what look like live control-input
+globals (`_DAT_0051cf34`/`_DAT_0051cf78`).
+
+Four independently-regenerating, capped float values per ship, with
+special handling for the player's own input, strongly resembles a
+**directional/quadrant shield-strength system** — genre-appropriate for
+Star Lancer, which is known to feature manageable directional shields.
+This interpretation is Confidence 1 (plausible, not confirmed); the
+underlying structural fact (4 capped regenerating floats with
+player-specific handling) is Confidence 2.
+
+## `UpdateWeaponFiring` (`0x004770e0`) — the real gunnery/auto-fire logic
+
+Skips objects with flag bit 1 set. Ramps a weapon-energy-pool float
+(`object+0x140`) toward a capacity limit taken from the class-definition
+pointer, then iterates a weapon-hardpoint array (`object+0x130`=short
+count, `object+0x134`=array, stride `0x60` bytes per hardpoint). Each
+hardpoint entry carries a ready-tick field (compared against
+`DAT_005883b0`, the tick counter confirmed elsewhere), a pointer to a
+weapon-type definition (reload time, energy cost, and an
+ammo/heat-contribution field), and drives the actual fire decision:
+
+- If the weapon type is "energy" (`*piVar8[2]==0`) and enough energy is
+  pooled, or "ammo" (`==1`/`==2`) and ammo remains, AND (for
+  AI-controlled ships specifically) a `rand()` roll against an
+  aggression-like float (`object+0x66c`) succeeds, calls
+  `FUN_0047c5f0(0, isLocalPlayer)` — almost certainly the actual
+  "fire this weapon" call — then deducts energy or ammo accordingly.
+- A difficulty-scaled reload-time modifier applies when
+  `object+0x674` is set (`reloadTime * 0x87 / 100` — roughly a 35%
+  reload-time reduction, i.e. faster firing on a harder difficulty
+  setting, though which literal difficulty level this corresponds to
+  isn't confirmed).
+- Toggles an "alternate fire group" bit (`object+0x14c`) when a linked
+  paired-mount condition is met — the classic alternating-barrel
+  firing pattern seen in many space-combat games (fire left gun, then
+  right gun, alternating).
+
+Branches distinctly for the LOCAL player's ship vs. others (`object+4
+== DAT_005883fa`), meaning this single function implements BOTH the
+player's auto-fire-assist behavior and AI gunnery — a genuinely central
+piece of the combat model.
+
+## Ship-object struct — partial, confidence-graded field map
+
+Every field below is inferred purely from how the three functions
+above (plus `UpdateMissionFrame` from the previous session) dereference
+their object pointer — there is no independent data-level
+cross-check (unlike `VRRoomNode`, which was verified against real
+memory). Deliberately left as prose, not a committed Ghidra struct
+type, per METHODOLOGY's confidence discipline.
+
+| Offset | Size | Field (tentative) | Confidence |
+|---|---:|---|---:|
+| `+0x00` | 4 | object class/type ID | 2 |
+| `+0x04` | 4 | **unresolved — see caveat** | 0-1 |
+| `+0x08` | 4 | status flags (bit 1 = destroyed?, others per mask) | 2 |
+| `+0x14` | 72 | current/committed physics transform | 1 |
+| `+0x5c` | 72 | pending physics transform | 1 |
+| `+0xa4` | 4 | weapon/shield energy-capacity-group pointer | 1 |
+| `+0xb4` | 4 | energy regen curve mode (1/2/3) | 1 |
+| `+0xb8` | 4 | capacity-group array index | 1 |
+| `+0xbc` | 4 | energy regen rate | 1 |
+| `+0xc0` | 4 | energy current value | 1 |
+| `+0xf8` | 4 | attached child-object count | 1 |
+| `+0x100` | 4 | child-object pointer array | 1 |
+| `+0x130` | 2 | weapon hardpoint count | 1 |
+| `+0x134` | 4 | hardpoint array (stride `0x60`) | 1 |
+| `+0x138` | 4 | per-hardpoint alt-fire counter array | 1 |
+| `+0x13c` | 4 | ammo/charge count | 1 |
+| `+0x140` | 4 | weapon energy pool | 1 |
+| `+0x144` | 2 | weapon-related flags | 1 |
+| `+0x148` | 4 | weapon-energy-pool gate | 1 |
+| `+0x14c` | 4 | alternate-fire-group toggle | 1 |
+| `+0x5f0`-`+0x5fc` | 4×4 | 4 capped regenerating floats (tentatively shield quadrants) | 1 |
+| `+0x664`, `+0x66c` | 4 each | ramp-formula floats | 1 |
+| `+0x674` | 4 | difficulty-scaled reload-time flag | 1 |
+| `+0x734`, `+0x73c` | 4 each | more ramp-formula floats | 1 |
+| `+0x754` | 4 | AI/behavior state | 1 |
+| `+0xb95` | 1 | special mode byte (5 = disabled/docked) | 1 |
+
+**Open question, deliberately unresolved**: `object+4` is read as an
+exact-equality-comparable small integer (the local player's slot index)
+in `UpdateShieldQuadrants`/`UpdateWeaponFiring`, but as a
+multi-bit-tested flags dword in `UpdateObjectPhysicsAndTimers`. Both
+could coexist (low bits = owner index, specific high bits = independent
+flags, usually zero) but this is unverified — flagged honestly rather
+than resolved by assumption, matching the precedent set by the sibling
+`wc3remake` project's own unresolved-question entries.
+
+### Open follow-ups
+
+- `FUN_0047c7b0`/`FUN_0047c800` (energy-threshold events), `FUN_0047c5f0`
+  (the actual fire-weapon call), `FUN_004c2690` (round-robin extra
+  work) — none decompiled.
+- The weapon-type-definition struct reached through each hardpoint
+  entry — only scattered field offsets glimpsed.
+- Whether the `+0x5f0..+0x5fc` floats really are shield quadrants —
+  checking where they're read for HUD rendering would likely settle
+  this.
+- The ship-object struct's total size is unknown; `+0xb95` is just the
+  highest offset touched by the functions opened this session.
