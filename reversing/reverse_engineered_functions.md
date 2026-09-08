@@ -6182,3 +6182,253 @@ established mission-29 role, not independently confirmed).
   rather than a reusable global struct array, making this particular
   table an atypically clean target; the others would need per-screen
   investigation if this thread continues.
+
+## Pass 48 -- Hotspot layouts documented for all 12 menu screens (2026-09-09)
+
+Direct request: document the clickable hotspot position data for every
+`RunMenuScreenLoop`-dispatched screen. Combined direct investigation
+with 4 parallel forks (each covering 2-3 screens) to cover all 11
+remaining screens beyond Pass 47's `RunMissionSelectMapScreen`.
+
+### Key infrastructure finding: `HitTestRectArray` (`0x43eb30`, was `FUN_0043eb30`)
+
+```c
+int __fastcall HitTestRectArray(void *rectArray, int rectCount, int mouseX, int mouseY);
+```
+
+A generic, shared hit-test utility used by roughly half the menu
+screens: walks an array of `{x,y,w,h}` `int16` rects (identical layout
+to Pass 47's `MenuHotspotRect`) and returns the index of the one
+containing `(mouseX,mouseY)`, or -1. Every prior sighting showed only
+`FUN_0043eb30(mouseX, mouseY)` because its `rectArray`/`rectCount`
+arguments are passed via hidden `__fastcall` registers -- applying
+`set_function_prototype` to it (the same technique from Passes 34/35/37)
+retroactively exposed the real array pointer and count at EVERY call
+site project-wide in one step, turning "opaque hotspot index" callers
+into fully-readable position tables. **This is now the single most
+useful technique for any further menu/UI archaeology in this project.**
+Some screens (`RunMainMenuScreen`) use their own inline hit-test loop
+against a differently-shaped table instead of this shared utility.
+
+### Screen 0 -- `RunMainMenuScreen` (`0x428b60`)
+
+Inline hit-test against global table `DAT_004e5b90`, stride 12 bytes
+(`{x,y,w,h,target,extra}` int16), 5 entries:
+
+| x | y | w | h |
+|---|---|---|---|
+| 27 | 123 | 184 | 290 |
+| 203 | 125 | 184 | 290 |
+| 421 | 165 | 184 | 290 |
+| 332 | 441 | 20 | 15 |
+| 300 | 441 | 20 | 15 |
+
+Three large ~184x290 tiles (New Game / Multiplayer / Options) plus two
+small nav buttons at the bottom. **Confidence 4** on coordinates
+(directly read); **confidence 1** on which specific target ID maps to
+which large tile -- the "target" field's exact offset attribution needs
+a second pass before trusting it (flagged honestly by the investigating
+fork rather than guessed).
+
+### Screen 1 -- `RunOptionsMenuScreen` (`0x42a620`)
+
+6-entry stack-local table via `HitTestRectArray`:
+
+| idx | x | y | w | h | Action |
+|---|---|---|---|---|---|
+| 0 | 30 | 165 | 152 | 127 | -> screen 3 (Sound Options) |
+| 1 | 219 | 165 | 152 | 127 | -> screen 16 (Controls Options) |
+| 2 | 408 | 165 | 152 | 127 | -> screen 15 (Video Options) |
+| 3 | 292 | 441 | 25 | 16 | Exit -> main menu |
+| 4 | 324 | 441 | 25 | 16 | Confirm-quit dialog |
+| 5 | 292 | 421 | 25 | 16 | Unidentified helper (`FUN_0042a520`) |
+
+**Confidence 5** -- directly and unambiguously read, including exact
+switch-case destinations. Clean row of 3 large category tiles
+(152x127) plus 3 small buttons.
+
+### Screen 3 -- `RunSoundOptionsScreen` (`0x42dab0`)
+
+Two contiguous global arrays, confirmed via `HitTestRectArray(&DAT_004e76a0,
+6,...)` and `HitTestRectArray(&DAT_004e76d0, 4,...)` (the second is
+literally `DAT_004e76a0`'s 6th entry onward -- one 10-entry table read
+as two logical groups):
+
+**Buttons** (`DAT_004e76a0`, 6 entries, all 25x16 or 19x26):
+
+| x | y | w | h | Action |
+|---|---|---|---|---|
+| 324 | 421 | 25 | 16 | Apply (save all volume settings to ini) |
+| 292 | 421 | 25 | 16 | Exit, keep changes |
+| 292 | 441 | 25 | 16 | Exit to main menu |
+| 300 | 369 | 19 | 26 | Cycle 3D audio provider back |
+| 322 | 369 | 19 | 26 | Cycle 3D audio provider forward |
+| 324 | 441 | 25 | 16 | Cancel (revert sliders) |
+
+**Volume sliders** (`DAT_004e76d0`, 4 entries, each also doubles as the
+LIVE draggable-handle X position, clamped to `[313,488]` -- the static
+image shows all 4 at their leftmost/minimum default): all `w=15,
+h=27`, y positions **Speech=126, FX=186, Music=246, Master=306** (a
+clean 60px-pitch vertical list). **Confidence 5** -- directly read,
+cross-confirmed against the slider-drag clamp code and the
+`WritePrivateProfileStringA` ini-key sequence identifying which
+slider is which.
+
+### Screen 8 -- `RunNetworkDisconnectScreen` (`0x43ca30`, pre-existing name)
+
+Not a real UI screen: `Sleep(1000); FUN_004abde0(); return 3;` -- zero
+hotspots, a non-interactive pass-through shown briefly during
+multiplayer disconnect cleanup.
+
+### Screens 10/11 -- `RunSaveLoadScreen` (`0x43ca50`)
+
+Local stack tables, save-vs-load mode via `DAT_0051d54c`. Extractable
+with confidence, but the full index-to-rect mapping wasn't cleanly
+isolated within scope (flagged honestly rather than guessed further).
+Confirmed **actions** by hotspot index (confidence 4):
+
+*Save mode*: 0=select target, 1=confirm delete/overwrite, 2=quick-save,
+3=open Save Browser (screen 13), 4/7=cancel, 5=exit to screen 0xe,
+6=options dialog, 8=pick list item, 9-12=scroll/select slot.
+
+*Load mode*: 0=start select, 1=confirm load, 2=exit to screen 0xe,
+3=options dialog, 4=exit to main menu.
+
+### Screen 12 -- `RunNewGameSetupScreen` (`0x430490`)
+
+Two tables via `HitTestRectArray`: an 8-entry main button row
+(`&stack0xffffff5c`, matching the 8 switch cases already documented in
+Pass 46 -- difficulty A/B, load-existing-pilot, confirm-new-pilot,
+exit, reset, options-dialog, toggle-name-list) whose raw coordinates
+weren't cleanly extractable from the decompile's stack-offset notation
+this pass, and a **10-entry name/callsign-picker list**
+(`&local_64`, only shown when `DAT_005202b8` is toggled on), read
+directly:
+
+| entry | x | y(or h) | w(or w) | h(or y) |
+|---|---|---|---|---|
+| 0 | 138 | 45 | 324 | 441 |
+| 1 | 60 | 16 | 543 | 200 |
+| 2 | 27 | 15 | 400 | 223 |
+| 3-9 | 136 | 20 | 400 | 248,273,298,323,348,373,398 |
+
+Entries 3-9 form a clean 7-row list, 25px pitch, 400x20 each --
+almost certainly the visible rows of a scrollable pilot-name/callsign
+preset list (selection copies from a 50-byte-stride name array at
+`DAT_005d5e8c`); entry 2's `(27,15,400,223)` is plausibly the list's
+background panel. **Confidence 4** on the raw values, **confidence 2**
+on the exact field-order interpretation (the `{x,h,w,y}`-shaped pattern
+in entries 3-9 is inferred from the arithmetic progression, not
+independently confirmed against a draw call).
+
+### Screen 13 -- `RunSaveGameBrowserScreen` (`0x431730`)
+
+**Save-slot list** (10 rows, local stack table, confidence 4): `x=17,
+w=400, h=49`, `y = 126 + 17*i` for `i=0..9` (126,143,...,279 -- exact
+17px pitch). **Scroll arrows** (confidence 3): up `~(579,250,26,16)`,
+down `~(579,268,26,16)`, also keyboard-bound (scancode `0xd0`=Down,
+`200`=Up). Action buttons (indices 10-13: back, confirm, cancel,
+delete) confirmed by switch-case behavior (confidence 4) but not
+cleanly coordinate-mapped (confidence 2).
+
+### Screen 14 -- `RunMultiplayerSetupScreen` (`0x432fc0`)
+
+Position data built from ~30+ chained pointer-aliases rather than a
+flat table -- the investigating fork correctly declined to force a
+full mapping rather than risk wrong coordinates. Confirmed **actions**
+for the 8-hotspot main row (confidence 5, direct switch-case reads):
+0=Direct Connect/Play, 1=**Zone.com** (confirms Pass 6's
+`ShellExecuteA` finding), 2=Join, 3=Host(mode A), 4=Host(direct),
+5=Host Co-op(?), 6=Exit, 7=Cancel-confirm. One partial coordinate
+cluster found (confidence 2): a 4-item vertical list at `x=455, y=290/
+339/389/439, h=20`. Session-list rows use a separate
+`FUN_004bc720`-driven mechanism (20-int-stride records at
+`DAT_005dd7f8`), not coordinate-mapped.
+
+### Screen 15 -- `RunVideoOptionsScreen` (`0x42e9b0`)
+
+Clean 17-entry global array, `DAT_004e76f0`, via `HitTestRectArray`
+(confidence 5, literal data):
+
+| idx | x | y | w | h | Action |
+|---|---|---|---|---|---|
+| 0/1 | 301/318 | 128 | 12 | 23 | Mode index -/+ |
+| 2/3 | 301/318 | 165 | 12 | 23 | Device index -/+ |
+| 4/5 | 301/318 | 202 | 12 | 23 | Window mode toggle -/+ |
+| 6/7 | 301/318 | 239 | 12 | 23 | Detail level -/+ |
+| 8/9 | 301/318 | 276 | 12 | 23 | 3D provider -/+ |
+| 10 | 324 | 421 | 25 | 16 | Reset to defaults |
+| 12 | 311 | 353 | 16 | 16 | Checkbox (unclear semantic) |
+| 13/14 | 292 | 421/441 | 25 | 16 | OK/Apply |
+| 15 | 311 | 390 | 16 | 16 | "Transitions" checkbox (confirmed via ini key) |
+| 16 | 324 | 441 | 25 | 16 | (paired with 10/13/14 button cluster) |
+
+Rows 0-9 form 5 clean `<`/`>` arrow pairs (identical x=301/318 for
+every setting row) -- a textbook "5 adjustable settings" layout.
+**Separately**, a 1-entry gamma-slider-handle array,
+`DAT_004e7778 = {347,314,15,27}`, independently cross-confirmed: the
+function's own live gamma-to-pixel formula
+(`(gamma-0.5)*116.666664 + 347.0`) reproduces the static rect's `x=347`
+exactly.
+
+### Screen 16 -- `RunControlsOptionsScreen` (`0x42b690`)
+
+Confirms and extends Pass 37's finding of a giant stack-local layout
+table -- real coordinates extracted (confidence 5 on raw values,
+3-4 on UI-element attribution):
+
+**3 checkboxes** (ForceFeedback/JoystickInvert/HatEnable): all
+`x=345, w=16, h=16`, `y=325,349,373` (24px pitch).
+
+**Key-rebind scrollable list**: two visually-contiguous blocks, both
+`x=50, w=550, h=10`: `y=139,154,169,184,199,214,229,244` (8 rows) then
+`y=259,274,289,304` (4 more rows, likely revealed-on-scroll) -- 15px
+pitch throughout, 12 visible rows total matching `DAT_004e5cd0`'s
+scancode-candidate table (Pass 37) and the `ControlBinding` array
+(Pass 38/47).
+
+**Scroll arrows**: small 16x16 icons, offset ~45px horizontally from
+the list.
+
+### Screens 0x11/0x12 -- `RunMultiplayerLobbyScreen` (`0x44b950`)
+
+**Player-roster row layout** (confidence 5): source records at
+`DAT_005db8f4`, stride 0xfc (252) bytes/player; UI row array at
+`DAT_00524aa0`, stride 0x2a (42) bytes/row (40-byte name buffer + a
+2-byte computed field, plausibly ping or ready-icon index). Loop bound
+`DAT_005db83c` (live player count).
+
+**8 lobby buttons**, a clean repeated `{rectPtr, enabled=1,
+hover=-1, langStringIndex}` descriptor shape (confidence 4).
+Language-string indices: `0x59f`x2, `0x59b`, `0x592`, `0x5a3`x2,
+`0x59a`, `0x5a0`, `0x5a1`, `0x598` -- real `GetLanguageString` indices
+(Pass 37), label text itself unrecoverable statically (runtime-only
+string table). Underlying rects partially decoded (confidence 3): a
+repeated `(48,147,...)` roster-slot pattern x6, a large `(428,428)`
+region (plausibly a player-portrait panel), and a `(45,126,149,21)`
+block. Host-mode mission-select list (`DAT_0050c798`, 16-dword
+stride) reuses this same button mechanism -- no separate coordinates
+found.
+
+### Consolidated confidence note
+
+Every coordinate reported above with "confidence 5" was read directly
+from the shipped binary's static `.data` image via `read_memory` or an
+unambiguous decompiled literal -- not inferred. Screens/tables marked
+lower confidence had their raw values read correctly but their
+index-to-widget or field-order attribution required interpretation the
+investigating agent flagged as uncertain rather than asserting as fact,
+consistent with METHODOLOGY's confidence discipline.
+
+### Open follow-ups
+
+- `RunMainMenuScreen`'s target-field attribution (which large tile maps
+  to which of the 3 large-rect entries).
+- `RunSaveLoadScreen`/`RunSaveGameBrowserScreen`'s action-button
+  coordinates (actions confirmed, positions not).
+- `RunNewGameSetupScreen`'s 8-entry main button row's raw coordinates.
+- `RunMultiplayerSetupScreen`'s ~30-pointer-alias layout -- a full
+  mapping would need substantially more dedicated effort.
+- `RunMultiplayerLobbyScreen`'s remaining unattributed rects and the
+  exact button-label text (blocked on the runtime-only string table,
+  per Pass 37).

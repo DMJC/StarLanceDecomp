@@ -1305,3 +1305,22 @@ RunMissionSelectMapScreen (0x44f3d0)
                  {hotspotCount, MenuHotspotRect* rects, ...} per state -- states 0 (3 rects,
                  0x4ebaf8) and 1 (5 rects, 0x4ebb10) read directly),
                  DAT_004ebb60 (state-transition table, [state][hotspotIndex] -> nextState, stride 0x16 dwords)
+
+## Hotspot layouts documented for all 12 menu screens (2026-09-09, forty-eighth session)
+
+```
+HitTestRectArray (0x43eb30, was FUN_0043eb30) -- shared hotspot hit-test utility
+  -> depends on: caller-supplied {rectArray ptr, count, mouseX, mouseY}
+  <- depended on by (hidden-arg technique exposed all at once via set_function_prototype):
+       RunOptionsMenuScreen (6-entry stack table)
+       RunSoundOptionsScreen (DAT_004e76a0[6] buttons + DAT_004e76d0[4] sliders, contiguous)
+       RunNewGameSetupScreen (8-entry main row @stack + 10-entry name-picker @local_64)
+       RunVideoOptionsScreen (DAT_004e76f0[17] + DAT_004e7778[1] gamma handle)
+       RunMultiplayerSetupScreen (8-entry main row, ~30 chained pointer-alias sub-tables)
+       RunMultiplayerLobbyScreen (8-entry button descriptor array + DAT_00524aa0 roster rows)
+       RunSaveLoadScreen / RunSaveGameBrowserScreen / RunControlsOptionsScreen (local tables)
+
+RunMainMenuScreen -- uses its OWN inline hit-test (not HitTestRectArray), DAT_004e5b90[5],
+  stride 12 bytes {x,y,w,h,target,extra}
+
+RunNetworkDisconnectScreen (0x43ca30, screen 8) -- confirmed zero hotspots, non-interactive

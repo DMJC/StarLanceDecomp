@@ -1481,3 +1481,29 @@ Direct research request. Decompiled `FUN_0043c1c0` (the per-frame VR-loop callba
 - Full entry-by-entry mapping of the `0x4ebb60` transition table.
 - State 5 (referenced in code, not read).
 - The other 11 menu screens' position tables are mostly one-off stack locals, not global struct arrays -- this table was an atypically clean target.
+
+## Hotspot layouts documented for all 12 menu screens (2026-09-09, forty-eighth session)
+
+Combined direct investigation + 4 parallel forks. Key infrastructure finding: `HitTestRectArray` (0x43eb30, was FUN_0043eb30), a shared hit-test utility whose hidden arguments (rectArray pointer + count) were exposed project-wide via `set_function_prototype` (same technique as Passes 34/35/37) -- this is now the standard tool for any further menu/UI position-data archaeology.
+
+| Screen | Confidence | Notes |
+|---|---:|---|
+| 0 `RunMainMenuScreen` | 4 (coords) / 1 (target mapping) | Inline hit-test, own 12-byte-stride table, 5 entries. Target-field attribution needs a second pass. |
+| 1 `RunOptionsMenuScreen` | 5 | 6-entry table, fully read, exact switch destinations. |
+| 3 `RunSoundOptionsScreen` | 5 | 10-entry contiguous global table (6 buttons + 4 sliders), fully read and cross-confirmed against ini-key sequence. |
+| 8 `RunNetworkDisconnectScreen` | 5 | Confirmed zero hotspots -- non-interactive pass-through. |
+| 10/11 `RunSaveLoadScreen` | 4 (actions) / 2 (positions) | Actions confirmed by switch-case; coordinates not cleanly isolated. |
+| 12 `RunNewGameSetupScreen` | 4 (10-entry list) / -- (8-entry row not extracted) | Name/callsign-picker list read directly; main button row's raw coordinates not obtained this pass. |
+| 13 `RunSaveGameBrowserScreen` | 4 (list rows) / 2 (action buttons) | Clean 10-row, 17px-pitch save-slot list; action-button positions not confidently isolated. |
+| 14 `RunMultiplayerSetupScreen` | 5 (actions) / 2 (one partial cluster) | ~30-chained-pointer-alias layout; fork correctly declined to force a full mapping. Confirms Zone.com finding from Pass 6. |
+| 15 `RunVideoOptionsScreen` | 5 | Clean 17-entry global array + independently cross-confirmed gamma-slider rect. |
+| 16 `RunControlsOptionsScreen` | 5 (raw values) / 3-4 (attribution) | Extends Pass 37; checkboxes + 12-row scrollable key-rebind list, clean pitch values. |
+| 0x11/0x12 `RunMultiplayerLobbyScreen` | 5 (roster stride) / 3-4 (button rects) | Player-roster layout confirmed; 8-button descriptor shape clean, underlying rects partially decoded. |
+
+### Open follow-ups
+
+- `RunMainMenuScreen` target-field attribution.
+- `RunSaveLoadScreen`/`RunSaveGameBrowserScreen` action-button coordinates.
+- `RunNewGameSetupScreen`'s 8-entry main button row coordinates.
+- `RunMultiplayerSetupScreen`'s full ~30-alias layout mapping.
+- `RunMultiplayerLobbyScreen`'s remaining unattributed rects; button label text blocked on runtime-only string table.
