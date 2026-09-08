@@ -509,13 +509,38 @@ SetShipDestroyedState (0x401f30)
 
 TrySetAiState (0x40ca50)
   -> depends on: PTR_DAT_004e06e0 (AI state-definition table: OnExit
-                 callback, flags, display name, priority per state),
-                 object+0x680 (AI-initialized flag), object+0x688
-                 (mid-transition busy flag), ReportAssertionFailureEx
-                 (rejected-transition logging)
+                 callback, flags, display name, priority per state —
+                 CONTENTS now read directly, see below), object+0x680
+                 (AI-initialized flag), object+0x688 (mid-transition
+                 busy flag), ReportAssertionFailureEx (rejected-
+                 transition logging)
   <- depended on by: SetShipDestroyedState, and (by design, though not
                  individually traced) presumably every other AI
                  behavior-change call site in the game
+```
+
+## AI state catalog (sixteenth session)
+
+```
+PTR_DAT_004e06e0 (3-pointer array: group0/1/2 state tables)
+  group0 -> 0x4e0050 (~20 entries read: Find Scoop Up, Jump Out, Jump
+            In, Slow Rotate, Ship Follow Curve, Toggle Cloak, Patrol
+            Route, Formation Regroup, Object Attack, "Ripper grabs
+            target object", Explode, Find New Target, Escort, Land,
+            Run Away, Fly, Warp Out, Warp In, Launch Missile, Fly
+            Aimlessly, Do Nothing — string pool at 0x4e0a80)
+  group1 -> 0x4e04a0 (~20 entries read: Fight(truncated), "Make
+            capship list left", Disrupted, "Eject fighter attack",
+            "Ripper attach cargo pod to Mammoth", "Ripper end drop
+            object", "Dark reign shoot", Dock, Eject Spin, Scoop Up,
+            Fight, Launch, Torpedo, Avoid Target, Multiplayer Control,
+            Player Control, "Fly ship backwards", "Immediately set
+            ship to zero velocity and rotation", "Huuuuuuuuge
+            explosion", "Turns object lights off", "Make ripper drop
+            what it's carrying" — string pool at 0x4e0780)
+  group2 -> 0x4e06c8 (NOT read this session)
+  <- depended on by: TrySetAiState (the whole priority-gated FSM this
+                 table drives)
 ```
 
 ## SurrenderLib scene-node primitives (tenth session)

@@ -558,3 +558,75 @@ checked" detail.
 - `VRRoomNode.unk10`'s real meaning — ranges from ~195 to 965 across the ~145 total nodes now read; a frame-count/duration hypothesis is plausible but unverified.
 - `roomType == 3`'s exact behavior — found one real instance (`0x50ad48`) this pass. The dispatch code checks this value separately from the 1/2/5/6/7/9 hub-jump set (in two distinct places: a "replay without changing rooms" branch and a hover/idle-state branch) — mechanism sketched from the earlier full decompile but not re-verified against this concrete instance.
 - Movie filenames for the ~145 nodes now catalogued by address/connectivity are mostly NOT individually read as strings — only a handful (the 6 hub roots + a few others) were resolved to actual `.bik` names. Reading the rest would let the abbreviation-based room names be checked against a much larger sample.
+
+## The AI state catalog, read directly from memory (2026-09-08, sixteenth session)
+
+`PTR_DAT_004e06e0` turned out to be a 3-entry array of pointers to
+per-group state tables (`(&PTR_DAT_004e06e0)[stateId/100]` selects
+group 0/1/2, matching the `/100`, `%100` indexing seen in `TrySetAiState`),
+each entry 24 bytes as previously documented (`+0`/`+4` two callback
+slots not read by `TrySetAiState` itself — plausibly OnEnter/OnUpdate
+— `+8` OnExit callback, `+0xc` a flags byte, `+0x10` a display-name
+string pointer, `+0x14` priority). Read the group-0 and group-1 tables
+and their adjacent string pools directly via `read_memory` (Confidence
+3 — this is raw data, not inferred).
+
+**Group 0 states (partial, ~20 entries read):** Find Scoop Up, Jump
+Out, Jump In, Slow Rotate, Ship Follow Curve, **Toggle Cloak**, Patrol
+Route, Formation Regroup, Object Attack, "Ripper grabs target object",
+Explode, Find New Target, Escort, Land, Run Away, Fly, Warp Out, Warp
+In, Launch Missile, Fly Aimlessly, Do Nothing.
+
+**Group 1 states (partial, ~20 entries read):** "...ght" (truncated,
+plausibly "Fight"), "Make capship list left", Disrupted, "Eject
+fighter attack", "Ripper attach cargo pod to Mammoth", "Ripper end
+drop object", "Dark reign shoot", Dock, Eject Spin, Scoop Up, Fight,
+Launch, Torpedo, Avoid Target, Multiplayer Control, Player Control,
+"Fly ship backwards", "Immediately set ship to zero velocity and
+rotation", "Huuuuuuuuge explosion" (verbatim — developer humor, not a
+transcription artifact), "Turns object lights off", "Make ripper drop
+what it's c[arrying]".
+
+This confirms and substantially enriches several earlier findings and
+open questions at once:
+
+- **`Toggle Cloak` confirms a real stealth/cloaking mechanic** exists
+  in the AI state system — corroborates `DAT_00595c64` cloak-related
+  checks noticed but not investigated all the way back in the very
+  first bootstrap session.
+- **"Ripper" is a specific in-universe NPC/ship type** — a cargo-
+  grabbing entity ("Ripper grabs target object", "Ripper attach cargo
+  pod to Mammoth", "Ripper end drop object", "Make ripper drop what
+  it's carrying") that attaches to and steals cargo, plausibly a
+  pirate/salvage ship class. "Mammoth" is a second named ship/object
+  type (the Ripper's cargo target).
+- **"Dark reign shoot"** — an unusual, specific state name; plausibly
+  a mission-specific or boss-enemy special attack. "Dark Reign" itself
+  may be an internal-only reference (coincidentally also the name of a
+  contemporary Activision RTS, but no evidence connects the two beyond
+  the name).
+- **Multiplayer/Player Control states** confirm the AI system itself
+  handles the handoff between AI-controlled and human-controlled
+  piloting of a ship — i.e., "Player Control" is just another AI state
+  in the same priority-gated FSM, not a separate code path.
+- **Capital-ship/mission-scripting states** (Jump In/Out, Warp In/Out,
+  Formation Regroup, Escort, Dock, Launch) match the kind of scripted
+  large-scale behaviors a capital-ship-and-carrier-based campaign like
+  Star Lancer's would need.
+- The literal string `"Huuuuuuuuge explosion"` is a genuine piece of
+  the shipped binary's data — developer humor preserved verbatim in
+  the release build, not a decompilation artifact.
+
+### Open follow-ups
+
+- The exact numeric state ID for each name wasn't individually
+  re-verified (the string pool was read as a contiguous block and the
+  names listed in memory order, which should match table order, but
+  the precise ID↔name pairing wasn't cross-checked entry-by-entry).
+- Group 2's table (the third pointer in `PTR_DAT_004e06e0`) — not read
+  yet.
+- The remaining, un-read portions of groups 0 and 1's tables (each
+  region read covered roughly 20 entries; the full catalog is likely
+  larger).
+- "Mammoth" and "Ripper" as confirmed in-universe names — worth a
+  broader string-table sweep if ship/enemy taxonomy becomes a focus.

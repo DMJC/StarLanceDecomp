@@ -2643,10 +2643,93 @@ not an ad-hoc destruction-only mechanism as it first appeared from
 
 ### Open follow-ups
 
-- The actual CONTENTS of `PTR_DAT_004e06e0` (the full list of AI
-  states, their names, and their priority values) — only the per-entry
-  field LAYOUT is confirmed; reading the table's static data directly
-  would reveal the complete AI-state catalog, likely a genuinely
-  interesting list (patrol, attack, evade, dock, flee, destroyed, etc.).
+- ~~The actual CONTENTS of `PTR_DAT_004e06e0`~~ — **read directly next, see below.**
 - Whether priority values are universal constants or vary by ship
   class.
+
+---
+
+# Eighteenth pass (2026-09-08, same day): the AI state catalog, read directly
+
+Read `PTR_DAT_004e06e0` and its two adjacent group tables directly
+from process memory via `read_memory`, rather than continuing to
+decompile — the table's CONTENTS were the actual open question, not
+more code. This is raw binary data (Confidence 3), not inferred.
+
+## Table structure
+
+`PTR_DAT_004e06e0` is a 3-element array of pointers, one per "hundreds
+group" (`stateId/100` selects the group, `stateId%100` indexes within
+it — matching `TrySetAiState`'s own indexing exactly):
+
+- Group 0 → `0x004e0050`
+- Group 1 → `0x004e04a0`
+- Group 2 → `0x004e06c8` (not read this session)
+
+Each 24-byte entry: two leading callback slots not read by
+`TrySetAiState` itself (`+0`, `+4` — plausibly OnEnter/OnUpdate
+handlers used elsewhere), `+8` the OnExit callback `TrySetAiState`
+calls, `+0xc` a flags byte (bit `0x20` = unconditional-transition, as
+documented last session), `+0x10` a pointer into a nearby string pool,
+`+0x14` the priority integer.
+
+## The state names
+
+**Group 0** (string pool at `0x4e0a80`, ~20 entries read in table
+order): `Find Scoop Up`, `Jump Out`, `Jump In`, `Slow Rotate`, `Ship
+Follow Curve`, **`Toggle Cloak`**, `Patrol Route`, `Formation
+Regroup`, `Object Attack`, `"Ripper grabs target object"`, `Explode`,
+`Find New Target`, `Escort`, `Land`, `Run Away`, `Fly`, `Warp Out`,
+`Warp In`, `Launch Missile`, `Fly Aimlessly`, `Do Nothing`.
+
+**Group 1** (string pool at `0x4e0780`, ~20 entries read): `"...ght"`
+(truncated in the read window, plausibly `Fight`), `"Make capship
+list left"`, `Disrupted`, `"Eject fighter attack"`, `"Ripper attach
+cargo pod to Mammoth"`, `"Ripper end drop object"`, `"Dark reign
+shoot"`, `Dock`, `Eject Spin`, `Scoop Up`, `Fight`, `Launch`,
+`Torpedo`, `Avoid Target`, `Multiplayer Control`, `Player Control`,
+`"Fly ship backwards"`, `"Immediately set ship to zero velocity and
+rotation"`, `"Huuuuuuuuge explosion"`, `"Turns object lights off"`,
+`"Make ripper drop what it's carrying"`.
+
+## What this confirms
+
+- **A real cloaking/stealth mechanic** (`Toggle Cloak`) — corroborates
+  `DAT_00595c64` cloak-related checks noticed but never chased down
+  all the way back in the project's very first bootstrap session.
+- **"Ripper" is a specific in-universe NPC/ship type**: a
+  cargo-grabbing entity ("Ripper grabs target object", "Ripper attach
+  cargo pod to Mammoth", "Ripper end drop object", "Make ripper drop
+  what it's carrying") — plausibly a pirate or salvage-ship class that
+  steals cargo mid-flight. "Mammoth" appears as a second named
+  ship/object type — the Ripper's cargo target, likely a transport or
+  freighter class.
+- **"Dark reign shoot"** — an unusual, specific state name, plausibly
+  a mission-specific or boss-enemy special attack. Whether "Dark
+  Reign" is a deliberate reference to anything (it also happens to be
+  the name of a contemporary Activision RTS) isn't established — could
+  easily be coincidental internal naming.
+- **Player control is just another AI state.** `Multiplayer Control`
+  and `Player Control` being entries in the SAME priority-gated FSM as
+  every AI behavior confirms the engine treats "a human is flying this
+  ship" as one state among many, not a structurally separate code path
+  from AI piloting.
+- **Capital-ship/mission-scripting states** (`Jump In`/`Jump Out`,
+  `Warp In`/`Warp Out`, `Formation Regroup`, `Escort`, `Dock`,
+  `Launch`) match exactly the kind of large-scale scripted behavior a
+  carrier-and-capital-ship campaign like Star Lancer's needs.
+- **`"Huuuuuuuuge explosion"`** is preserved verbatim in the shipped
+  release binary — genuine developer humor in real game data, not a
+  decompilation or transcription artifact.
+
+### Open follow-ups
+
+- The precise numeric state ID for each name wasn't individually
+  cross-checked entry-by-entry (names were read in the table's memory
+  order, which should correspond to ID order within each group, but
+  this wasn't independently re-verified per entry).
+- Group 2's table — not read this session.
+- The remaining portions of groups 0 and 1 beyond the ~20 entries each
+  that were read — the full catalog is likely somewhat larger.
+- "Mammoth" and "Ripper" as confirmed in-universe ship/entity names —
+  a good anchor for a future ship-taxonomy sweep of the string table.
