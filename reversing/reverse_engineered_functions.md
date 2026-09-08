@@ -3974,3 +3974,137 @@ than forcing an explanation:
   `FUN_0045d720`/`FUN_0045d8b0`/`FUN_0045d8e0`/`FUN_0045d910` (all
   referenced from `ResolveObjectRangeAndInvokeCallback`'s callback path)
   not decompiled.
+
+## Pass 28 -- Resource file / BigFile TOC loader (2026-09-08)
+
+Direct investigation of the ".hog"/BigFile archive subsystem underlying
+`LoadResourceFileBuffer` (documented structurally in an earlier pass).
+Confirmed real source files `C:\lancer\game\bigfile.cpp` and
+`C:\lancer\game\hog_file.cpp`, and the real function-name prefix
+`HOG_` for this subsystem's public API (`HOG_bigread`, `HOG_bigread2`,
+`HOG_bigsize`, `HOG_file_read`, `HOG_file_size`).
+
+### Archive file format, confirmed structurally
+
+`OpenBigFile` (`0x4c7e20`) opens a `.hog`/BigFile archive and reads a
+fixed 16-byte header via one `fread` (through the locking wrapper
+`FUN_004cfeec`) followed by 3 big-endian-swapped `uint32` reads
+(`ReadSwappedUint32`, was `FUN_004c7df0` -- confirmed as a pure
+byte-swap utility operating on an already-buffered pointer, advanced
+via a hidden fastcall register argument between calls, the same
+recurring decompiler artifact seen throughout this project):
+
+```
+offset 0x00: magic uint32BE  == 0x42494746 ("BIGF")
+offset 0x04: tocEntryCount   (piVar2[7] in the decompile)
+offset 0x08: tocSizeBytes    (piVar2[8] -- size of the TOC region, header included)
+offset 0x0c: (unused 4th header word, not read individually)
+```
+
+If the magic doesn't match, `OpenBigFile` fails cleanly (frees and
+returns NULL) -- no fallback inside this function. On success, it
+allocates `tocSizeBytes`, rewinds the file (`FUN_004d0c17`, matches
+CRT `rewind()`'s exact shape: clear error/EOF flags, no seek offset
+parameter), and bulk-reads `tocSizeBytes` from the START of the file
+into that buffer -- meaning the in-memory TOC buffer re-includes a
+copy of the 16-byte header at its front, which is exactly why
+`FindBigFileTocEntry`'s search loop (below) starts its cursor at
+`tocBuffer + 0x10`, skipping that embedded header copy.
+
+### TOC entry format, confirmed structurally (confidence 4)
+
+`FindBigFileTocEntry` (`0x4c8370`, was `FUN_004c8370`) walks the TOC
+buffer from `tocBuffer+0x10` to `tocBuffer+tocSizeBytes`, and its
+field-access pattern pins down the entry layout precisely:
+
+```c
+struct BigFileTocEntry {
+    uint32_t fileOffsetBE;   // big-endian file offset of this resource's data
+    uint32_t fileSizeBE;     // big-endian byte size of this resource's data
+    char     name[];         // null-terminated, case-insensitive compared
+};                            // variable length -- entries packed tightly,
+                              // next entry starts right after the name's NUL
+```
+
+Evidence: the name-comparison call is
+`FUN_004dae20((char *)(cursor + 8), targetName)` -- i.e. the name
+starts 8 bytes into each entry, exactly matching two leading `uint32`
+fields. On a match, the function calls `ReadSwappedUint32()` TWICE more
+with the (hidden, advancing) cursor still pointing at this same entry's
+start -- reading back `cursor+0` (offset) then `cursor+4` (size),
+confirming those are genuine per-entry fields rather than a
+separately-stored parallel array. It then seeks the archive's `FILE*`
+to the resolved offset (`FUN_004d0407(fp, offset, SEEK_SET)`) and
+returns the resolved size, leaving the file cursor positioned exactly
+at the resource's data, ready for the caller to `fread` it directly.
+On no match (name comparison via `FUN_004dae20`, confirmed to be a
+`_stricmp`-style case-insensitive CRT compare, returns nonzero), the
+loop advances the cursor past the 8-byte prefix and the name's length
+(including its NUL) to reach the next entry. Falling off the end of
+the TOC region returns 0 (not found).
+
+### Read path: compression-aware, with a loose-file mod/dev override
+
+`HOG_BigRead` (`0x4c7f60`, matches the real name `HOG_bigread`) takes a
+resource path, strips a trailing 2-character extension matching `"ut"`
+if present (purpose not determined -- possibly a `.ut`/`.uti`-style
+suffix used only by an editor/tool variant of the same filename) and a
+leading directory component, then calls `FindBigFileTocEntry`. If
+found, it peeks 2 bytes at the resolved offset, seeks back 2 bytes, and
+checks for a `0x10fb` compressed-block marker:
+
+- **Compressed** (`marker == 0x10fb`): delegates to
+  `DecompressBigFileEntry` (`0x4c8480`, was `FUN_004c8480`), which
+  reads a 5-byte header immediately after the marker to recover the
+  true DECOMPRESSED size, allocates `decompressedSize + 0x2800` bytes
+  (extra slack, plausibly a decompressor window/overrun margin), reads
+  the compressed payload into the tail of that buffer, calls
+  `FUN_004cc350` (the actual decompressor -- not decompiled this
+  session; likely an LZ/RLE variant given the `0x10fb` marker and
+  trailing-window layout) to expand it in place, then copies the
+  result into a right-sized final allocation.
+- **Uncompressed**: allocates the resolved size directly and reads the
+  bytes with one `fread`.
+
+If `FindBigFileTocEntry` fails to find the entry (returns 0), `HOG_
+BigRead` falls back to `HOG_file_read` (`0x4c5be0`, confirmed real name
+via its own debug string `"HOG_file_read: error loading %s."` and
+source path `C:\lancer\game\hog_file.cpp`) -- a completely independent
+loader that opens the path as a **plain loose file on disk** (not
+inside any archive), sized via `HOG_file_size` (`fseek`+`ftell`). Only
+if *that* also fails does it report the second, harder failure
+(`"HOG_bigread: error loading %s."`) via `ReportAssertionFailureEx`.
+
+**`LoadResourceFileBuffer`'s mod/dev-override mechanism, now explained
+precisely**: it calls `FileExistsOnDisk` (`0x4ad6e0`, a plain
+`GetFileAttributesA(path) != INVALID`check) *before* even trying the
+archive path. If a loose file with the requested name genuinely exists
+on disk, `LoadResourceFileBuffer` reads it directly via
+`ReadLooseResourceFile` (`0x45a3e0`) and NEVER consults the BigFile
+archive at all for that resource. Only when no loose file is present
+does it fall through to `LoadNamedResource`->`HOG_BigRead` (the
+archive path, which itself has its OWN internal loose-file fallback via
+`HOG_file_read`, described above, for when the archive's TOC doesn't
+contain the entry). This is a genuine, simple, well-supported mod/dev
+override: **any loose file dropped into the expected game-data
+directory with the correct relative name silently takes priority over
+the packed `.hog` archive's copy**, no special flag or configuration
+needed. `ReadLooseResourceFile` also calls `HandleFatalMissionError()`
+on failure when specific caller flags are set, tying this directly into
+the mission-loading fatal-error path documented in an earlier pass.
+
+### Open follow-ups
+
+- `FUN_004cc350` (the actual compressed-block expander used by
+  `DecompressBigFileEntry`) -- not decompiled; likely an LZ/RLE
+  variant, unconfirmed.
+- The stripped `.ut`-suffix behavior in `HOG_BigRead` -- purpose not
+  determined (only that a trailing `.ut`-prefixed 2-char extension is
+  silently dropped from the requested name before the TOC lookup).
+- The BigFile header's 4th 16-byte-header word (never read
+  individually by `OpenBigFile`) -- likely reserved/padding, not
+  confirmed.
+- Whether `CloseBigFile`/`HOG_bigsize` (0x4c81f0, confirmed via its own
+  compression-aware size logic mirroring `HOG_BigRead`'s marker check)
+  are called from any currently-documented higher-level resource
+  manager -- not traced this session.

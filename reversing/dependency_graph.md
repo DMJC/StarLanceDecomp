@@ -951,3 +951,47 @@ MissionScript_0x459bd0_ResetAndScan (0x459bd0)
   <- depended on by: mission-scripting command table (slot association UNRESOLVED --
                  table position implies "TurretSetTarget" but behavior does not match)
 ```
+
+## Resource file / BigFile TOC loader (2026-09-08, twenty-eighth session)
+
+```
+OpenBigFile (0x4c7e20)
+  -> depends on: FUN_004d02ef (fopen-style wrapper, "rb" mode),
+                 ReadSwappedUint32 (0x4c7df0, magic+tocEntryCount+tocSizeBytes),
+                 FUN_004d0c17 (rewind()-equivalent),
+                 FUN_004cfeec (locking fread wrapper)
+  <- depended on by: (caller not re-traced this session -- likely a startup
+                 archive-mount routine alongside EnsureCorrectCDMounted)
+
+HOG_BigRead / HOG_bigread (0x4c7f60)
+  -> depends on: FindBigFileTocEntry (0x4c8370),
+                 DecompressBigFileEntry (0x4c8480) [compressed path],
+                 HOG_file_read (0x4c5be0) [TOC-miss fallback],
+                 ReportAssertionFailureEx, FUN_004c36d0 (sprintf-style formatter)
+  <- depended on by: LoadNamedResource (0x4c5bd0, trivial passthrough)
+                 <- LoadResourceFileBuffer (0x45a300)
+
+FindBigFileTocEntry (0x4c8370)
+  -> depends on: FUN_004dae20 (_stricmp-style case-insensitive compare),
+                 ReadSwappedUint32 (offset/size fields),
+                 FUN_004d0407 (fseek wrapper, seeks archive FILE* to resolved offset)
+  <- depended on by: HOG_BigRead, HOG_bigsize (0x4c81f0)
+
+DecompressBigFileEntry (0x4c8480)
+  -> depends on: ReadSwappedUint32 (2-byte marker peek via FUN_004cfeec, not itself),
+                 SR_MEM_allocate, FUN_004cc350 (actual decompressor, NOT decompiled),
+                 SR_MEM_free
+  <- depended on by: HOG_BigRead (compressed-entry path)
+
+LoadResourceFileBuffer (0x45a300)
+  -> depends on: FileExistsOnDisk (0x4ad6e0) [mod/dev override check],
+                 ReadLooseResourceFile (0x45a3e0) [loose-file path, calls HandleFatalMissionError on flagged failure],
+                 LoadNamedResource -> HOG_BigRead [archive path]
+  <- depended on by: (mission/resource loading callers, not re-traced this session)
+
+HOG_file_read (0x4c5be0)
+  -> depends on: HOG_file_size (0x4c5b90), SR_MEM_allocate_named,
+                 FUN_004d02ef (fopen), FUN_004cfeec (fread), FUN_004d013c (fclose),
+                 ReportAssertionFailureEx
+  <- depended on by: HOG_BigRead (TOC-miss fallback)
+```

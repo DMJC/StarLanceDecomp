@@ -1112,3 +1112,32 @@ decompiled two more handlers.
   `DAT_005267c0`-stride-8-then-inner-stride-0x30 walk) into one struct.
 - `FUN_0045b2d0`, `FUN_0045d720`, `FUN_0045d8b0`, `FUN_0045d8e0`,
   `FUN_0045d910` -- not decompiled.
+
+## Resource file / BigFile TOC loader (2026-09-08, twenty-eighth session)
+
+Direct investigation of the ".hog"/BigFile archive subsystem. Confirmed
+real source files `bigfile.cpp` and `hog_file.cpp`, and the `HOG_`
+public-API naming convention.
+
+| Name (address) | Confidence | Notes |
+|---|---|---|
+| BigFile archive header format (magic 0x42494746="BIGF" @0x00, tocEntryCount @0x04, tocSizeBytes @0x08, 4 bytes unused @0x0c) | 4 | Directly read from `OpenBigFile`'s decompile; magic check is unconditional and fails cleanly. |
+| BigFile TOC entry format `{uint32BE fileOffset; uint32BE fileSize; char name[];}`, packed/variable-length | 4 | Derived from `FindBigFileTocEntry`'s exact field-access offsets (name compared at cursor+8; offset/size re-read from cursor+0/+4 on match; non-match advance = 8 + strlen(name) + 1). Internally consistent, no contradictions found. |
+| `OpenBigFile` (0x4c7e20) | 4 | Reads header, allocates+rewinds+bulk-reads the TOC (TOC buffer includes a copy of the header at its front, offset by `FindBigFileTocEntry`'s `+0x10` search start). |
+| `CloseBigFile` (0x4c7f20) | 3 | Frees TOC buffer, closes file handle, frees the struct -- straightforward, not deeply re-examined this session. |
+| `HOG_BigRead` a.k.a. `HOG_bigread` (0x4c7f60) | 4 | Confirmed real name via debug strings. Strips a trailing "ut"-prefixed 2-char extension and leading directory, looks up via `FindBigFileTocEntry`, checks a `0x10fb` compression marker, dispatches to `DecompressBigFileEntry` or a direct read, and falls back to `HOG_file_read` (loose file) on TOC miss. |
+| `FindBigFileTocEntry` (0x4c8370, was FUN_004c8370) | 4 | TOC linear-scan-by-name; case-insensitive compare via `FUN_004dae20` (confirmed CRT-style `_stricmp` shape); seeks the archive FILE* to the resolved offset and returns size on match. |
+| `DecompressBigFileEntry` (0x4c8480, was FUN_004c8480) | 3 | Reads a 5-byte true-size header after the compression marker, allocates size+0x2800 slack, reads compressed payload into the buffer's tail, calls `FUN_004cc350` (not decompiled) to expand in place, copies to a right-sized final buffer. |
+| `HOG_bigsize` (0x4c81f0, was FUN_004c81f0) | 3 | Compression-aware logical-size lookup, mirrors `HOG_BigRead`'s marker check without doing the actual read. |
+| `GetBigFileEntrySize` (0x4c5b80, was FUN_004c5b80) | 2 | Thin wrapper around `HOG_bigsize`; exact distinct purpose from calling `HOG_bigsize` directly not determined. |
+| `HOG_file_read` (0x4c5be0, was FUN_004c5be0) | 4 | Confirmed real name via debug string + `hog_file.cpp` source path. Loose-file (non-archive) loader: size via `HOG_file_size`, allocate, open+fread+close. |
+| `HOG_file_size` (0x4c5b90, was FUN_004c5b90) | 4 | `fseek(END)`+`ftell()`-equivalent size lookup for a loose file. |
+| `FileExistsOnDisk` (0x4ad6e0, was FUN_004ad6e0) | 4 | Plain `GetFileAttributesA(path) != INVALID_FILE_ATTRIBUTES`. Used by `LoadResourceFileBuffer` as a mod/dev-override check -- a loose file on disk with the expected name silently pre-empts the packed archive. |
+| `ReadLooseResourceFile` (0x45a3e0, was FUN_0045a3e0) | 3 | Loose-file reader used by `LoadResourceFileBuffer`'s override path; calls `HandleFatalMissionError()` on failure under specific caller flags, tying into the mission-loading fatal-error path documented in an earlier pass. |
+
+### Open follow-ups
+
+- `FUN_004cc350` (the actual decompressor) -- not decompiled; likely LZ/RLE given the `0x10fb` marker.
+- The stripped `.ut` trailing-extension behavior in `HOG_BigRead` -- purpose unknown.
+- The BigFile header's unused 4th 16-byte-header word.
+- Whether `HOG_bigsize`/`GetBigFileEntrySize` are called from any currently-documented higher-level resource manager -- not traced.
