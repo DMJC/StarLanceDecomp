@@ -4408,3 +4408,170 @@ the two arrays being identical/aliased.
 - Whether `DAT_0052abe0` and `DAT_005294e0` are the same array or two
   parallel ones -- not directly confirmed.
 - `FUN_004024e0` (object display-name resolver) -- not decompiled.
+
+## Pass 32 -- THE MISSION SCRIPT INTERPRETER FOUND: a stack-based bytecode VM (2026-09-08)
+
+Direct continuation of the interpreter search (open since Pass 27).
+Found it by following the trigger system's data flow rather than
+searching from the command table's side: `Mission_TriggerCount`'s
+overflow-dump caller chain led to the real per-tick trigger-processing
+pipeline, which led directly to a genuine bytecode interpreter.
+
+### The chain that led here
+
+```
+UpdateMissionFrame (0x4924b0, already documented)
+  -> ProcessMissionTriggerQueue (0x45b840, was FUN_0045b840)
+       per-frame: walks all live triggers (DAT_005373e4 count,
+       DAT_0052abe0 array, stride 0x30 -- same record documented
+       in Pass 31), and for each, calls:
+     -> DispatchMissionTriggerMatch (0x45ce70, was FUN_0045ce70)
+          thin wrapper; skips if the owning object index is -1
+        -> MatchTriggerAgainstWaitingScripts (0x45cea0, was FUN_0045cea0)
+             the real trigger-to-script matcher: walks an array at
+             DAT_005294e0 + index*0x30 -- CONFIRMED to be the exact
+             same 0x30-byte array MissionScript_SetAnyTriggerState
+             (Pass 27) walks, resolving Pass 31's "confidence 2,
+             possibly the same array" hypothesis up to confidence 4.
+             On a match, calls:
+           -> FindMissionScriptThreadSlot (0x45b960, was FUN_0045b960)
+                walks a linked list rooted at PTR_DAT_004f6348 (each
+                node 0xB8/0x2e-dword bytes, "next" pointer at +0xc8)
+                to find a script-thread slot, and copies the trigger's
+                extra data into it at +0x18.
+```
+
+### `ResumeMissionScriptThread` (0x45ba30, was FUN_0045ba30): the scheduler
+
+```c
+void __fastcall ResumeMissionScriptThread(undefined4 *param_1)
+{
+  if (param_1[3] != 0) {
+    if (DAT_00538c9c <= (uint)param_1[3]) return;
+    param_1[3] = 0;
+  }
+  DAT_00537570 = *param_1;        // restore VM stack pointer from thread state
+  DAT_00537574 = 0;
+  DAT_005373f0 = param_1[1];      // restore VM instruction cursor from thread state
+  DAT_00537578 = param_1;         // "current thread" global
+  iVar1 = RunMissionScriptVM();
+  if (iVar1 == 0) {
+    *param_1 = DAT_00537570;      // yielded/blocked -- save state back for next resume
+    param_1[1] = DAT_005373f0;
+    return;
+  }
+  param_1[4] = 0;                 // finished -- mark thread dead
+  DAT_00537415 = DAT_00537415 + -1;  // decrement active-thread count
+}
+```
+
+This is a **cooperative script-thread scheduler**: `PTR_DAT_004f6348`
+is the head of a linked list of independently-resumable mission script
+"threads" (coroutines), each with its own saved VM stack pointer and
+instruction cursor. Each frame, live threads get resumed one at a
+time; a thread either yields (blocked, e.g. waiting on a trigger or a
+timer) and gets its state saved for the next resume, or runs to
+completion and is torn down.
+
+### `RunMissionScriptVM` (0x45c980, was FUN_0045c980): the actual interpreter
+
+```c
+uint __fastcall RunMissionScriptVM(undefined *param_1)
+{
+  ...
+  piVar1 = (int *)(param_1 + 0x10);   // instruction cursor, within the thread struct
+  do {
+    ...
+    pcVar2 = *(code **)(&DAT_004f6350 + (uint)*(byte *)*piVar1 * 4);  // fetch opcode byte, index jump table
+    *piVar1 = (int)((byte *)*piVar1 + 1);                              // advance cursor past opcode
+    iVar4 = (*pcVar2)(iVar4);                                          // execute opcode handler
+  } while (iVar4 != 0);   // keep going until a handler signals stop/yield
+  ...
+}
+```
+
+This is a textbook **fetch-decode-execute bytecode interpreter loop**:
+fetch one opcode byte from the thread's instruction stream, index a
+jump table (`DAT_004f6350`) by that raw byte value to get a handler
+function pointer, advance the cursor, call the handler (which receives
+and returns a simple "keep running" int flag), and loop until a
+handler signals stop. This is emphatically NOT the same mechanism as
+the named-command metadata table investigated in Passes 25-27 (which
+used a `(scriptCursor*, argListPtr*)` two-pointer calling convention
+per command) -- **this is a separate, lower-level system.**
+**Confidence 5** that this is a genuine bytecode interpreter loop --
+the structure is unambiguous.
+
+### The opcode jump table (`DAT_004f6350`) and confirmed stack-VM primitives
+
+Read and parsed as a 4-byte-pointer array. Roughly 84 populated
+entries (opcodes ~2-85, with some gaps -- opcodes 8-19 are entirely
+zero/unused), followed immediately by what is recognizably the START
+of the SAME rich name/description/argument metadata table investigated
+in Passes 25-27 (string-pointer-shaped values matching that table's
+field pattern begin right after the jump table ends) -- i.e. **the raw
+opcode jump table and the named-command metadata table are two
+adjacent but structurally distinct tables in the same data region**,
+not the same table read two different ways as I'd been assuming.
+
+Decompiled 3 opcode handlers to confirm the execution model:
+
+- **Opcode 2** (`0x45bad0`, now `MissionVM_OpEquals`):
+  `*(DAT_00537570-8) = (*(DAT_00537570-8) == *(DAT_00537570-4)); DAT_00537570 -= 4;`
+  -- pops two values off an evaluation stack (`DAT_00537570`, a stack
+  pointer that grows/shrinks by 4-byte words) and pushes their
+  equality as a boolean. **Classic `OP_EQ`.**
+- **Opcode 3** (`0x45bb00`, now `MissionVM_OpNotEquals`): identical
+  shape with `!=`. **Classic `OP_NE`.**
+- **Opcode 20** (`0x45bbf0`): calls `FUN_0045cb20()` (a "fetch some
+  game-state value" primitive, not decompiled) and pushes the low byte
+  of its result onto the stack -- a **push-game-value opcode**.
+
+**Confidence 5** that `DAT_004f6350`+`RunMissionScriptVM` implement a
+genuine **stack-based bytecode virtual machine**, most plausibly used
+to evaluate mission-script CONDITION/EXPRESSION logic (the boolean
+tests that gate trigger-based script branches), given the confirmed
+push/pop/compare primitives found. `DAT_00537570` = VM evaluation stack
+pointer; `DAT_005373f0`/thread-struct field `+4` = VM instruction
+cursor (saved/restored per thread).
+
+### Open question: how does this relate to the named-command table?
+
+The relationship between this low-level stack VM (this pass) and the
+rich named-command metadata table with handlers like
+`MissionScript_WaitForKey`/`MissionScript_TerminateMission`/
+`MissionScript_SetAnyTriggerState` (Passes 25-27) is **not yet
+established**. Plausible hypotheses, none confirmed:
+
+1. The stack VM evaluates boolean CONDITIONS only (if/wait-until
+   logic), while the named-command table drives separate, higher-level
+   ACTIONS -- two cooperating but structurally independent mini-systems
+   compiled from different parts of a `.dte` script.
+2. One of the ~84 stack-VM opcodes is a "call named command N" bridge
+   that reads a following command-index byte and dispatches through
+   the OTHER table with the different calling convention -- unifying
+   both into one system with two instruction classes.
+
+Given `MissionScript_WaitForKey`'s own handler independently manages
+condition-table waits and cursor rewinding using an entirely different
+data structure (`DAT_004e2380`) than this VM's stack (`DAT_00537570`),
+hypothesis 1 (two independent systems) currently looks more likely,
+but this is **not confirmed** -- flagged explicitly as open rather than
+guessed at.
+
+### Open follow-ups
+
+- Decompile more of the ~84 opcode handlers to build a fuller ISA
+  picture (arithmetic? jumps/branches? the actual "wait for trigger"
+  opcode that would explain how `MatchTriggerAgainstWaitingScripts`
+  resumes a blocked thread).
+- Determine how a script thread's instruction stream relates to the
+  `.dte` file's on-disk script bytecode (i.e. confirm this VM's opcodes
+  ARE what's stored in `.dte` mission files, rather than a
+  compiled-at-load-time intermediate form).
+- Resolve the relationship (if any) between this VM and the Pass 25-27
+  named-command table.
+- The full 0xB8-byte script-thread struct layout -- only a few fields
+  characterized (`+0x00` stack ptr, `+0x04` cursor, `+0x0c` some
+  count/limit, `+0x10` alt cursor field seen in `RunMissionScriptVM`,
+  `+0x18` trigger-data landing area).

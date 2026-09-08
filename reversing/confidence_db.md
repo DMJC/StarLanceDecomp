@@ -1195,3 +1195,25 @@ checked and ruled out), but found the complete trigger-type catalog.
 - Map the full 0x30-byte trigger record beyond byte 0.
 - Confirm/refute `DAT_0052abe0` == `DAT_005294e0`.
 - `FUN_004024e0` (object display-name resolver) -- not decompiled.
+
+## THE MISSION SCRIPT INTERPRETER FOUND: a stack-based bytecode VM (2026-09-08, thirty-second session)
+
+Found by following the trigger-processing data flow from `UpdateMissionFrame` rather than searching from the command-table side.
+
+| Name (address) | Confidence | Notes |
+|---|---|---|
+| `RunMissionScriptVM` (0x45c980, was FUN_0045c980) = the interpreter's fetch-decode-execute loop | 5 | Unambiguous: fetches an opcode byte from a per-thread cursor, indexes a jump table by raw byte value, calls the handler, loops until a handler signals stop. |
+| `DAT_004f6350` = opcode jump table (~84 populated entries) | 5 | Directly read and parsed; immediately followed in memory by the START of the Pass 25-27 named-command metadata table -- the two are adjacent, structurally DISTINCT tables, not the same data read two ways. |
+| Stack-based VM execution model (`DAT_00537570` = eval stack pointer) | 5 | Confirmed via 2 fully decompiled opcodes (`MissionVM_OpEquals`/`MissionVM_OpNotEquals`, opcodes 2/3): classic pop-pop-push comparison primitives on a 4-byte-word stack. |
+| `ResumeMissionScriptThread` (0x45ba30, was FUN_0045ba30) = cooperative script-thread scheduler | 4 | Restores/saves VM stack pointer + instruction cursor per thread; yields (state saved) vs. finishes (thread torn down, active-count decremented). |
+| `PTR_DAT_004f6348` = head of a linked list of active mission-script thread instances (0xB8-byte records) | 4 | Confirmed via `FindMissionScriptThreadSlot`'s list-walk shape (next-pointer at +0xc8, 0x2e-dword/0xB8-byte stride). |
+| `ProcessMissionTriggerQueue` (0x45b840) / `DispatchMissionTriggerMatch` (0x45ce70) / `MatchTriggerAgainstWaitingScripts` (0x45cea0) | 4 | Per-frame trigger-consumption pipeline, called from `UpdateMissionFrame`; confirms `DAT_005294e0`+index*0x30 (from `MissionScript_SetAnyTriggerState`, Pass 27) and `DAT_0052abe0` (trigger record array, Pass 31) are traversed together here, up-confirming Pass 31's "possibly the same array" hypothesis to confidence 4. |
+| `AddMissionTriggerVariantA`/`B` (0x45b690/0x45b7c0, was FUN_0045b690/FUN_0045b7c0) | 3 | Two similarly-shaped trigger-registration functions (dedup check, then append to the 0x30-byte trigger array); exact distinction between the two variants not determined. |
+| Relationship between this stack VM and the Pass 25-27 named-command table | 0 (open) | Two plausible hypotheses (independent condition/action layers vs. one opcode bridges to the other) -- neither confirmed. Leaning toward "independent systems" given WaitForKey's handler uses an entirely different data structure than this VM's stack, but not settled. |
+
+### Open follow-ups
+
+- Decompile more opcode handlers to build a fuller ISA (branches/jumps, arithmetic, the trigger-wait opcode).
+- Confirm whether this VM's bytecode is literally what `.dte` files store on disk.
+- Resolve the VM-vs-named-command-table relationship.
+- Map the full 0xB8-byte script-thread struct.

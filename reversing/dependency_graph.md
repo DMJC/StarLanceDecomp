@@ -1044,3 +1044,38 @@ FUN_004843a4 (HUD per-frame render, NOT the script interpreter -- ruled out this
                  condition/display table, shared with MissionScript_WaitForKey)
   <- depended on by: (not traced)
 ```
+
+## THE MISSION SCRIPT INTERPRETER FOUND: a stack-based bytecode VM (2026-09-08, thirty-second session)
+
+```
+UpdateMissionFrame (0x4924b0)
+  -> ProcessMissionTriggerQueue (0x45b840)
+       -> depends on: DAT_005373e4 (Mission_TriggerCount), DAT_0052abe0 (trigger array, stride 0x30),
+                       GetObjectIndexFromPointer, DAT_00529504 (nav-graph node count, validity check)
+       -> DispatchMissionTriggerMatch (0x45ce70)
+            -> MatchTriggerAgainstWaitingScripts (0x45cea0)
+                 -> depends on: DAT_005294e0+idx*0x30 (== MissionScript_SetAnyTriggerState's array,
+                                confirmed same array this session), DAT_005267c0 (trigger-type lookup,
+                                shared with ResolveObjectRangeAndInvokeCallback / SetAnyTriggerState),
+                                FindMissionScriptThreadSlot (0x45b960)
+                                  -> walks linked list rooted at PTR_DAT_004f6348 (node stride 0xB8/0x2e dwords)
+                                FUN_0045d810, FUN_0045d0d0, FUN_0045b8d0 (not decompiled)
+
+ResumeMissionScriptThread (0x45ba30)
+  -> depends on: DAT_00537570 (VM eval stack ptr), DAT_005373f0 (VM instruction cursor),
+                 DAT_00537578 (current-thread global), DAT_00537415 (active-thread count),
+                 RunMissionScriptVM (0x45c980)
+  <- depended on by: (per-tick script scheduler driver, not traced this session)
+
+RunMissionScriptVM (0x45c980)
+  -> depends on: DAT_004f6350 (opcode jump table, ~84 entries), per-thread instruction cursor at
+                 threadStruct+0x10
+  -> dispatches to (confirmed 3 of ~84 opcodes):
+       MissionVM_OpEquals (0x45bad0, opcode 2) -> DAT_00537570 (eval stack)
+       MissionVM_OpNotEquals (0x45bb00, opcode 3) -> DAT_00537570
+       opcode 20 (0x45bbf0) -> FUN_0045cb20 (push game-state value, not decompiled) -> DAT_00537570
+  <- depended on by: ResumeMissionScriptThread
+
+Relationship to the Pass 25-27 named-command metadata table (adjacent in memory, immediately
+after DAT_004f6350's jump table ends): UNRESOLVED -- flagged as open, not assumed either way.
+```
