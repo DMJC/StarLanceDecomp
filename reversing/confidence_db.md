@@ -424,8 +424,29 @@ silent edit, per METHODOLOGY.
 
 ### Open follow-ups
 
-- The actual callback function(s) passed to `InvokeEffectAnchorCallback`/`PropagateAlertToChildren` at real call sites — not identified; this is what would reveal the actual "reaction" behavior.
+- ~~The actual callback function(s) passed to `InvokeEffectAnchorCallback`/`PropagateAlertToChildren` at real call sites~~ — **found next session, see below: this is projectile hit/damage resolution.**
 - The `+0x50`/`+0x54` "child" fields on effect-anchor nodes, and how the `+0xa4`/`+0x20c`/`+0x210` anchor-table shape relates to (or differs from) the `+0xa4`/`+0x214`/`+0x218` shape seen on `SpawnWeaponVisualEffect`'s target — possibly two different sub-object types sharing the `+0xa4` offset by coincidence, possibly a real structural relationship. Not resolved.
+
+## `ProcessProjectileImpact` — hit detection, shield damage, and subsystem destruction (2026-09-08, twelfth session)
+
+Checked `PropagateAlertToChildren`/`InvokeEffectAnchorCallback`'s
+actual callers to find the real callback functions. This resolved the
+whole "what does the traversal DO" question from last session in one
+step — and turned out to be the actual combat-damage-resolution logic,
+among the most gameplay-central code found in this entire investigation.
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `ProcessProjectileImpact` (0x479b40, was `FUN_00479b40`) | 2 | The real projectile-vs-ship collision/damage function, processing the "nearby object" queue `SpawnProjectile` built (confirmed by matching field layout: a count field and a parallel array, matching pool-slot `+0x64`/`+0x68` from 3 sessions ago). For each queued nearby object: (1) re-derives the SAME type-`0xd`/`0xe` → `+1200`/`+3000` detection-radius bonus found independently in `SpawnProjectile`'s spawn-time scan — direct cross-confirmation from the damage-application side, not just the detection side; (2) solves a quadratic for closest-approach distance along the projectile's travel line, comparing against the target's radius plus the type bonus; (3) on a hit, resolves a shield-facing index (`FUN_00463d30`, not decompiled — "which quadrant did this hit") and applies damage directly to the shield-quadrant floats documented (as a guess) in the ship-object struct 4 sessions ago (`object+0x5f0+facing*4`) — **this promotes the "shield quadrants" interpretation from Confidence 1 to Confidence 2-3**: they are directly read/decremented here as damage-absorption values, and the SAME `_DAT_0051cf34`/`_DAT_0051cf78` globals `UpdateShieldQuadrants` referenced for live player input are used here too, as active "damage currently draining this quadrant" trackers; (4) gives flak/turret-laser weapons (types `0xb`/`0xc`) a **2.5× damage multiplier** specifically against non-player (larger/capital-ship) targets — a concrete anti-capital-ship point-defense role for those two weapon types; (5) calls `ApplyDamage`-shaped function `FUN_00463ee0` with the resolved amount; (6) invokes `InvokeEffectAnchorCallback` a SECOND time, recursively, against the hit ship's own subsystem/component list — resolving the callback mystery: **it's used here to detect whether the hit lands on a specific targetable SUBSYSTEM/COMPONENT of the ship** (an anchor-tree entry), and if so applies independent component-level damage/destruction, plays type-specific explosion effects (bigger for `0xd`/`0xe` huge guns), and triggers a distinct sound (`FUN_0049d360`, the same sound-trigger function documented in `FireWeapon` 4 sessions ago). This is genuine **subsystem/component-level ship damage** — individual turrets, engines, or other ship parts can apparently be independently targeted and destroyed, not just a single hit-point pool for the whole ship. |
+| `UpdateShieldPowerAndComponents` (0x465380, was `FUN_00465380`) | 1 | A second `PropagateAlertToChildren` caller — appears to handle PLAYER-INITIATED shield power redistribution (decrementing `_DAT_0051cf34`/`_DAT_0051cf78` on player input, matching classic "redistribute shield power between quadrants" space-sim controls) combined with a named-component lookup (a literal string `"Ulysses Fin"` — very likely an in-game capital ship class name, "Ulysses," with a targetable "Fin" subsystem — consistent with the subsystem-damage system above). Not decoded in full detail — dense, entangled with several other systems (turret-target validation, `DAT_005883f8` combat-state flag). |
+| `HandleComponentDestroyedEvent` (0x495ac0, was `FUN_00495ac0`) | 1 | A third, much smaller `PropagateAlertToChildren` caller — checks a component-state code (skips for codes `2`/`7`), then triggers an effect (`FUN_004645c0`, seen in multiple places this session as an effect/sound dispatcher taking an ID + owner + code) — plausibly fired specifically when a targeted subsystem/component is destroyed. Not decoded in full detail. |
+
+### Open follow-ups
+
+- `FUN_00463d30` ("which shield facing was hit" — resolves an index 0-3), `FUN_00463ee0` ("ApplyDamage"-shaped), `FUN_004645c0` (effect/sound dispatcher, called from at least 3 different functions this session with an ID+owner+code signature).
+- "Ulysses" as a probable in-universe capital ship class name — worth checking the string table for siblings (other ship class names) if ship/fleet naming becomes a focus.
+- The full component/subsystem damage model — only the existence and rough shape (per-component hit test, independent destruction, distinct effects) is confirmed; the component list's own structure isn't decoded.
+- `UpdateShieldPowerAndComponents`/`HandleComponentDestroyedEvent` deserve a full pass if the shield/subsystem-damage system becomes a focus — both still Confidence 1, only skimmed this session.
 
 ## WinMain state-machine cluster (first dive, 2026-09-08)
 

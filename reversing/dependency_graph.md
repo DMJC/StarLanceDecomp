@@ -394,6 +394,43 @@ CreateParticleEmitter (0x49c600)
                  objects, alongside CreateEffectObject)
 ```
 
+## Projectile impact / shield / subsystem damage (twelfth session)
+
+```
+ProcessProjectileImpact (0x479b40)
+  -> depends on: SpawnProjectile's "nearby object" queue (pool-slot
+                 +0x64 count / +0x68 array, confirmed by matching
+                 field shape), the type-0xd/0xe detection-radius bonus
+                 (re-derived independently, cross-confirms
+                 SpawnProjectile's own copy of this constant),
+                 ship-object +0x5f0..+0x5fc shield-quadrant floats
+                 (NOW READ/WRITTEN here as real damage-absorption
+                 values — promotes that struct field from Confidence 1
+                 guess to Confidence 2-3), _DAT_0051cf34/_DAT_0051cf78
+                 (shared with UpdateShieldQuadrants — confirmed as
+                 live per-quadrant damage-drain trackers),
+                 InvokeEffectAnchorCallback (called recursively against
+                 the HIT SHIP's own subsystem/component anchor list —
+                 this IS the callback mystery's resolution)
+  -> depends on (NOT YET IN DB): FUN_00463d30 (hit-facing resolver),
+                 FUN_00463ee0 (apply-damage), FUN_004645c0 (effect/
+                 sound dispatcher), FUN_00479940/FUN_00479b30 (hit-
+                 exemption checks)
+  <- depended on by: (not directly determined — reached via the
+                 callback mechanism from SpawnProjectile's proximity
+                 scan, not a direct call)
+
+UpdateShieldPowerAndComponents (0x465380)
+  -> depends on: PropagateAlertToChildren, a literal "Ulysses Fin"
+                 component-name string (probable capital-ship class +
+                 subsystem name), _DAT_0051cf34/_DAT_0051cf78
+  -> NOT decoded in full detail this session
+
+HandleComponentDestroyedEvent (0x495ac0)
+  -> depends on: PropagateAlertToChildren, FUN_004645c0
+  -> NOT decoded in full detail this session
+```
+
 ## SurrenderLib scene-node primitives (tenth session)
 
 ```
