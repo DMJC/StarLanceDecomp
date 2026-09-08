@@ -639,6 +639,35 @@ PTR_s_DPMESSAGE_END_0050ca94 (message-name pointer table, indexed by
                  every DirectPlay send in the game uses
 ```
 
+## The "Shadow" (spectator) system (twenty-second session)
+
+```
+HandleSetShadowMessage (0x4b49f0, DPGMESSAGE_SETSHADOW = message ID 50)
+  -> depends on: DAT_005db538 (current shadow/spectate-target slot),
+                 &DAT_005db654 (60-byte-stride per-player name array),
+                 FUN_00491030 (resource-string lookup, used throughout
+                 the UI, still not decompiled), ship-object
+                 +0x5f0..+0x600 shield-quadrant array (zeroed when the
+                 LOCAL player becomes the shadow), SendSetShadowMessage
+                 (broadcast)
+  <- depended on by: (network dispatch on message ID 50, not
+                 individually traced)
+
+HandleKilledByShadowMessage (0x4b4b30, DPGMESSAGE_KILLEDBYSHADOW = message ID 51)
+  -> depends on: ship-object +0x694 ("last attacker" field, documented
+                 several sessions ago — written here with sentinel
+                 -2 instead of a real attacker slot), same name-array/
+                 resource-lookup pattern as HandleSetShadowMessage,
+                 SendKilledByShadowMessage (broadcast)
+  <- depended on by: (network dispatch on message ID 51, not
+                 individually traced)
+
+SendSetShadowMessage (0x4bb030) / SendKilledByShadowMessage (0x4bb060)
+  -> depends on: BeginNetworkMessage, WriteMessageBits (confirmed via
+                 exact `mov edx, 50`/`mov edx, 51` immediate-value
+                 byte-pattern search, not guessed)
+```
+
 QueueAiEvent (0x402660)
   -> depends on: object+0xb8c/+0xb90 (event queue count/buffer, lazily
                  allocated 720 bytes), ReportAssertionFailureEx

@@ -3209,6 +3209,95 @@ variants).
 - Individual dispatch/handler code for any of these ~80 message types
   — this session read only the name table, not the handling logic.
 - `"HOJ"` (`DPGMESSAGE_HOJ`) — an unexplained 3-letter acronym.
-- The "Shadow" mechanic and "Spectral Shields" — both brand new,
-  unconnected to any other finding so far.
+- ~~The "Shadow" mechanic~~ — resolved next, see below.
+- "Spectral Shields" — still unconnected to any other finding.
 - Whether `DPGMESSAGE_DISEASED` is a real mechanic or developer humor.
+
+---
+
+# Twenty-fourth pass (2026-09-08, same day): the "Shadow" mechanic — multiplayer spectating
+
+Traced `DPGMESSAGE_SETSHADOW`/`DPGMESSAGE_KILLEDBYSHADOW` from message
+name to actual handler code, using exact byte-pattern searches at
+every step rather than guessing offsets:
+
+1. Found the two strings' addresses via `search_strings`.
+2. Located their exact SLOTS in the message-pointer table via
+   `search_byte_patterns` (searching for the literal 4-byte string
+   address) — `0x50cb5c` (SETSHADOW) and `0x50cb60`
+   (KILLEDBYSHADOW), giving table indices **50** and **51**
+   respectively (message IDs).
+3. Found the SEND functions by searching for the exact machine code
+   that loads those message IDs into the register `BeginNetworkMessage`
+   reads (`mov edx, 50` / `mov edx, 51`, i.e. byte patterns `ba 32 00
+   00 00` / `ba 33 00 00 00`) immediately before a call to
+   `BeginNetworkMessage` — found at `0x4bb030`/`0x4bb060`.
+4. Traced those senders' own callers to the real handler logic.
+
+## `HandleSetShadowMessage` (`0x004b49f0`) — multiplayer spectating
+
+```c
+void __fastcall HandleSetShadowMessage(int newShadowSlot, char broadcast);
+```
+
+**This is a spectator/"follow-cam" system.** A global
+(`DAT_005db538`) tracks which player slot is currently being
+"shadowed" (spectated) — `-1` means no one. When it changes, the
+function builds a chat/notification-style message using a
+60-byte-per-player name array (`&DAT_005db654 + slot*0x3c`),
+substituting a localized `"you"`-equivalent string (via `FUN_00491030`,
+the same resource-string lookup used throughout the UI in earlier
+sessions) whenever the local player is the subject, instead of
+printing their own name. When the LOCAL PLAYER specifically becomes
+the shadow (i.e. starts spectating), their own shield-quadrant array
+(`object+0x5f0`..`+0x600`, the same struct fields documented several
+sessions ago in the shield-damage system) gets zeroed — sensible for a
+spectator with no active combat state. Updates the global and, if
+`broadcast` is set, sends the change to other clients via
+`SendSetShadowMessage`.
+
+This also explains the `"shadow = %d"` debug string found alongside
+the message names in the string pool: a plain debug print of
+`DAT_005db538`'s current value.
+
+## `HandleKilledByShadowMessage` (`0x004b4b30`)
+
+```c
+void __fastcall HandleKilledByShadowMessage(int slot, char broadcast);
+```
+
+Sets `object[slot]+0x694` — the "last attacker" field written by
+`ApplyShieldDamage`/`ApplyComponentDamage` several sessions ago — to
+the sentinel value `0xfffffffe` (-2), rather than a real attacker
+slot. This marks the elimination as NOT a normal combat kill,
+plausibly "ended/eliminated in connection with the shadow/spectate
+system" (e.g. the player being shadowed disconnected or the spectate
+session ended in a way that needed a "no real killer" marker for
+scoring/HUD purposes). Builds the same kind of name-substituted
+notification message as `HandleSetShadowMessage`, and broadcasts via
+`SendKilledByShadowMessage` if requested. The exact game event that
+triggers this specific handler (as opposed to a normal death) isn't
+fully pinned down — the MECHANISM (special sentinel + notification)
+is clear (Confidence 2), the precise semantic trigger less so
+(Confidence 1).
+
+## `SendSetShadowMessage` (`0x004bb030`) / `SendKilledByShadowMessage` (`0x004bb060`)
+
+Thin `BeginNetworkMessage(3)`/`WriteMessageBits(...)` wrappers —
+confirmed as the exact network-send counterparts to the two handlers
+above via the precise message-ID immediate-value search described
+above, not inferred from naming or proximity alone.
+
+### Open follow-ups
+
+- The exact trigger for `HandleKilledByShadowMessage` — which specific
+  game event calls it, and whether downstream scoring/HUD code
+  special-cases the `-2` sentinel (e.g. "no kill credit awarded").
+- `FUN_00491030`'s own resource-string-lookup mechanism — called from
+  a wide variety of subsystems across many sessions now, never itself
+  opened.
+- Whether shadowing/spectating is available broadly to any
+  disconnected or eliminated player, or gated to a specific game mode
+  — `DAT_005db538`'s neighborhood of other deathmatch-related globals
+  suggests deathmatch specifically, but this wasn't independently
+  confirmed.

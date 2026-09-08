@@ -830,7 +830,41 @@ error"`.)
   handling code.
 - "HOJ" (`DPGMESSAGE_HOJ`) — an unexplained 3-letter acronym, meaning
   not determined.
-- The "Shadow" mechanic (`KILLEDBYSHADOW`/`SETSHADOW`) and "Spectral
-  Shields" — both entirely new findings with no prior context to
-  connect them to.
+- ~~The "Shadow" mechanic~~ — **resolved next session, see below: a spectator/follow-cam system.**
+- "Spectral Shields" — still unconnected to any other finding.
 - Whether `DPGMESSAGE_DISEASED` is a real mechanic or developer humor.
+
+## The "Shadow" mechanic resolved: multiplayer spectating (2026-09-08, twenty-second session)
+
+Located `DPGMESSAGE_SETSHADOW` (message ID **50**) and
+`DPGMESSAGE_KILLEDBYSHADOW` (message ID **51**) precisely by
+byte-pattern-searching for their string pointers within the message
+table (found at table slots `0x50cb5c`/`0x50cb60`), then located their
+SEND functions by searching for the exact `mov edx, 50`/`mov edx, 51`
+immediate-load instructions preceding calls to `BeginNetworkMessage` —
+found at `0x4bb030`/`0x4bb060`, which trace back to two handler
+functions.
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `HandleSetShadowMessage` (0x4b49f0, was `FUN_004b49f0`) | 2 | **This is a multiplayer spectator/"follow-cam" system.** Manages a global "currently-shadowed player" slot (`DAT_005db538`). Takes a new shadow-target slot (`-1` = none). Builds a chat/notification-style message using a 60-byte-per-player name array (`&DAT_005db654 + slot*0x3c`), substituting a `"you"`-style string when the local player is involved instead of their own name (`FUN_00491030`, the same resource-string lookup used throughout the UI). When the LOCAL PLAYER becomes the shadow (spectator), zeroes their own shield-quadrant array (`object+0x5f0`..`+0x600`) — consistent with a spectator having no combat state to track. Updates `DAT_005db538` to the new shadow target and, if requested, broadcasts the change via `SendSetShadowMessage`. |
+| `HandleKilledByShadowMessage` (0x4b4b30, was `FUN_004b4b30`) | 1-2 | Sets the target object's `+0x694` field (documented several sessions ago as the "last attacker slot" written by `ApplyShieldDamage`/`ApplyComponentDamage`) to the sentinel value `0xfffffffe` (-2) — a special "not killed by a normal attacker" marker, plausibly meaning "eliminated/ended while in a shadow/spectate-related state" rather than a literal in-combat elimination. Builds a similar name-substituted notification message. The exact triggering circumstance (does this fire when the player BEING shadowed disconnects/dies, ending the spectate session? Or something else?) isn't fully pinned down — Confidence 2 for the mechanism (writes a special sentinel + notification), Confidence 1 for the precise semantic trigger. |
+| `SendSetShadowMessage` (0x4bb030) / `SendKilledByShadowMessage` (0x4bb060) | 2 | Thin `BeginNetworkMessage`/`WriteMessageBits` wrappers confirmed via exact message-ID immediate-value search (`mov edx, 50`/`51`) — the network-send side of the above handlers. |
+
+This also explains the `"shadow = %d"` debug string found alongside
+the message names: a straightforward debug print of the current
+`DAT_005db538` value.
+
+### Open follow-ups
+
+- The exact trigger for `HandleKilledByShadowMessage` — what specific
+  game event calls it, and what the `-2` sentinel is checked against
+  downstream (e.g. does HUD/scoring code special-case it as "no kill
+  credit"?).
+- `FUN_00491030`'s own resource-string-lookup mechanism — used
+  pervasively across many sessions now (menus, this shadow system,
+  etc.) but never itself decompiled.
+- Whether "shadowing" is available to any disconnected/eliminated
+  player at any time, or gated to specific game modes (deathmatch was
+  assumed given `DAT_005db538`'s neighborhood of other deathmatch-
+  specific globals, not independently confirmed).
