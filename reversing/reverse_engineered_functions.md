@@ -3078,14 +3078,137 @@ longer needs a separate, AI-specific explanation.
 
 ### Open follow-ups
 
+- ~~The `DPMessage` name table~~ — read in full next, see below.
 - `FUN_0045a460` (the actual emergency-mission-state-dump writer called
   by `HandleFatalMissionError`).
-- The `DPMessage` name table itself (rooted near `0x50ca94`) — reading
-  it directly would reveal the real names of every DirectPlay message
-  type the game sends, a potentially rich catalog similar to the AI
-  state table found two sessions ago.
 - The two parallel per-player buffer sets in `BeginNetworkMessage` —
   the reliable/unreliable channel interpretation is a guess, not
   confirmed.
 - `DAT_0050ca88`'s trailing-bit-mask table contents (an 8-entry
   per-bit-count mask table is expected but not read).
+
+---
+
+# Twenty-third pass (2026-09-08, same day): the full DirectPlay message catalog
+
+Read `PTR_s_DPMESSAGE_END_0050ca94`'s entire pointer array and backing
+string pool directly via `read_memory` — raw data, Confidence 3, not
+inferred. This is the richest single find of the whole investigation:
+roughly 80 real DirectPlay message names, effectively a table of
+contents for the entire multiplayer game, revealing several mechanics
+no prior session had touched.
+
+## Table structure
+
+Two prefix families, ended by a `DPMESSAGE_END` sentinel:
+
+- **`DPGMESSAGE_*`** (~52 entries) — in-mission gameplay synchronization.
+- **`DPIMESSAGE_*`** (~28 entries) — lobby/matchmaking/session setup.
+
+## `DPGMESSAGE_*` — gameplay sync
+
+```
+DROPPICKUP              NOVACANNONFIRED          PLAYERTARGET
+PLAYERGONE              PROXMINE                 RIPPERSYNC
+FRIENDLYFIRE            SCRIPTSYNCRESTART        SCRIPTSYNCREADY
+LAUNCHMISSILE           PLAYEREJECTED            CLOAKACTIVE
+SPECTRALSHIELDSACTIVE   ECMACTIVE                HELPMEOUT
+BACKOFF                 ATTACKMYTARGET           RESPAWN_PICKUP
+POWERUP_TRIGGERED       PICKEDUP_OBJECT          KILLS
+HOJ                     AI_DECISION              SYNC_SCRIPT_START
+cSCRIPTSYNC             TRIGGERNUKE              DROPPEDCOMMSRELAY
+DEATHSPEWBEACONS        KILLEDBYSHADOW           SETSHADOW
+DISEASED                IONCANNONSTATE           IONCANNONROTATION
+TAGBOMBEXPLODES         TAGBOMBOWNER             DM_SEND_RESYNC
+DM_REQUEST_RESYNC       RESYNC_DMSCENARIO        SPAWNPOSITION
+ACT_SPHERE_HIT          APP_PAUSE                WARPOUT_REQ
+JUMPOUT_REQ             MISSILEPOSITION          SHIELDSTRENGTH
+SHIELDHIT               SUBOBJSTRENGTH           SUBOBJHIT
+CHAFF                   CREATEBULLET             POSITION
+LANDING
+```
+
+## `DPIMESSAGE_*` — lobby/session
+
+```
+SETINMAINGAME    REQINMAINGAME    SETTEAMCOLOUR   REQTEAMCOLOUR
+IAMDEAD          KICKOUT          AREYOUREADY     WHOISHOST
+SENDPLAYERSHIP   REQPLAYERSHIP    SENDMYINDEX     NEWHOST
+SENDLOADOUT      SYNC_START       cPing           sPing
+SENDWORLDSTATE   REQWORLDSTATE    SENDEXTRAMISSSPEC
+SENDMISSSPEC     REQMISSPEC       REQGAMEINDEX    GAMEINDEX
+UNREADY_TO_START READY_TO_START   SETPLAYER       START
+```
+
+(Sentinel: `DPMESSAGE_END`. A related adjacent string: `"DP Unknown
+error"`.)
+
+## What this catalog confirms and reveals
+
+**Direct terminology confirmation** of an earlier finding: `SUBOBJHIT`/
+`SUBOBJSTRENGTH` are the game's own literal names for the
+subsystem/component damage model documented several sessions ago
+(`ApplyComponentDamage`) — the network protocol's own naming matches
+the reverse-engineered mechanic exactly.
+
+**`PROXMINE` is a genuine, separate mine mechanic** — real proximity
+mines exist as their own message type, distinct from the "Huge Gun"
+capital-ship superweapons (types `0xd`/`0xe`) an earlier session
+initially (and later corrected) guessed were mines.
+
+**Three entirely new weapon/gadget systems**, not encountered in any
+prior session:
+- An **Ion Cannon** (`IONCANNONSTATE`, `IONCANNONROTATION`) — a
+  rotating/aimable weapon, likely capital-ship-scale, distinct from
+  both the "Huge Gun" superweapons and "Dark Reign."
+- **Tag Bombs** (`TAGBOMBEXPLODES`, `TAGBOMBOWNER`) — a planted or
+  thrown explosive with owner tracking (presumably for kill credit or
+  a "who tagged this ship" mechanic).
+- A **Nuke** (`TRIGGERNUKE`).
+
+**A "Spectral Shields" mechanic** (`SPECTRALSHIELDSACTIVE`), distinct
+from the directional shield-quadrant system already well-documented —
+plausibly a special ability, pickup, or ship-class feature. Not
+connected to any other finding yet.
+
+**ECM and Chaff confirmed as real, distinct countermeasure systems**
+(`ECMACTIVE`, `CHAFF`) — `CHAFF` in particular matches the `"chaff
+exit"` debug-log tag noticed in `RunMissionGameplay`'s teardown
+sequence many sessions ago, now with a real network message
+counterpart. `CLOAKACTIVE` likewise matches the `"Toggle Cloak"` AI
+state found in the state-catalog session.
+
+**An unexplained "Shadow" mechanic** (`KILLEDBYSHADOW`, `SETSHADOW`) —
+no other finding connects to this. Could be a stealth/decoy feature, a
+specific enemy type, or something else entirely.
+
+**Death and economy mechanics**: `DEATHSPEWBEACONS` (ships eject
+beacons on death — plausibly cargo/salvage or a distress signal),
+`DROPPEDCOMMSRELAY` (a droppable communications item), and a genuine
+pickup/powerup system (`DROPPICKUP`/`PICKEDUP_OBJECT`/
+`RESPAWN_PICKUP`/`POWERUP_TRIGGERED`).
+
+**`DPGMESSAGE_DISEASED`** — an unusual, unexplained name. Could be a
+real status-effect mechanic, or possibly developer humor in the same
+vein as `"Huuuuuuuuge explosion"` from the AI state catalog.
+
+**Dedicated deathmatch-desync recovery** (`DM_SEND_RESYNC`,
+`DM_REQUEST_RESYNC`, `RESYNC_DMSCENARIO`) — a resync protocol specific
+to deathmatch mode, separate from general world-state sync.
+
+**A complete lobby/matchmaking protocol**: host migration
+(`WHOISHOST`/`NEWHOST`), ready-check (`AREYOUREADY`/`READY_TO_START`/
+`UNREADY_TO_START`), team color assignment (`SETTEAMCOLOUR`/
+`REQTEAMCOLOUR`), late-joiner world-state and mission-spec sync
+(`SENDWORLDSTATE`/`SENDMISSSPEC`/`SENDEXTRAMISSSPEC`), and a custom
+ping mechanism (`cPing`/`sPing`, plausibly client-ping/server-ping
+variants).
+
+### Open follow-ups
+
+- Individual dispatch/handler code for any of these ~80 message types
+  — this session read only the name table, not the handling logic.
+- `"HOJ"` (`DPGMESSAGE_HOJ`) — an unexplained 3-letter acronym.
+- The "Shadow" mechanic and "Spectral Shields" — both brand new,
+  unconnected to any other finding so far.
+- Whether `DPGMESSAGE_DISEASED` is a real mechanic or developer humor.

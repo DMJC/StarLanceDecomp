@@ -602,13 +602,42 @@ BeginNetworkMessage (0x4b9920) / WriteMessageBits (0x4b9830)
   -> depends on: two parallel per-player buffer sets (DAT_005db674/
                  DAT_005db678 vs DAT_005db67c/DAT_005db680, selected by
                  a flags bit — reliable/unreliable channel guess),
-                 DebugLog_Stub, a DPMessage debug-name table
-                 (PTR_s_DPMESSAGE_END_0050ca94, NOT read), DAT_0050ca88
+                 DebugLog_Stub, the full DPMessage name table
+                 (PTR_s_DPMESSAGE_END_0050ca94, READ IN FULL — see
+                 below, ~80 real message names), DAT_0050ca88
                  (trailing-bit mask table)
   <- depended on by: BroadcastAiEventPacket, and (by design, given the
                  generic bit-packed-message shape) presumably most/all
                  of the game's DirectPlay traffic — confirms "DP" =
                  DirectPlay throughout the codebase (see confidence_db.md)
+```
+
+## The full DirectPlay message catalog (twenty-first session)
+
+```
+PTR_s_DPMESSAGE_END_0050ca94 (message-name pointer table, indexed by
+                               message type ID, used by BeginNetworkMessage)
+  -> ~52 DPGMESSAGE_* entries (gameplay sync): confirms SUBOBJHIT/
+     SUBOBJSTRENGTH as the real name for ApplyComponentDamage's model;
+     reveals PROXMINE (real separate mine mechanic, distinct from the
+     "huge gun" 0xd/0xe correction), IONCANNONSTATE/IONCANNONROTATION
+     (a new weapon, Ion Cannon), TAGBOMBEXPLODES/TAGBOMBOWNER (Tag
+     Bomb), TRIGGERNUKE, SPECTRALSHIELDSACTIVE (a shield mechanic
+     distinct from the quadrant system), ECMACTIVE, CHAFF (matches
+     the "chaff exit" debug tag from RunMissionGameplay), CLOAKACTIVE
+     (matches "Toggle Cloak" AI state), KILLEDBYSHADOW/SETSHADOW (an
+     unexplained "Shadow" mechanic), DEATHSPEWBEACONS,
+     DROPPEDCOMMSRELAY, a pickup/powerup system (DROPPICKUP/
+     PICKEDUP_OBJECT/RESPAWN_PICKUP/POWERUP_TRIGGERED), deathmatch
+     resync machinery (DM_SEND_RESYNC/DM_REQUEST_RESYNC/
+     RESYNC_DMSCENARIO), and DPGMESSAGE_DISEASED (unexplained)
+  -> ~28 DPIMESSAGE_* entries (lobby/session): full matchmaking
+     protocol — host migration, ready-check, team colors, world-state/
+     mission-spec sync for late joiners, custom ping (cPing/sPing)
+  <- depended on by: BeginNetworkMessage (name lookup for debug
+                 logging), and implicitly the message-type-ID space
+                 every DirectPlay send in the game uses
+```
 
 QueueAiEvent (0x402660)
   -> depends on: object+0xb8c/+0xb90 (event queue count/buffer, lazily
