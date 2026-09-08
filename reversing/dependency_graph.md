@@ -668,6 +668,28 @@ SendSetShadowMessage (0x4bb030) / SendKilledByShadowMessage (0x4bb060)
                  byte-pattern search, not guessed)
 ```
 
+## "Spectral Shields" — temporary invulnerability (twenty-third session)
+
+```
+SetSpectralShieldsActive (0x415430, DPGMESSAGE_SPECTRALSHIELDSACTIVE = message ID 67)
+  -> depends on: DAT_0057bf20 (availability gate), ship-object +8 flags
+                 (bit 0x8000000 = the invulnerability flag itself —
+                 confirms user-supplied documentation claim directly),
+                 the weapon-type-definition table's +0x64 field (type
+                 ID, shared with FireWeapon) and a NEW +0xb-stride
+                 sibling field DAT_00500cec ("threat weight" per type,
+                 alongside DAT_00500ce0/ce4/ce8 documented earlier),
+                 ship-object +0x670 (NEW field: most-threatening-
+                 nearby-weapon-type result), SendSpectralShieldsMessage
+  <- depended on by: (activation call site not traced — presumably a
+                 player input/ability-hotkey handler)
+
+SendSpectralShieldsMessage (0x4babc0)
+  -> depends on: BeginNetworkMessage, WriteMessageBits (confirmed via
+                 exact `mov edx, 0x43` immediate-value byte-pattern
+                 search)
+```
+
 QueueAiEvent (0x402660)
   -> depends on: object+0xb8c/+0xb90 (event queue count/buffer, lazily
                  allocated 720 bytes), ReportAssertionFailureEx

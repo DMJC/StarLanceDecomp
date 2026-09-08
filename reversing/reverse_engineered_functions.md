@@ -3301,3 +3301,96 @@ above, not inferred from naming or proximity alone.
   — `DAT_005db538`'s neighborhood of other deathmatch-related globals
   suggests deathmatch specifically, but this wasn't independently
   confirmed.
+
+---
+
+# Twenty-fifth pass (2026-09-08, same day): "Spectral Shields" — confirmed temporary invulnerability
+
+The user supplied external knowledge from game documentation:
+Spectral Shields grants near-temporary invulnerability. Verified this
+directly against the binary using the same precise tracing chain as
+the "Shadow" investigation: string address → exact table slot (via
+`search_byte_patterns` on the string pointer) → message ID → exact
+sender function (via `search_byte_patterns` on the `mov edx, <id>`
+immediate load preceding `BeginNetworkMessage`) → that sender's caller,
+the real toggle logic.
+
+`DPGMESSAGE_SPECTRALSHIELDSACTIVE` resolved to message ID **67**
+(`0x43`), sent by `SendSpectralShieldsMessage` (`0x4babc0`), called
+from `SetSpectralShieldsActive` (`0x415430`).
+
+## `SetSpectralShieldsActive` (`0x00415430`)
+
+```c
+void __fastcall SetSpectralShieldsActive(char activate);
+```
+
+**Confirms the user's claim directly, not just by name.** Gated by an
+availability flag (`DAT_0057bf20 != -1` — plausibly whether the
+ability is unlocked or on cooldown this mission, not fully pinned
+down). The core mechanic:
+
+- **Deactivating** (`activate==0`): clears bit `0x8000000` on the
+  local player's own ship flags (`object+8`) — the SAME flags dword
+  checked throughout the entire combat system (destroyed state, docked
+  state, and others documented across many earlier sessions).
+- **Activating**: sets that exact bit.
+
+A single dedicated bit for a temporary defensive state, matching
+"near-temporary invulnerability" exactly. The change is broadcast to
+other clients in multiplayer (`SendSpectralShieldsMessage`) in either
+direction.
+
+### A threat-analysis pass, on activation only
+
+Beyond the simple flag toggle, activating Spectral Shields also runs a
+genuinely sophisticated scan:
+
+1. Iterates every nearby enemy ship (proximity-gated by a squared-
+   distance check against `_DAT_00501cb4`, team-filtered via `+0x644==1`).
+2. For each enemy's weapon hardpoints, looks up each weapon's TYPE
+   (via the weapon-type-definition's `+0x64` field — the exact field
+   `FireWeapon` reads for its sound/effect-variant index, many
+   sessions ago) and tallies a running count per type into a 15-slot
+   accumulator (one slot per weapon type, matching the 15-entry weapon
+   catalog documented several sessions ago).
+3. Multiplies each tally by a per-type "threat weight," read from a
+   PREVIOUSLY UNDOCUMENTED field (`DAT_00500cec`) in the SAME
+   11-int-stride weapon-type table already partly catalogued
+   (siblings `DAT_00500ce0`=sound, `DAT_00500ce4`=lifetime,
+   `DAT_00500ce8`=scale — `DAT_00500cec` is evidently a 4th field,
+   "threat weight," in that same per-weapon-type record).
+4. Picks the single highest-weighted weapon type — explicitly
+   EXCLUDING the two Huge Gun superweapon types (`0xd`/`0xe`) — and
+   stores it into a NEW ship-object field, `object+0x670`.
+
+The mechanism (tally → weight → pick maximum, excluding superweapons)
+is read directly from the decompiled code, not guessed. Its DOWNSTREAM
+purpose isn't confirmed — plausibly selects a matching visual/audio
+cue for the shield effect based on the most likely incoming threat, or
+feeds some other reactive system, but no consumer of `object+0x670`
+was traced this session.
+
+## `SendSpectralShieldsMessage` (`0x004babc0`)
+
+Thin `BeginNetworkMessage`/`WriteMessageBits` wrapper, confirmed as
+message ID 67's real sender via the exact immediate-value search
+described above.
+
+### Open follow-ups
+
+- What consumes `object+0x670` (the "most threatening nearby weapon
+  type" result) — not traced.
+- `DAT_0057bf20`'s exact semantics — only its `-1`/`0`/`1` states were
+  observed, not a full value range or what sets it initially.
+- Whether ship-flags bit `0x8000000` is explicitly checked anywhere in
+  `ApplyShieldDamage`/`ApplyComponentDamage` (which so far only
+  documented an invulnerability check on bit `0x200000`) — worth
+  re-examining those functions' flag masks now that this specific
+  bit's meaning is confirmed; it's possible the invulnerability effect
+  is enforced elsewhere (e.g. a check earlier in the hit-detection
+  pipeline, before `ApplyShieldDamage` is even reached).
+- The `"SPECTRAL SHIELDS"` UI-display string (`0x4e37a0`, distinct
+  from the DirectPlay message-name string) — found but not traced to
+  its actual usage (likely a HUD or pickup/ability-notification
+  label).

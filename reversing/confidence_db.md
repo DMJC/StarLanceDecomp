@@ -868,3 +868,28 @@ the message names: a straightforward debug print of the current
   player at any time, or gated to specific game modes (deathmatch was
   assumed given `DAT_005db538`'s neighborhood of other deathmatch-
   specific globals, not independently confirmed).
+
+## "Spectral Shields" resolved: a real temporary-invulnerability ability (2026-09-08, twenty-third session)
+
+The user supplied external knowledge (game documentation): Spectral
+Shields grants near-temporary invulnerability. Verified directly
+against the binary using the same precise tracing method as the
+"Shadow" investigation: located `DPGMESSAGE_SPECTRALSHIELDSACTIVE`'s
+table slot (`0x50cba0`) via byte-pattern search on its string address,
+computed message ID **67** (`0x43`), found the sender via `mov edx,
+0x43` (`ba 43 00 00 00`) immediately preceding a `BeginNetworkMessage`
+call (`SendSpectralShieldsMessage`, `0x4babc0`), and traced its one
+caller to the real toggle function.
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `SetSpectralShieldsActive` (0x415430, was `FUN_00415430`) | 3 | **Confirms the user's claim directly.** Gated by an availability flag (`DAT_0057bf20 != -1`, presumably set based on difficulty or whether the ability is unlocked/available this mission — not independently confirmed). Deactivating (`param_1==0`) clears bit `0x8000000` on the LOCAL PLAYER's own ship flags (`object+8`) — the SAME flags dword checked throughout the combat system for state like "destroyed," "docked," etc. Activating sets that exact bit. This is a genuine, dedicated flag bit for a temporary defensive state — consistent with "near invulnerability" as documented. Broadcasts the change over the network (`SendSpectralShieldsMessage`) when in multiplayer, either direction. |
+| | | **Also performs a threat-analysis pass on activation**: scans every nearby enemy ship (proximity-radius-gated, team check `+0x644==1`) and tallies which weapon TYPES their hardpoints are using into a 15-slot accumulator (indexed via the same weapon-type-definition `+0x64` field documented many sessions ago in `FireWeapon`), then weights each tally by a per-type "threat" value read from a previously-undocumented field in the SAME 11-int-stride weapon-type table already partly catalogued (`DAT_00500cec` — a sibling of `DAT_00500ce0`/`ce4`/`ce8`), and stores the single most-weighted-threatening weapon type (excluding the two Huge Gun superweapon types, `0xd`/`0xe`) into a NEW ship-object field, `object+0x670`. Purpose of this analysis isn't fully confirmed — plausibly selects a matching visual/audio cue for the shield effect, or feeds into some other reactive system, but the mechanism itself (tally→weight→pick-max) is directly read from the decompiled code, not guessed. |
+| `SendSpectralShieldsMessage` (0x4babc0, was `FUN_004babc0`) | 3 | Confirmed network-send counterpart via the exact message-ID immediate-value search described above — not inferred from naming. |
+
+### Open follow-ups
+
+- What `object+0x670`'s "most threatening nearby weapon type" value is actually used for downstream — not traced.
+- `DAT_0057bf20`'s exact semantics (availability flag vs. cooldown timer vs. something else) — only its `!=-1`/`==0`/`==1` states observed, not a full value range.
+- Whether bit `0x8000000` on the ship-flags dword is checked by name anywhere else (e.g. in `ApplyShieldDamage`/`ApplyComponentDamage`'s own invulnerability checks, which so far only documented bit `0x200000`) — worth a targeted re-check of those functions' flag masks now that this specific bit's meaning is known.
+- The `"SPECTRAL SHIELDS"` UI-display string (`0x4e37a0`) — found but not traced to its own usage (likely a HUD/pickup-notification label), separate from the message-name string.
