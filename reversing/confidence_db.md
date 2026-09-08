@@ -1530,3 +1530,22 @@ stack region the manual reading pointed at.
 
 - `RunNewGameSetupScreen`'s 8-entry button row real coordinates: still unresolved. Needs either dynamic analysis (live memory read) or a much more careful manual re-derivation, independently cross-checked before being trusted.
 - Methodological note for future passes: don't trust a `PTRSUB`-derived stack constant on its own -- cross-check it against a second, nearby literal-offset write before relying on it (see Pass 50 writeup).
+
+## Pass 51 -- `RunMainMenuScreen` target-field attribution + `RunSaveLoadScreen`/`RunSaveGameBrowserScreen` action-button coordinates (2026-09-09)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `RunMainMenuScreen` `DAT_004e5b90` target-field semantics | 5 | Not a destination ID -- a loop-continue gate (`target==3` = absorbed by frame loop, else breaks to action switch, which dispatches on hotspot index). |
+| `RunMainMenuScreen` index 0/1/2 -> New Game/Multiplayer/Options | 5 | Direct switch on `DAT_0051d544`. |
+| `RunMainMenuScreen` index 4 -> mission 0x1d ("watch ending") trigger | 4 | Same `DAT_0057e044`+mission-29 signature as the documented campaign epilogue path; button's exact label not confirmed. |
+| `RunMainMenuScreen` index 3 -> inert (target field blocks dispatch) | 3 | Mechanism confirmed; exact UI purpose (hover region? disabled slot?) not resolved. |
+| Mission-select cheat code = "POTATO" (scancodes `0x19,0x18,0x14,0x1e,0x14,0x18`) | 5 | Independently re-derived this pass, but **not new** -- already confirmed at confidence 5 in Pass 34 ("CTRL+POTATO"). Used to fix a stale, contradictory "not recoverable" claim left in an earlier (pre-Pass-34) doc entry that was never updated. |
+| `RunSaveLoadScreen` 19-record contiguous stack table, load=records[1:6], save=records[6:19] | 5 | Base-pointer arithmetic directly confirmed (40-byte/5-record offset between the two `HitTestRectArray` base args), not inferred. |
+| `RunSaveLoadScreen` load-mode (5) and save-mode (13) coordinates | 5 | Directly read, all 18 entries. |
+| `RunSaveGameBrowserScreen` 17-record table (10 slots + 4 actions via one window, 2 scroll arrows + 1 confirm-dialog rect via two more) | 5 | Directly read. Corrects Pass 48's x/h field transposition on the slot-list row, and its "cancel/delete" action-label guess (real actions: Back/Confirm/Exit-to-main-menu/Options). |
+
+### Open follow-ups
+
+- `RunSaveLoadScreen` record 0 `(201,217,84,21)` -- referenced only via a button-descriptor pointer, not hit-tested; role unclear.
+- `RunNewGameSetupScreen`'s 8-entry row remains unresolved (Pass 50).
+- `RunMultiplayerSetupScreen`/`RunMultiplayerLobbyScreen` remaining items untouched this pass.

@@ -1319,9 +1319,15 @@ HitTestRectArray (0x43eb30, was FUN_0043eb30) -- shared hotspot hit-test utility
        RunVideoOptionsScreen (DAT_004e76f0[17] + DAT_004e7778[1] gamma handle)
        RunMultiplayerSetupScreen (8-entry main row, ~30 chained pointer-alias sub-tables)
        RunMultiplayerLobbyScreen (8-entry button descriptor array + DAT_00524aa0 roster rows)
-       RunSaveLoadScreen / RunSaveGameBrowserScreen / RunControlsOptionsScreen (local tables)
+       RunSaveLoadScreen (19-record contiguous table[confirmed Pass 51]: load=slice[1:6],
+         save=slice[6:19] -- adjacency directly confirmed via base-pointer arithmetic)
+       RunSaveGameBrowserScreen (17-record table[confirmed Pass 51]: 10 slots + 4 actions in one
+         window, 2 scroll arrows + 1 confirm-dialog rect in two more)
+       RunControlsOptionsScreen (local tables)
 
 RunMainMenuScreen -- uses its OWN inline hit-test (not HitTestRectArray), DAT_004e5b90[5],
-  stride 12 bytes {x,y,w,h,target,extra}
+  stride 12 bytes {x,y,w,h,target,extra}. target field is a loop-continue gate, not a
+  destination ID (Pass 51) -- index 0/1/2 -> New Game/Multiplayer/Options, index 4 -> hidden
+  "watch ending" mission-0x1d trigger, index 3 -> inert (never reaches the action switch).
 
 RunNetworkDisconnectScreen (0x43ca30, screen 8) -- confirmed zero hotspots, non-interactive

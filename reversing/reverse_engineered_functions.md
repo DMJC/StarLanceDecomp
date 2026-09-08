@@ -1058,15 +1058,20 @@ that is then written directly into `DAT_00562dc8`.
 
 This has every hallmark of a classic era-appropriate developer/QA
 **mission-select cheat code** — type a specific sequence to unlock
-direct entry to any mission number. The exact key sequence itself
-isn't recoverable from static analysis (the decompiler doesn't expose
-which key each `FUN_004bd570(1)` check is actually testing — that
-information likely lives in `FUN_004bd570`'s own implementation or a
-lookup table it references, not examined this pass). Confidence 2 for
-the mechanism's shape (directly observed), Confidence 1 for the "this
-is a cheat code" interpretation (very likely, not proven) — a good
-candidate for live-verification per METHODOLOGY's live-debugging
-guidance if anyone wants to actually find the key sequence.
+direct entry to any mission number.
+
+**Stale-entry correction (added Pass 51, 2026-09-09)**: the paragraph
+above, as originally written, said the exact key sequence "isn't
+recoverable from static analysis." That was superseded two passes
+later, in Pass 34 (`CheckKeyEdgeState` decoded), which read the
+literal scancode array directly and confirmed the sequence is
+**Ctrl+P-O-T-A-T-O** ("Ctrl+Potato") at confidence 5 -- see that
+section below for the full writeup. This entry was simply never
+updated to point at the resolution, which left two contradictory
+confidence claims about the same fact sitting in the same document.
+Flagging and fixing that now per METHODOLOGY's non-silent-correction
+rule, rather than leaving the stale "Confidence 1, not recoverable"
+claim standing.
 
 ## `RunSaveGameBrowserScreen` (`0x00431730`) — save file format
 
@@ -6224,11 +6229,10 @@ Inline hit-test against global table `DAT_004e5b90`, stride 12 bytes
 | 300 | 441 | 20 | 15 |
 
 Three large ~184x290 tiles (New Game / Multiplayer / Options) plus two
-small nav buttons at the bottom. **Confidence 4** on coordinates
-(directly read); **confidence 1** on which specific target ID maps to
-which large tile -- the "target" field's exact offset attribution needs
-a second pass before trusting it (flagged honestly by the investigating
-fork rather than guessed).
+small nav buttons at the bottom. **Confidence 5** -- target-field
+attribution resolved in Pass 51 (see below): index 0/1/2 = New
+Game/Multiplayer/Options, index 4 = hidden "watch ending" mission-29
+trigger, index 3 = not wired to the action switch at all.
 
 ### Screen 1 -- `RunOptionsMenuScreen` (`0x42a620`)
 
@@ -6282,10 +6286,10 @@ multiplayer disconnect cleanup.
 
 ### Screens 10/11 -- `RunSaveLoadScreen` (`0x43ca50`)
 
-Local stack tables, save-vs-load mode via `DAT_0051d54c`. Extractable
-with confidence, but the full index-to-rect mapping wasn't cleanly
-isolated within scope (flagged honestly rather than guessed further).
-Confirmed **actions** by hotspot index (confidence 4):
+Local stack tables, save-vs-load mode via `DAT_0051d54c`. **Confidence
+5** -- full index-to-rect mapping resolved in Pass 51 (see below); the
+two mode-specific windows turned out to be adjacent slices of one
+19-record contiguous table.
 
 *Save mode*: 0=select target, 1=confirm delete/overwrite, 2=quick-save,
 3=open Save Browser (screen 13), 4/7=cancel, 5=exit to screen 0xe,
@@ -6323,13 +6327,14 @@ independently confirmed against a draw call).
 
 ### Screen 13 -- `RunSaveGameBrowserScreen` (`0x431730`)
 
-**Save-slot list** (10 rows, local stack table, confidence 4): `x=17,
-w=400, h=49`, `y = 126 + 17*i` for `i=0..9` (126,143,...,279 -- exact
-17px pitch). **Scroll arrows** (confidence 3): up `~(579,250,26,16)`,
-down `~(579,268,26,16)`, also keyboard-bound (scancode `0xd0`=Down,
-`200`=Up). Action buttons (indices 10-13: back, confirm, cancel,
-delete) confirmed by switch-case behavior (confidence 4) but not
-cleanly coordinate-mapped (confidence 2).
+**Confidence 5** -- fully resolved in Pass 51 (see below). Save-slot
+list (10 rows): `x=49, w=400, h=17`, `y = 126 + 17*i` for `i=0..9`
+(126,143,...,279 -- exact 17px pitch; corrects an earlier x/h field
+transposition). Scroll arrows: up `(579,250,26,16)`, down
+`(579,268,26,16)` (also keyboard-bound, scancode `0xd0`=Down,
+`200`=Up). Action buttons (indices 10-13): Back, Confirm, Exit-to-main-
+menu, Options -- corrects the earlier "back/confirm/cancel/delete"
+guess (there is no delete hotspot in this set).
 
 ### Screen 14 -- `RunMultiplayerSetupScreen` (`0x432fc0`)
 
@@ -6607,3 +6612,148 @@ against a second, independent cross-check.
   (find a second, nearby stack access at a compile-time-literal offset
   and confirm the P-code offset matches an actual observed write) --
   don't assume `PTRSUB`'s constant is trustworthy on its own.
+
+## Pass 51 -- `RunMainMenuScreen` target-field attribution + `RunSaveLoadScreen`/`RunSaveGameBrowserScreen` action-button coordinates (2026-09-09)
+
+Direct follow-up on Pass 48's three remaining open items (skipping the
+`RunNewGameSetupScreen` 8-entry row, already root-caused as
+unresolvable in Pass 50, and the `RunMultiplayerSetupScreen`/
+`RunMultiplayerLobbyScreen` items, not requested this pass).
+
+### `RunMainMenuScreen` (`0x428b60`) -- target-field attribution resolved, confidence 5
+
+Full decompile of the inline hit-test loop resolves this cleanly --
+no ambiguity remained once the whole function (not just the hit-test
+snippet) was read. Direct memory read of `DAT_004e5b90`'s 5 x 6-`int16`
+records:
+
+| idx | x | y | w | h | target | extra | Action |
+|---|---|---|---|---|---|---|---|
+| 0 | 27 | 123 | 184 | 290 | 0 | 18 | New Game (`DAT_0051dac4=0xc` -> `RunNewGameSetupScreen`) |
+| 1 | 203 | 125 | 184 | 290 | 0 | 19 | Multiplayer (`DAT_0051dac4=0xe` -> `RunMultiplayerSetupScreen`) |
+| 2 | 421 | 165 | 184 | 290 | 0 | 20 | Options (`DAT_0051dac4=1` -> `RunOptionsMenuScreen`) |
+| 3 | 332 | 441 | 20 | 15 | 3 | 24 | Not wired to the switch (see below) |
+| 4 | 300 | 441 | 20 | 15 | 0 | 24 | Falls to the `else` branch -- directly loads and runs mission `0x1d` (29) as a full gameplay session, then unloads |
+
+The `target` field turns out **not** to be a destination ID at all --
+it's a **loop-continue gate**: the per-frame hit-test loop only
+`break`s (handing off to the post-loop action switch) when the clicked
+entry's `target != 3`. Every entry except index 3 has `target=0` and
+breaks immediately; index 3 (`target=3`) does not, so its click is
+absorbed by the frame loop without reaching the switch at all --
+consistent with it being a non-interactive/decorative element (its
+exact role, e.g. a hover-highlight-only region, is not further
+resolved -- confidence 1 on that specific interpretation, confidence 5
+on the mechanism itself). The action switch itself dispatches purely
+on `DAT_0051d544` (the matched hotspot **index**, not the target
+field): `==0`/`==1`/`==2` go to the three documented screens; anything
+else (only reachable via index 4, since index 3 never breaks the loop)
+falls through to a direct `DAT_00562dc8=0x1d; DAT_0057e044=1;
+InitializeMissionGameplay(); RunMissionGameplay(); UnloadMission();`
+sequence -- the exact same mission-29/epilogue pattern documented
+earlier for the campaign's final debriefing (`enddebriefing.ut`).
+**Confidence 4**: index 4 (the small button at `x=300`) is very likely
+a "Watch Ending / Credits" trigger that directly plays the campaign's
+closing cinematic-mission, given the identical `0x1d` + `DAT_0057e044`
+signature already tied to the epilogue path.
+
+**Note, corrected**: this pass's decompile also turned up the 6-entry
+scancode array `{0x19, 0x18, 0x14, 0x1e, 0x14, 0x18}` = **P-O-T-A-T-O**
+driving the cheat sequence, which was first read as a brand-new
+finding here. It is not new -- **Pass 34** (`CheckKeyEdgeState`
+decoded, earlier in this document) already found and confirmed the
+same "Ctrl+Potato" sequence at confidence 5. This pass's independent
+read is a useful cross-check (it landed on the identical scancodes via
+a different function's decompile) but the credit and the confidence-5
+status both belong to Pass 34. Caught and corrected before being
+double-counted in the tracking docs -- see the stale-entry note added
+just above the original (pre-Pass-34) writeup.
+
+### `RunSaveLoadScreen` (`0x43ca50`) -- action-button coordinates, confidence 5
+
+The function builds one big 19-record, 4-`int16` (`{x,y,w,h}`) stack
+table; `HitTestRectArray` is called with two different (base, count)
+windows into it depending on mode -- this time **directly confirmed**
+(not inferred): the SAVE-mode base pointer (`&local_178`) is literally
+40 bytes (5 records) past the LOAD-mode base pointer (`&local_1a0`) in
+the declared-locals list, i.e. LOAD mode uses records 1-5 and SAVE
+mode uses records 6-18 of the same contiguous block. (Record 0,
+`(201,217,84,21)`, isn't covered by either hit-test window -- it's
+referenced only via a button-descriptor pointer, likely a
+status/label field rather than a clickable hotspot.)
+
+**Load mode** (`&local_1a0`, 5 entries):
+
+| idx | x | y | w | h | Action |
+|---|---|---|---|---|---|
+| 0 | 45 | 140 | 149 | 21 | Start select |
+| 1 | 464 | 386 | 28 | 28 | Confirm load |
+| 2 | 323 | 420 | 28 | 20 | Exit to screen 0xe |
+| 3 | 323 | 441 | 28 | 20 | Options dialog |
+| 4 | 291 | 441 | 28 | 20 | Exit to main menu |
+
+**Save mode** (`&local_178`, 13 entries):
+
+| idx | x | y | w | h | Action |
+|---|---|---|---|---|---|
+| 0 | 45 | 179 | 149 | 21 | Select target / name field |
+| 1 | 45 | 217 | 149 | 21 | Confirm delete/overwrite |
+| 2 | 465 | 300 | 28 | 14 | Quick-save |
+| 3 | 465 | 343 | 28 | 14 | Open Save Browser (`RunSaveGameBrowserScreen`) |
+| 4 | 464 | 386 | 28 | 18 | Cancel |
+| 5 | 323 | 420 | 28 | 20 | Exit to screen 0xe |
+| 6 | 323 | 441 | 28 | 20 | Options dialog |
+| 7 | 291 | 441 | 28 | 20 | Cancel |
+| 8 | 567 | 242 | 28 | 18 | Pick list item |
+| 9-12 | 359 | 179/192/205/218 | 232 | 13 | Scroll/select slot (4-row visible list, 13px pitch) |
+
+Directly read, cross-confirmed against the already-documented
+switch-case actions (Pass 48) -- **confidence 5** on both coordinates
+and index-to-action mapping.
+
+### `RunSaveGameBrowserScreen` (`0x431730`) -- action-button + scroll-arrow coordinates, confidence 5
+
+Three separate `HitTestRectArray` windows into one 17-record
+`{x,y,w,h}` block:
+
+**Save-slot list** (10 rows, part of the 14-entry `&local_41c` window):
+`x=49, w=400, h=17`, `y = 126 + 17*i` for `i=0..9` (126,143,...,279).
+**Correction to Pass 48**: the earlier approximate reading reported
+`x=17, w=400, h=49` -- the `x` and `h` fields were transposed. The
+correct values are `x=49, h=17` (17px row pitch, matching the
+already-correct pitch claim; only the two individual field values were
+swapped).
+
+**Action buttons** (indices 10-13 of the same 14-entry window):
+
+| idx | x | y | w | h | Action |
+|---|---|---|---|---|---|
+| 10 | 292 | 421 | 25 | 16 | Back (exit browser -> `RunNewGameSetupScreen`) |
+| 11 | 324 | 421 | 25 | 16 | Confirm (load, or save-with-overwrite-check) |
+| 12 | 292 | 441 | 25 | 16 | Exit to main menu |
+| 13 | 324 | 441 | 25 | 16 | Options dialog |
+
+**Correction to Pass 48**: these were previously labeled "back,
+confirm, cancel, delete" (a guess). The actual decompiled switch-case
+bodies show 12 is "exit to main menu" (`DAT_0051dac4=0`) and 13 is
+"options dialog" (the same `FUN_0042aa80`/`FUN_0042aaa30` pattern used
+everywhere else in these screens) -- there is no delete action among
+these four; "delete" was not implemented via this hotspot set.
+
+**Scroll arrows** (separate 2-entry `&local_42c` window): up
+`(579,250,26,16)`, down `(579,268,26,16)` -- **confirms** Pass 48's
+approximate guess exactly; upgraded from confidence 3 to confidence 5.
+
+**Overwrite-confirm dialog button** (new finding, separate 1-entry
+`&local_434` window, only hit-tested while the "are you sure?" popup
+is active): `(562,384,32,20)`.
+
+### Open follow-ups
+
+- `RunSaveLoadScreen` record 0 `(201,217,84,21)`'s exact role
+  (referenced only via a descriptor pointer, not hit-tested directly).
+- `RunNewGameSetupScreen`'s 8-entry button row remains unresolved
+  (Pass 50 root cause stands).
+- `RunMultiplayerSetupScreen`'s ~30-alias layout and
+  `RunMultiplayerLobbyScreen`'s remaining rects -- not attempted this
+  pass.
