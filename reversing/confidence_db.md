@@ -1083,3 +1083,32 @@ table, confirming the dispatch-table theory behaviorally.
 - Decompile the `TurretSetTarget` handler (strings already located) to
   grow the confirmed-handler sample size.
 - Characterize `DAT_00588338`.
+
+## TurretSetTarget investigation: table pattern confirmed, one contradiction found (2026-09-08, twenty-seventh session)
+
+Direct follow-up on "continue with TurretSetTarget." Re-derived the
+mission-scripting command table's field layout byte-precisely and
+decompiled two more handlers.
+
+| Name (address) | Confidence | Notes |
+|---|---|---|
+| Command-table description-string lag pattern (each slot's desc field describes the *previous* slot's command) | 4 | Confirmed 3-for-3 across WaitForKey/TerminateMission/TurretSetTarget by directly reading and matching string content. Up from 2 (open ambiguity) in the previous session. |
+| `MissionScript_SetAnyTriggerState` (0x45d3a0) | 4 | Decompiled: walks a per-entity trigger array at `DAT_005267c0`, finds the Nth trigger of a given type, writes a new enable/disable state, calls `FUN_0045b2d0` to apply. Clean match to its 4 catalogued arguments. Second independent confirmation of the table's `(cursor, argListPtr)` handler calling convention. |
+| `MissionScript_0x459bd0_ResetAndScan` (0x459bd0) | 3 (own behavior) / 1 (command association) | Traced its full call chain (`ResetTriggerGlobalsAndResolveTarget` -> `ResolveObjectRangeAndInvokeCallback` -> `InvokeTargetMatchCallback`). Confirmed effect as called from this table slot: resets 2 globals (`DAT_00537418`/`DAT_00537575`), then hits a provable no-op because the range-checked argument it's hardcoded to pass (`&LAB_00459bf0`, a code address) can never match any of the checked data-segment collections, and its callback argument is NULL. ~~Previously named `MissionScript_EndMissionDeathSequence` (Pass 26), implying it schedules a jump to a death-sequence label~~ **-- corrected this session: that interpretation is not supported by the full call-chain trace and has been removed from the function's name.** |
+| `ResolveObjectRangeAndInvokeCallback` (0x45d480, was FUN_0045d480) | 3 | Range-checks an object pointer against 3 known live-collection ranges (nav-graph nodes, a trigger table, the previously-documented navigation/waypoint graph), and for a match, iterates candidates invoking a callback via `InvokeTargetMatchCallback`. Distinct from, but closely related to (shares globals with), the already-documented `ScanNavigationGraphTarget` (0x401d80). |
+| `InvokeTargetMatchCallback` (0x45d700, was FUN_0045d700) | 4 | Trivial: calls `FUN_0045d720()` then invokes its function-pointer argument directly, `(*param_1)()`. Confirms the callback-function-pointer-as-argument pattern already seen elsewhere in this codebase (`PropagateAlertToChildren`/`InvokeEffectAnchorCallback`). |
+| `TurretSetTarget`'s true handler | 0 (unresolved) | The table-slot-implied handler (`0x459bd0`) does not touch the command's own Turret/Entity-to-target arguments and is provably inert as called. Genuinely open -- not guessed at further this session. |
+
+### Open follow-ups
+
+- Locate the actual `.dte` mission-script interpreter/dispatcher that
+  reads this table -- no xrefs found to any table row or handler
+  address, so the exact field-offset convention can't be independently
+  confirmed against real dispatch code, only inferred from 3-for-4
+  consistent behavioral matches.
+- Reconcile the two different trigger-table access shapes seen
+  (`ResolveObjectRangeAndInvokeCallback`'s `DAT_005267c0`-stride-8 range
+  check vs. `MissionScript_SetAnyTriggerState`'s
+  `DAT_005267c0`-stride-8-then-inner-stride-0x30 walk) into one struct.
+- `FUN_0045b2d0`, `FUN_0045d720`, `FUN_0045d8b0`, `FUN_0045d8e0`,
+  `FUN_0045d910` -- not decompiled.

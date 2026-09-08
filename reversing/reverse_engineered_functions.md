@@ -3818,3 +3818,159 @@ state/label transition via `FUN_0045d460`/`FUN_0045d480`).
 - Characterize `DAT_00588338` (incremented by
   `MissionScript_TerminateMission`) — likely a mission-end-trigger
   count, not yet cross-referenced elsewhere.
+
+## Pass 27 -- TurretSetTarget investigation: table-slot pattern confirmed, one open contradiction (2026-09-08)
+
+Direct follow-up ("continue with TurretSetTarget"). Set out to decompile
+`TurretSetTarget`'s handler and ended up doing a much more careful,
+byte-precise re-derivation of the command table's field layout, which
+resolved most of Pass 26's uncertainty but surfaced one genuine,
+unresolved contradiction worth documenting honestly rather than
+papering over.
+
+### The table's field-lag pattern, now solidly confirmed (3-for-3)
+
+Re-parsed a wider table region (`0x4f31a8`-`0x4f3390`) programmatically
+as little-endian 32-bit words and cross-checked every string pointer
+found against its actual memory content. This gives THREE clean,
+independently-verified `(name, description)` pairs:
+
+| command name | description string |
+|---|---|
+| `WaitForKey` | "Stops script until key pressed" |
+| `TerminateMission` | "End the mission, and drop to death sequence" |
+| `TurretSetTarget` | "Sets the target for a ships turret" (+ params "Turret", "Entity to target") |
+
+Critically, each command's OWN description string is physically stored
+not within its own 0x74-byte (116-byte) table slot, but at offset
+`+0x00` of the *following* slot (the one holding the *next* command's
+name/handler/argCount). This is a clean, repeatable pattern (confirmed
+3 times), while each command's own `handler` (slot `+0x08`) and `name`
+(slot `+0x10`) fields ARE correctly un-lagged, matching their own
+command -- also confirmed independently via decompiled handler
+BEHAVIOR, not just string content, for two of the three (see below).
+**Confidence 4** on this description-lag pattern now (up from 2 in
+Pass 26, where it was flagged as an open ambiguity) -- it's a repeatable,
+verified structural fact about the table's memory layout, even though
+*why* the source data is laid out this way (variable-length authoring
+tool quirk vs. deliberate struct-splitting) remains unknown.
+
+Also found and confirmed a fourth command in the same table, immediately
+after `TurretSetTarget`'s slot: **`SetAnyTriggerState`** (4 arguments:
+"Entity owning trigger", "Trigger type to enable/disable", "TRUE for
+enable; FALSE for disable", "Trigger Type Number (for triggers of same
+...)").
+
+### Handler behavior: 3 of 4 confirmed, `TurretSetTarget`'s remains open
+
+**`MissionScript_SetAnyTriggerState` (`0x45d3a0`, was `FUN_0045d3a0`)**
+-- decompiled and its behavior is an excellent, clean match for its
+name and 4-argument metadata:
+
+```c
+undefined4 __fastcall MissionScript_SetAnyTriggerState(undefined4 param_1,int param_2)
+{
+  // param_2 = pointer to this opcode's argument list
+  uVar3 = *(undefined4 *)(param_2 + 4);   // trigger type
+  uVar4 = *(undefined4 *)(param_2 + 8);   // enable/disable value
+  uVar5 = *(uint *)(param_2 + 0xc);       // occurrence index ("Trigger Type Number")
+  uVar7 = FUN_00453200();                 // resolves the target entity (arg[0], implicit)
+  // walks a per-entity trigger array at DAT_005267c0 + entity*8, finds the
+  // Nth (uVar5-th) trigger matching type uVar3, writes the new enable
+  // state into that trigger record (offset +0x14), and calls
+  // FUN_0045b2d0() to apply it.
+  return 1;
+}
+```
+
+This independently confirms the table's `(param_1, param_2=argList)`
+calling convention already established by `MissionScript_WaitForKey`
+in Pass 26 -- **confidence 4**, second independent behavioral proof of
+the calling convention, on top of a clean name/argument-metadata match.
+
+**`TurretSetTarget`'s implied handler does NOT behaviorally match.**
+Per the confirmed unlagged name/handler slot pattern,
+`TurretSetTarget`'s handler should be the function pointer at its own
+slot's `+0x08`, which is `0x459bd0` -- the function Pass 26 decompiled
+and (speculatively) named `MissionScript_EndMissionDeathSequence`.
+Chasing its full call chain this session:
+
+```
+0x459bd0:  calls ResetTriggerGlobalsAndResolveTarget(&LAB_00459bf0)
+  ResetTriggerGlobalsAndResolveTarget (was FUN_0045d460):
+    DAT_00537418 = 0; DAT_00537575 = 0;
+    calls ResolveObjectRangeAndInvokeCallback(param_1, 0)   // callback = NULL
+      ResolveObjectRangeAndInvokeCallback (was FUN_0045d480):
+        // range-checks param_1 against several known live-collection
+        // ranges: nav-graph nodes (DAT_0052951c/DAT_00529504), a
+        // trigger table (DAT_005267cc/DAT_005267c8), and the same
+        // navigation/waypoint graph documented earlier
+        // (DAT_005294fc/DAT_005294f0/DAT_00529500/DAT_00529520/
+        // DAT_00538c90/DAT_005267c0) -- for a match, iterates
+        // candidates and calls InvokeTargetMatchCallback(callback)
+        // per match.
+```
+
+The value actually passed as `param_1` is `&LAB_00459bf0` -- a fixed
+CODE address inside the `.text` segment. None of the three range
+checks inside `ResolveObjectRangeAndInvokeCallback` can ever match a
+code-segment address (they all check against dynamically-populated
+data-segment/heap ranges), so in THIS specific call, the function is
+mechanically a no-op past the two global resets -- it can never reach
+`InvokeTargetMatchCallback`, and the callback argument is `0`
+(NULL) besides. **The net confirmed effect of `0x459bd0`, as called
+from this table slot, is simply: reset `DAT_00537418` and
+`DAT_00537575` to 0, and do nothing else.**
+
+This does not read as "sets the target for a ship's turret" in any
+direct sense -- it never touches `param_2`'s argument list (the
+Turret/Entity-to-target arguments the table says this command takes),
+and its downstream call is inert given the argument it's hardcoded to
+pass. **This contradicts the table-slot pattern that held cleanly for
+the other 3 commands examined**, and I'm flagging it explicitly rather
+than forcing an explanation:
+
+- **Corrected, not silently**: Pass 26's name `MissionScript_
+  EndMissionDeathSequence` for `0x459bd0` implied a specific, confident
+  interpretation ("schedules a jump to a death-sequence label") that
+  this session's deeper trace does NOT support -- the callback that
+  would carry out any such jump is passed as NULL and is provably
+  unreachable given the fixed argument. Renamed in Ghidra to the
+  neutral, behavior-only `MissionScript_0x459bd0_ResetAndScan` to avoid
+  leaving an unsupported claim as the function's name. **Confidence 1**
+  on which mission-script command this handler actually implements;
+  **confidence 3** on its own mechanical behavior (global reset, then
+  an argument-dependent no-op in this particular call site).
+
+### Open follow-ups
+
+- `TurretSetTarget`'s real handler is still not confidently identified.
+  Two possibilities not yet ruled out: (a) the table-slot pattern
+  genuinely breaks for this one entry for an unknown reason (authoring
+  bug, or a since-removed/stubbed-out command -- note the resulting
+  behavior is a harmless no-op, consistent with a command that was
+  disabled but left in the catalog), or (b) my slot/anchor arithmetic
+  has a subtle error specific to this row that hasn't been caught
+  despite matching the pattern used successfully for the other 3 rows.
+- Locate the actual mission-script INTERPRETER/dispatcher (the code
+  that reads a `.dte` script opcode and calls through this table) --
+  this would settle the field-offset question definitively instead of
+  relying on cross-referencing string content and handler behavior.
+  No xrefs were found to any individual table row or to any of the
+  handler addresses (`get_xrefs_to` returned "No references found" for
+  all of them), suggesting the interpreter computes the row address
+  dynamically (`table_base + opcode_index * 0x74`) in a way Ghidra's
+  static analysis hasn't resolved into discrete references.
+- `ResolveObjectRangeAndInvokeCallback`'s trigger-table range check
+  (`DAT_005267cc`/`DAT_005267c8`) reuses the same `DAT_005267c0` array
+  `MissionScript_SetAnyTriggerState` walks directly -- worth
+  characterizing this trigger-table struct properly (currently only
+  known: entry stride 8 bytes for the `DAT_005267c0` range-checked
+  form, but `SetAnyTriggerState` indexes a DIFFERENT, larger structure
+  at `DAT_005267c0 + entity*8` with a `+0x14` state byte and per-record
+  sub-array of stride `0x30` -- these are not yet reconciled into one
+  consistent struct definition).
+- `FUN_0045b2d0` (applies the resolved trigger-state change) and
+  `FUN_0045d720`/`FUN_0045d8b0`/`FUN_0045d8e0`/`FUN_0045d910` (all
+  referenced from `ResolveObjectRangeAndInvokeCallback`'s callback path)
+  not decompiled.

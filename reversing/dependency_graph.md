@@ -929,3 +929,25 @@ MissionScript_EndMissionDeathSequence (0x459bd0)
   <- depended on by: mission-scripting command dispatch table (entry association
                  uncertain -- behaviorally the best fit for "drop to death sequence")
 ```
+
+## TurretSetTarget investigation (2026-09-08, twenty-seventh session)
+
+```
+MissionScript_SetAnyTriggerState (0x45d3a0)
+  -> depends on: FUN_00453200 (resolves implicit target entity),
+                 DAT_005267c0 (per-entity trigger array, stride 8, inner records stride 0x30),
+                 FUN_0045b2d0 (applies the resolved trigger-state change, not decompiled)
+  <- depended on by: mission-scripting command table ("SetAnyTriggerState" slot, confirmed)
+
+MissionScript_0x459bd0_ResetAndScan (0x459bd0)
+  -> depends on: ResetTriggerGlobalsAndResolveTarget (0x45d460)
+       -> depends on: DAT_00537418, DAT_00537575 (reset to 0),
+                       ResolveObjectRangeAndInvokeCallback (0x45d480, called with callback=NULL)
+            -> depends on: DAT_0052951c/DAT_00529504 (nav-graph node range),
+                            DAT_005267cc/DAT_005267c8 (trigger-table range),
+                            DAT_005294fc/DAT_005294f0/DAT_00529500/DAT_00529520/DAT_00538c90/DAT_005267c0
+                              (navigation/waypoint graph, shared with ScanNavigationGraphTarget @ 0x401d80),
+                            InvokeTargetMatchCallback (0x45d700) -> calls FUN_0045d720, then (*callback)()
+  <- depended on by: mission-scripting command table (slot association UNRESOLVED --
+                 table position implies "TurretSetTarget" but behavior does not match)
+```
