@@ -1176,3 +1176,31 @@ DAT_004e2380 (now typed ControlBinding[74], 78-byte stride)
   -> depends on (per-entry): GetLanguageString(langStringIndex) for the real localized display name
   <- documents: the complete 74-binding default keyboard control scheme (cameras, targeting,
               flight, weapons, ship-system windows, Spectral Shields, wingman commands, menu)
+
+## .fnt/.spr assets identified as WinVFX resource formats (2026-09-09, thirty-ninth session)
+
+```
+InitializeWinVfxLibrary (0x4a26d0)
+  -> depends on: LoadLibraryA("winvfx8.dll" or "winvfx16.dll", by color depth),
+                 GetProcAddress x ~27 (VFX_shape_draw, VFX_shape_translate_draw, VFX_shape_transform,
+                   VFX_buffer_transform, VFX_window_construct, VFX_pane_construct, VFX_pane_wipe,
+                   VFX_shape_lookaside, VFX_shape_multilookaside, VFX_shape_draw_filtered,
+                   VFX_shape_draw_tinted, VFX_return_global_palette, VFX_shape_draw_mirrored,
+                   VFX_string_draw, VFX_character_width, VFX_pane_copy, VFX_pixel_write,
+                   VFX_window_destroy, VFX_pane_destroy, VFX_shape_bounds, VFX_assign_window_buffer,
+                   VFX_shape_scan, VFX_init_global_palette, VFX_line_draw, VFX_triplet_value,
+                   VFX_shape_origin, VFX_shape_resolution),
+                 DAT_00588730+0x1602 (RGB palette source, shared with SurrenderLib's palette init, Pass 25/30)
+  <- depended on by: WinMain (bootstrap, not re-traced this session)
+
+BuildFontWidthCache (0x480d70, was FUN_00480d70)
+  -> depends on: LoadNamedResource (.fnt resource handle), VFX_character_width (via DAT_005959e0)
+  <- depended on by: FUN_004288e0 and other .fnt-loading call sites
+
+DrawShapeJittered (0x48c6e0, was FUN_0048c6e0)
+  -> depends on: VFX_shape_bounds, VFX_shape_draw / VFX_shape_draw_mirrored (via DAT_005959e4/DAT_005957a8),
+                 DAT_00588700 / DAT_00588724 (jitter intensity, not independently confirmed)
+
+.fnt / .spr resources
+  -> loaded via: LoadNamedResource (Pass 28's generic resource path)
+  -> consumed via: winvfx8.dll / winvfx16.dll's VFX_* API (opaque -- binary layout not in Lancer.exe)

@@ -5289,3 +5289,103 @@ loaded string table, is runtime-only and reads as all-zero here).
   without a live session or an extracted language resource file.
 - Whether this exact 74-entry list matches the manual/in-game options
   screen's own displayed order -- not cross-checked.
+
+## Pass 39 -- .fnt/.spr assets identified as WinVFX resource formats (2026-09-09)
+
+Direct investigation of the `.fnt` (font) and `.spr` (sprite) asset
+formats. Found and traced the loading pathway to its real conclusion: a
+completely separate, dynamically-loaded third-party 2D rendering
+library, distinct from SurrenderLib (3D), Bink (video), and Miles
+(audio) -- rounding out the full picture of Star Lancer's middleware
+stack.
+
+### The loading pathway
+
+Both `.fnt` and `.spr` files load through the SAME generic path already
+documented (`LoadNamedResource` -> `HOG_BigRead`/loose-file fallback,
+Pass 28) -- there is no StarLancer-specific header parsing at that
+layer. The returned raw buffer is then handed directly to a THIRD
+external rendering library as an opaque resource handle:
+
+- `.fnt` (e.g. `handel.fnt`, `smlfont.fnt`, `blufont.fnt`) -> consumed
+  via `VFX_string_draw`/`VFX_character_width`.
+- `.spr` (e.g. `frontend.spr`, `capships.spr`, `quit.spr`) -> consumed
+  via the `VFX_shape_*` function family (`VFX_shape_draw`,
+  `VFX_shape_translate_draw`, `VFX_shape_transform`,
+  `VFX_shape_draw_mirrored`, `VFX_shape_draw_tinted`,
+  `VFX_shape_draw_filtered`, `VFX_shape_lookaside`,
+  `VFX_shape_multilookaside`, `VFX_shape_bounds`, `VFX_shape_scan`,
+  `VFX_shape_origin`, `VFX_shape_resolution`).
+
+### `InitializeWinVfxLibrary` (`0x4a26d0`, was `FUN_004a26d0`)
+
+Confirms the real library: dynamically loads **`winvfx8.dll`** or
+**`winvfx16.dll`** via `LoadLibraryA`, selected by the active color
+depth (`*(int*)(DAT_00588730+0x160e) < 2` -- 8-bit palette mode vs.
+16-bit true color), then resolves ~27 `VFX_*` entry points via
+`GetProcAddress` into a global function-pointer table (`DAT_005959e4`,
+`DAT_00594434`, `DAT_00595068`, etc. -- the same table `DrawShapeJittered`
+and dozens of other functions call through, previously undocumented as
+a distinct library). Fatal-errors (`"init_vfx: Can't find WINVFXxx.DLL"`)
+if the DLL isn't found.
+
+**This is a real, separate, dynamically-linked 2D graphics library --
+`.fnt` = a WinVFX Font resource, `.spr` = a WinVFX Shape resource.**
+Their internal binary layouts are NOT parsed anywhere in `Lancer.exe`
+itself -- all parsing happens inside `winvfx8.dll`/`winvfx16.dll`,
+external files not present in this reverse-engineering project's scope
+(same category of finding as Bink/`.bik` and Miles Sound System audio:
+a well-defined boundary to third-party middleware, not a StarLancer
+game-logic format). **Confidence 5** that this is the real,
+unavoidable conclusion -- the DLL name, load mechanism, and ~27 real
+`VFX_`-prefixed export names are all read directly and unambiguously
+from the decompile.
+
+### Palette initialization ties back to the `.ccb` master palette (Pass 30)
+
+Immediately after resolving the DLL's exports, `InitializeWinVfxLibrary`
+initializes WinVFX's own global palette using the SAME RGB-triple
+source (`DAT_00588730+0x1602`) and the SAME per-channel bit-shift/mask
+constants (`DAT_00588730+0x162a/0x1626/0x1632/0x163e/...`) as the
+SurrenderLib palette-conversion loop documented in Pass 25/30 -- calling
+`VFX_return_global_palette` (`DAT_005957c0`) to get a writable buffer,
+packing the RGB triples into it, then `VFX_init_global_palette`
+(`DAT_005957d0`) to commit it. **This confirms the `.ccb` master
+palette (`palette.ccb`/`softpal.ccb`) is shared across BOTH the 3D
+renderer (SurrenderLib) and the 2D UI/sprite renderer (WinVFX)** -- one
+palette resource, two independent rendering backends consuming it via
+near-identical conversion code. If `DAT_00594544+0x10` (a device-caps
+field) indicates a true-color mode (`> 1`), this palette step is
+skipped entirely in favor of a different mode (`FUN_00480a40` called in
+a small radial loop instead -- not decompiled, likely an anti-aliasing
+or gradient-edge setup for high-color rendering).
+
+### `DrawShapeJittered` (`0x48c6e0`, was `FUN_0048c6e0`)
+
+One heavily-called consumer of the `VFX_shape_*` API, examined to
+confirm the library boundary. In the hardware-rendering path
+(`DAT_00588730+0x1ac != 0`), performs a **software-composited
+screen-distortion/jitter effect**: reads a shape's bounds via
+`VFX_shape_bounds`, then blits it scanline-by-scanline with a per-line
+random horizontal offset (`_rand()`-driven, scaled by
+`DAT_00588700`/`DAT_00588724` -- these are almost certainly damage-flash
+or hit-shake intensity globals given their names' proximity to other
+already-documented damage-effect state) and handles all 4
+orientation/flip cases (`uStack_20` bits 0-2). In the pure software
+path, falls back to a direct `VFX_shape_draw_mirrored`/`VFX_shape_draw`
+call with no jitter. This is very likely the "screen distortion when
+you take a hit" visual effect, though not cross-checked against a
+specific damage-event caller this session.
+
+### Open follow-ups
+
+- The actual `.fnt`/`.spr` binary layouts remain genuinely
+  unrecoverable without `winvfx8.dll`/`winvfx16.dll` (not present in
+  this project) -- correctly identifying this boundary is the
+  conclusion, not a gap to keep chasing.
+- `DAT_00588700`/`DAT_00588724` (jitter intensity globals) -- not
+  independently characterized or confirmed as damage-flash state.
+- `FUN_00480a40` (the true-color-mode palette-skip alternative) -- not
+  decompiled.
+- Confirm `DrawShapeJittered`'s callers to nail down exactly which
+  gameplay event triggers the jitter effect.

@@ -1329,3 +1329,19 @@ Direct continuation of Pass 37. Read `DAT_004e2380` in full (74 entries x 78 byt
 
 - Trace `ControlBinding.actionSlot`'s consumer.
 - Localized string text remains unrecoverable without a live session or extracted language resource.
+
+## .fnt/.spr assets identified as WinVFX resource formats (2026-09-09, thirty-ninth session)
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `.fnt`/`.spr` are native resource formats of a third external library, WinVFX (`winvfx8.dll`/`winvfx16.dll`) | 5 | Directly confirmed: dynamic `LoadLibraryA` + ~27 `GetProcAddress` calls for real `VFX_*` export names (`VFX_shape_draw`, `VFX_string_draw`, `VFX_character_width`, etc.), read unambiguously from the decompile. |
+| `InitializeWinVfxLibrary` (0x4a26d0, was FUN_004a26d0) | 5 | Loads winvfx8.dll (8-bit palette mode) or winvfx16.dll (16-bit true color), resolves the whole VFX_* API table, initializes the shared global palette. |
+| `.fnt`/`.spr` binary layouts are NOT parsed anywhere in Lancer.exe -- genuinely external to this project's scope | 5 | Same category of finding as Bink (`.bik`) and Miles Sound System -- a real, well-defined third-party middleware boundary, not a gap requiring further static analysis. |
+| The `.ccb` master palette (Pass 30) is shared between SurrenderLib (3D) and WinVFX (2D) | 4 | Confirmed via near-identical RGB-triple-to-native-format conversion code in `InitializeWinVfxLibrary`, using the same source data and bit-shift constants as the earlier-documented SurrenderLib palette loop. |
+| `DrawShapeJittered` (0x48c6e0, was FUN_0048c6e0) | 3 | A `VFX_shape_*` consumer implementing a per-scanline random-offset screen-distortion blit, plausibly a damage/hit-shake visual effect; not cross-checked against a specific damage-event caller. |
+
+### Open follow-ups
+
+- `DAT_00588700`/`DAT_00588724` (jitter intensity globals) -- not independently confirmed as damage-flash state.
+- `FUN_00480a40` (true-color-mode palette-skip alternative) -- not decompiled.
+- `DrawShapeJittered`'s callers -- not traced to confirm the trigger event.
