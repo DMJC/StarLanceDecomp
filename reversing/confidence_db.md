@@ -1141,3 +1141,17 @@ public-API naming convention.
 - The stripped `.ut` trailing-extension behavior in `HOG_BigRead` -- purpose unknown.
 - The BigFile header's unused 4th 16-byte-header word.
 - Whether `HOG_bigsize`/`GetBigFileEntrySize` are called from any currently-documented higher-level resource manager -- not traced.
+
+## BigFile decompressor identified as RefPack; .ut suffix explained (2026-09-08, twenty-ninth session)
+
+| Name (address) | Confidence | Notes |
+|---|---|---|
+| `DecompressRefPackBlock` (0x4cc350, was FUN_004cc350) = EA "RefPack"/"QFS" LZ77 codec | 4 | Control-byte decode shape (3-tier match-token width, literal counts in low 2 bits, 0xFC-0xFF terminal range) structurally matches the publicly-documented RefPack scheme; the `0x10FB` marker checked before calling it is RefPack's known 2-byte magic. Not verified against a live compressed sample -- pattern-match confidence, not a tested re-implementation. |
+| `.ut` = speech/dialogue "utterance" tag file | 3 (abbreviation reading) / 4 (file class) | 383 matching strings, all pilot-chatter/briefing/taunt/pickup-line names; confirmed via `get_xrefs_to` that `"ms_speech\enrbr_tag%02d.ut"` is referenced only from `RunMissionBriefingScreen`, tying directly to the already-documented "speech-tag lookup" mechanism from an earlier pass. |
+| `HOG_BigRead`'s extension-stripping rule | 3 | Generic (`strncmp(ext,"ut",2)==0`), not `.ut`-literal-specific; most likely reconciles a hardcoded `.ut` suffix used by callers against bare-basename entries in the BigFile TOC. Plausible, not directly confirmed against real TOC contents. |
+| `SR_CCB_load` (0x4cb9d0, was FUN_004cb9d0) | 3 | Confirmed real SurrenderLib name via its own debug strings + source path. Loads `.ccb` files (format/semantics not investigated). Incidental finding while chasing `HOG_BigRead` callers. |
+
+### Open follow-ups
+
+- `.ccb` file format -- not investigated, out of scope for this pass.
+- RefPack identification not verified against an actual live compressed sample from the game's data.

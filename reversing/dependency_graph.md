@@ -995,3 +995,21 @@ HOG_file_read (0x4c5be0)
                  ReportAssertionFailureEx
   <- depended on by: HOG_BigRead (TOC-miss fallback)
 ```
+
+## BigFile decompressor identified as RefPack; .ut suffix explained (2026-09-08, twenty-ninth session)
+
+```
+DecompressBigFileEntry (0x4c8480)
+  -> depends on: DecompressRefPackBlock (0x4cc350, was FUN_004cc350) -- EA RefPack/QFS LZ77 decoder,
+                 identified via control-byte structural match, triggered by the 0x10FB magic
+
+HOG_BigRead (0x4c7f60)
+  -> depends on: (unchanged from Pass 28) -- extension-stripping rule now understood as reconciling
+                 a hardcoded ".ut" suffix used by many callers (e.g. RunMissionBriefingScreen's
+                 "ms_speech\enrbr_tag%02d.ut") against bare-basename BigFile TOC entries
+
+SR_CCB_load (0x4cb9d0, was FUN_004cb9d0)
+  -> depends on: HOG_BigRead, LoadNamedResource, SR_MEM_allocate, FUN_004cb540 (scalar field reader,
+                 not decompiled), FUN_004d0333 (free)
+  <- depended on by: (not traced this session -- found only as a HOG_BigRead caller)
+```

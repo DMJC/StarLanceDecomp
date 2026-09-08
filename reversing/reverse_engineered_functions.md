@@ -4108,3 +4108,94 @@ the mission-loading fatal-error path documented in an earlier pass.
   compression-aware size logic mirroring `HOG_BigRead`'s marker check)
   are called from any currently-documented higher-level resource
   manager -- not traced this session.
+
+## Pass 29 -- BigFile decompressor identified as RefPack; .ut suffix explained (2026-09-08)
+
+Direct follow-up on the two items flagged open at the end of Pass 28.
+
+### The decompressor is EA's "RefPack" (aka "QFS") compression codec
+
+Decompiled `DecompressRefPackBlock` (`0x4cc350`, was `FUN_004cc350`,
+called from `DecompressBigFileEntry`). Its control-byte decoding shape
+-- literal-run counts packed into the low 2 bits of a tag byte, three
+escalating tiers of match-token width (1/2/3 leading tag bytes) each
+encoding a copy DISTANCE and LENGTH via bit-packed combinations of the
+following bytes, and a terminal tag range (`(byte)uVar4 > 0xfb`, i.e.
+`0xFC`-`0xFF`) that copies a final short literal run and stops -- is a
+precise structural match for **RefPack**, EA/Origin's standard LZ77-family
+compression format from the late-1990s (also known as "QFS" compression,
+publicly documented via SimCity 4/The Sims/NFS-series reverse-engineering
+efforts). The `0x10FB` marker `HOG_BigRead`/`HOG_bigsize` check for before
+calling the decompressor is exactly RefPack's well-known 2-byte magic
+header (bytes `10 FB`). Given Star Lancer was published by Origin/EA, this
+makes complete sense as a shared, EA-wide compression utility rather than
+a StarLancer-specific codec. **Confidence 4** on the algorithm
+identification (based on structural pattern-matching against the
+publicly documented RefPack control-byte scheme, not an internal source
+confirmation) -- high enough to treat as settled for practical
+(re-implementation) purposes; a byte-exact re-implementation should
+still be checked against a real compressed sample before being trusted
+for correctness.
+
+### The `.ut` suffix: speech/dialogue tag files, extension stripped generically
+
+Searched all strings ending in `.ut` and found 383 matches, essentially
+all short audio/dialogue-adjacent asset names: pilot ejection barks
+(`ejt_001.ut`..`ejt_016.ut`), taunts (`tnt_003.ut`..`tnt_013.ut`),
+pickup/badge lines (`antpkup_001.ut`, `yambdg_001.ut`,
+`relbdg_001.ut`, ...), and notably `ms_speech\enrbr_tag%02d.ut` and
+`enddebriefing.ut`/`loadout.ut` -- all consistent with the
+already-documented "speech-tag lookup" mechanism in
+`RunMissionBriefingScreen` from an earlier pass (confirmed directly:
+`get_xrefs_to` on the `"ms_speech\enrbr_tag%02d.ut"` string shows its
+only reference is from `RunMissionBriefingScreen`). This strongly
+supports **`.ut` = "utterance"** -- a speech/dialogue tag file format
+(plausibly timing/subtitle-sync metadata paired with a voice-over audio
+clip), matching standard game-audio-pipeline terminology from this era.
+**Confidence 3** on the "utterance" reading of the abbreviation itself
+(a reasonable, well-supported inference, not textually confirmed
+anywhere in the binary); **confidence 4** on the file class being
+speech/dialogue-tag data given the caller and naming evidence.
+
+`HOG_BigRead`'s extension-stripping check (`strncmp(ext, "ut", 2) == 0`
+truncates the name at the `.` before the TOC lookup) is a GENERIC rule
+-- it strips any 2-character extension starting with `"ut"`, not a
+`.ut`-specific special case in the literal string sense (it would also
+strip a hypothetical `.utz` or `.utw`). Given `.ut` is overwhelmingly
+the dominant extension actually used in the game's data (383 of the
+matched strings), the practical effect is that essentially all `.ut`
+speech-tag lookups get their extension silently dropped before the
+BigFile TOC search. The most likely explanation, consistent with the
+BigFile TOC entry format documented in Pass 28 (`{offset, size,
+name[]}`, arbitrary names, no fixed extension field): **the packed
+archive stores these speech-tag entries under their bare basename
+(no extension)**, while caller code throughout the game consistently
+constructs the request string WITH a hardcoded `.ut` suffix (visible
+directly in the `"ms_speech\enrbr_tag%02d.ut"` format string), and
+`HOG_BigRead` reconciles the mismatch with this one shared stripping
+rule rather than requiring every caller to omit the extension itself.
+**Confidence 3** on this specific mechanism (a real, observed
+behavior with a plausible, testable explanation, not independently
+confirmed against an actual archive's TOC contents).
+
+### Incidental finding: `SR_CCB_load` identified
+
+While cross-checking `HOG_BigRead` callers for `.ut`-related context,
+one previously-anonymous caller (`FUN_004cb9d0`) was confirmed via its
+own debug strings (`"SR_CCB_load: Null name passed"`, `"SR_CCB_load:
+Failed to open CCB file %s"`, source path
+`C:\lancer\surrender\surrenderlib\...`) to be the real SurrenderLib
+function `SR_CCB_load` -- a loader for `.ccb` files (format not
+otherwise investigated this session; likely "Camera/Cinematic Buffer,"
+unconfirmed) that reads a fixed 0xc0-dword header block, a further
+0x300-dword block, several scalar fields via repeated `FUN_004cb540()`
+calls, then a variable-length trailing payload. Renamed accordingly;
+not otherwise explored.
+
+### Open follow-ups
+
+- `.ccb` file format and `SR_CCB_load`'s field semantics -- noted but
+  not investigated (out of scope for this pass).
+- No compressed BigFile sample was actually decoded byte-for-byte this
+  session -- the RefPack identification rests on control-byte-shape
+  matching against public documentation, not a live test.
