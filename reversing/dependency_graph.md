@@ -564,11 +564,27 @@ ScanForTargetCandidate (0x401cb0)
   -> depends on: object+0x684 (AI command struct, mode selector at +2),
                  DAT_005267cc (mission-scripted candidate list, one of
                  LoadMissionFile's 27 directory tables — direct link
-                 between AI targeting and mission-authored data)
-  -> depends on (NOT YET IN DB): thunk_FUN_004531c0 (candidate
-                 iterator), FUN_00401d80 (mode-2 delegate)
+                 between AI targeting and mission-authored data),
+                 GetObjectIndexFromPointer (candidate iterator helper),
+                 ScanNavigationGraphTarget (mode-2 delegate)
   <- depended on by: HandleDarkReignAttackState (and presumably other
                  AI target-search call sites, not individually traced)
+
+ScanNavigationGraphTarget (0x401d80)
+  -> depends on: DAT_005294fc/DAT_00529500/DAT_00529520 (mission
+                 navigation-graph node array — 3 previously-separate
+                 LoadMissionFile directory tables now understood as
+                 ONE structure), DAT_005267c0 (per-node type byte),
+                 DAT_00538c90 (type-1 node sub-candidate-list, same
+                 shape as ScanForTargetCandidate's own mode-1 table)
+  -> depends on (NOT YET IN DB): FUN_00453070 (type-2 recursion prep),
+                 FUN_0045a440 (invalid node-type fallback)
+  <- depended on by: ScanForTargetCandidate (mode 2)
+
+GetObjectIndexFromPointer (0x4531c0)
+  -> depends on: DAT_0052951c (base of a 76-byte-stride mission-object
+                 array)
+  <- depended on by: ScanForTargetCandidate, ScanNavigationGraphTarget
 
 QueueAiEvent (0x402660)
   -> depends on: object+0xb8c/+0xb90 (event queue count/buffer, lazily
@@ -576,13 +592,19 @@ QueueAiEvent (0x402660)
                  (overflow guard, "DPStack Overflow on %s"),
                  DAT_005883b0 (tick counter, for expiry timestamps),
                  HasDamageAuthority (multiplayer broadcast gate)
-  -> depends on (NOT YET IN DB): FUN_004ba560 (multiplayer AI-event
-                 broadcast)
+  -> depends on: BroadcastAiEventPacket (multiplayer AI-event
+                 broadcast — resolved this session)
   <- depended on by: HandleDarkReignAttackState; presumably a wide
                  range of other AI decision-making call sites given
                  its generic "push a perceived event with TTL" shape
                  — relationship to TrySetAiState's state machine not
                  directly traced
+
+BroadcastAiEventPacket (0x4ba560)
+  -> depends on (NOT YET IN DB): FUN_004b9920 (begin packet),
+                 FUN_004b9830 (write one packet field — called
+                 4-8 times per broadcast depending on event type)
+  <- depended on by: QueueAiEvent
 ```
 
 ## SurrenderLib scene-node primitives (tenth session)

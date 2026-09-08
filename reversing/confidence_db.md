@@ -693,6 +693,26 @@ the state-machine (`TrySetAiState`) documented two sessions ago.
 
 ### Open follow-ups
 
-- `FUN_00401d80` (`ScanForTargetCandidate` mode 2), `thunk_FUN_004531c0` (mission-scripted candidate-list iterator), `FUN_004ba560` (multiplayer AI-event broadcast) — none decompiled.
+- ~~`FUN_00401d80`, `thunk_FUN_004531c0`, `FUN_004ba560`~~ — **all three resolved next, see below.**
 - Whether/how the event queue (`QueueAiEvent`) actually drives state transitions (`TrySetAiState`) — the two systems' relationship is inferred from their shared domain (`Ai.cpp`, per-object AI data) but not directly traced through code.
 - `DAT_005267cc`'s own record layout (20 bytes/entry, `+9`=count/flag byte observed) — only partially decoded via this one consumer.
+
+## The mission navigation graph, and AI-event network serialization (2026-09-08, nineteenth session)
+
+Resolved `ScanForTargetCandidate` mode 2's delegate plus its own helper,
+and the multiplayer broadcast call from `QueueAiEvent`. The first of
+these ties together several previously-separate mission-directory
+globals (from `LoadMissionFile`'s 27-table `.dte` format, documented 6
+sessions ago) into one coherent structure.
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `ScanNavigationGraphTarget` (0x401d80, was `FUN_00401d80`) | 2 | **Reveals a mission-scripted navigation/waypoint GRAPH**, not just flat candidate lists. Walks nodes (12-byte stride) starting from an index resolved via `DAT_005294fc`, bounded by `DAT_00529520` (a count) against a base `DAT_00529500` — all three previously catalogued only as "one of `LoadMissionFile`'s 27 directory tables" with no known relationship to each other; this function shows they're parts of ONE graph structure. Each node has a type byte (from a further table, `DAT_005267c0`) selecting behavior: type 0 calls the test callback once (a plain waypoint); type 1 iterates a THIRD table (`DAT_00538c90`, pointer+count-byte-at-`+9` shape, matching `ScanForTargetCandidate` mode 1's pattern exactly) — a node that expands into a sub-list of candidates; type 2 recurses into another graph node (`FUN_00453070` then this function again) — genuine graph traversal, not just a flat list. This is very likely the same navigation-node system backing the `"Patrol Route"`/`"Jump In"`/`"Jump Out"`/`"Formation Regroup"` AI states catalogued last session — a mission author can apparently script a whole waypoint/patrol graph, not just point-to-point destinations. |
+| `GetObjectIndexFromPointer` (0x4531c0, was `thunk_FUN_004531c0`, formerly a thunk) | 2 | A small utility: converts a raw pointer/offset into an object-table array INDEX by subtracting a base (`DAT_0052951c`) and dividing by `0x4c`=76 (the per-object record stride) — with sentinel values `0`, `-1`, `0xffff` all normalized to `0xffff` ("no object"). Confirms `DAT_0052951c` is the base of a 76-byte-stride array of mission-instantiated objects (consistent with earlier sessions' scattered references to `DAT_0052951c`-relative offsets). |
+| `BroadcastAiEventPacket` (0x4ba560, was `FUN_004ba560`) | 2 | Confirms `QueueAiEvent`'s multiplayer sync is real network packet serialization: begins a packet (`FUN_004b9920(2)`, presumably "packet type 2"), writes 4 fields unconditionally (`FUN_004b9830`, called repeatedly — a per-field network-write primitive, not decompiled), then branches on the event's own type key (`*param_2`): type `0x69` (105) writes 4 MORE fields (a richer payload for that specific event type) before one final write; every other type just writes one final field and returns. Confirms different AI event types carry genuinely different amounts of network-synced data. |
+
+### Open follow-ups
+
+- `FUN_00453070` (graph-node-to-callback-arg conversion in `ScanNavigationGraphTarget`'s type-2 recursive case), `FUN_0045a440` (invalid-node-type fallback), `FUN_004b9920`/`FUN_004b9830` (the underlying network packet-write primitives — clearly a small, reusable serialization API given how many places call them, worth opening if the multiplayer networking layer becomes a focus).
+- What event type `0x69` (105) specifically represents, and why it alone carries extra data.
+- The full node-type enum for the navigation graph (only 0/1/2 observed; a `default` fallback exists implying more types may be possible even if unused).

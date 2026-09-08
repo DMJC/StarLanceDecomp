@@ -2888,12 +2888,107 @@ state-transition requests) wasn't traced this session.
 
 ### Open follow-ups
 
-- `FUN_00401d80` (`ScanForTargetCandidate` mode 2), `thunk_FUN_004531c0`
-  (mission-scripted candidate iterator), `FUN_004ba560` (multiplayer
-  AI-event broadcast) — none decompiled.
+- ~~`FUN_00401d80`, `thunk_FUN_004531c0`, `FUN_004ba560`~~ — resolved next, see below.
 - The actual link between `QueueAiEvent`'s queue and `TrySetAiState`'s
   state transitions — inferred from shared domain, not directly traced
   through code. Finding whatever reads `object+0xb90`'s queue would
   settle this.
 - `DAT_005267cc`'s own record layout (20 bytes/entry; only the `+9`
   count/flag byte is decoded, via this one consumer).
+
+---
+
+# Twenty-first pass (2026-09-08, same day): the mission navigation graph, and AI-event packet serialization
+
+Resolved `ScanForTargetCandidate` mode 2's delegate, its own helper
+(the mysterious `thunk_FUN_004531c0`), and `QueueAiEvent`'s
+multiplayer broadcast call. The first of these is the real prize: it
+ties several previously-catalogued-but-unrelated mission-directory
+globals into one coherent navigation-graph structure.
+
+## `ScanNavigationGraphTarget` (`0x00401d80`)
+
+```c
+bool __fastcall ScanNavigationGraphTarget(uint startNodeIndex,
+                                            char (*testCallback)(void));
+```
+
+`ScanForTargetCandidate`'s mode-2 delegate turns out to walk a real
+**mission-scripted navigation/waypoint GRAPH**, not a flat list. Six
+sessions ago, `LoadMissionFile` was documented as populating 27
+directory-table globals with no known relationship to each other
+beyond "part of the `.dte` format." This function shows that at least
+three of them — `DAT_005294fc`, `DAT_00529500`, `DAT_00529520` — are
+actually one structure: a node array (12-byte stride) with a resolved
+starting index, a count bound, and a base pointer.
+
+Each node's behavior is selected by a type byte from a FOURTH table
+(`DAT_005267c0`):
+
+- **Type 0**: calls the test callback once — a plain single waypoint.
+- **Type 1**: iterates a FIFTH table (`DAT_00538c90`, a pointer +
+  count-byte-at-`+9` shape — exactly matching `ScanForTargetCandidate`
+  mode 1's own candidate-list format) — a node that expands into a
+  sub-list of candidates rather than being one itself.
+- **Type 2**: recurses into another graph node (via `FUN_00453070`
+  then a fresh call to this same function) — genuine graph traversal,
+  confirming nodes can reference other nodes, not just leaf
+  candidates.
+- Anything else falls through to `FUN_0045a440` (not decompiled,
+  plausibly an invalid-node-type handler).
+
+This is very likely the underlying data structure behind the
+`"Patrol Route"`, `"Jump In"`, `"Jump Out"`, and `"Formation Regroup"`
+AI states catalogued two sessions ago — a mission author can script an
+entire waypoint/patrol GRAPH (with branching and sub-lists), not just
+simple point-to-point destinations.
+
+## `GetObjectIndexFromPointer` (`0x004531c0`)
+
+```c
+ushort __fastcall GetObjectIndexFromPointer(int rawPointer);
+```
+
+A small, previously-unnamed "thunk" that turns out to be a genuine
+utility: converts a raw pointer/byte-offset into an object-table array
+INDEX by subtracting a base (`DAT_0052951c`) and dividing by `0x4c`
+(76, the per-object record size), with the sentinel values `0`, `-1`,
+and `0xffff` all normalized to `0xffff` ("no valid object"). Confirms
+`DAT_0052951c` is the base of a 76-byte-stride array of
+mission-instantiated objects — consistent with scattered
+`DAT_0052951c`-relative references seen in earlier sessions
+(`InitializeMissionGameplay`, among others) without their shared
+structure being clear at the time.
+
+## `BroadcastAiEventPacket` (`0x004ba560`)
+
+```c
+void __fastcall BroadcastAiEventPacket(int unused, short eventKey[4]);
+```
+
+Confirms `QueueAiEvent`'s multiplayer synchronization is real network
+packet serialization, not just a flag: begins a packet
+(`FUN_004b9920(2)`, presumably "packet type 2"), writes 4 fields
+unconditionally via a repeated call to what's clearly a per-field
+network-write primitive (`FUN_004b9830`, called with no visible
+arguments each time — consistent with it pulling from some ambient
+serialization-buffer state), then branches on the event's own type key
+(`eventKey[0]`): type `0x69` (105) writes 4 MORE fields — a richer
+payload specific to that one event type — before a final write, while
+every other type just does the one final write. Confirms different AI
+event types carry genuinely different amounts of data across the
+network, not a fixed-size struct blindly copied.
+
+### Open follow-ups
+
+- `FUN_00453070` (graph-node recursion prep for
+  `ScanNavigationGraphTarget`'s type-2 case), `FUN_0045a440`
+  (invalid-node-type fallback), `FUN_004b9920`/`FUN_004b9830` (the
+  underlying network packet-write primitives — clearly a small, reused
+  serialization API given how many call sites exist; worth opening if
+  the multiplayer networking layer becomes a dedicated focus).
+- What event type `0x69` specifically represents, and why it alone
+  carries extra network data.
+- The full navigation-graph node-type enum (only 0/1/2 observed; the
+  `default` fallback implies the format allows for more even if unused
+  in practice).
