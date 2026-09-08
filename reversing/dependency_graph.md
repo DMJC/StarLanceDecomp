@@ -905,3 +905,27 @@ mission.cpp API (source-confirmed via debug strings, code not newly traced this 
   <- matches structurally to: LoadMissionFile / RunMissionGameplay / UnloadMission
      (already documented in an earlier session under different working names)
 ```
+
+## Mission-scripting command handlers (2026-09-08, twenty-sixth session)
+
+```
+MissionScript_WaitForKey (0x459ae0)
+  -> depends on: DAT_005799bc (current key-wait index, global),
+                 DAT_004e2380 (0x4e-byte-stride per-key condition table),
+                 DAT_00595c68 / DAT_00595c92 / DAT_00595c9e / DAT_00595c85 / DAT_00595d05
+                   (condition-flag bytes/arrays checked per condition-type case),
+                 DAT_004e23cc (0x27-stride secondary index table),
+                 DAT_00588370 (flag array indexed by the above)
+  <- depended on by: mission-scripting command dispatch table (entry for "WaitForKey")
+
+MissionScript_TerminateMission (0x459bb0)
+  -> depends on: DAT_00588338 (incremented counter, not otherwise characterized)
+  <- depended on by: mission-scripting command dispatch table (entry associated with
+                 name "TerminateMission", exact table-slot alignment uncertain)
+
+MissionScript_EndMissionDeathSequence (0x459bd0)
+  -> depends on: FUN_0045d460 -> depends on: DAT_00537418, DAT_00537575 (reset to 0),
+                 FUN_0045d480 (label/state-jump primitive, not decompiled)
+  <- depended on by: mission-scripting command dispatch table (entry association
+                 uncertain -- behaviorally the best fit for "drop to death sequence")
+```

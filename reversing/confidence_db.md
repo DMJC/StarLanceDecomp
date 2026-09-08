@@ -1059,3 +1059,27 @@ itself) remains inferred from context, not yet independently located.
 - The actual hit-resolution code that reads `object+0x670` and blocks/negates damage from a matching weapon type — not located. Likely somewhere in or near `FireWeapon`/`ProcessProjectileImpact`/`ApplyShieldDamage`, but a direct search for the `0x670` displacement found only the two WRITE sites (computation + network sync), no read.
 - The rest of `ProcessNetworkMessage`'s ~9.5KB body — only the one message case was examined; this function is a rich target for confirming/correcting many other message-name-only findings from the DirectPlay catalog session.
 - `DAT_0050ca7c` (the second trailing-bit-mask-adjacent table used only in `ReadMessageBits`, not `WriteMessageBits`).
+
+## Mission-scripting command handlers decompiled (2026-09-08, twenty-sixth session)
+
+Direct follow-up to the previous session's open item: decompiled the
+handler function pointers referenced by the mission-scripting command
+table, confirming the dispatch-table theory behaviorally.
+
+| Name (address) | Confidence | Notes |
+|---|---|---|
+| `MissionScript_WaitForKey` (0x459ae0) | 4 | Script-VM wait-opcode handler: `(scriptCursor*, argList*) -> bool done`. Indexes a 0x4e-stride condition table by the arg[0] key index; rewinds the script cursor by 4 bytes to retry if not yet satisfied. Behavior matches the table's own description string for `WaitForKey` ("Stops script until key pressed") exactly. |
+| `MissionScript_TerminateMission` (0x459bb0) | 3 | Trivial no-arg handler: increments global `DAT_00588338` and always returns done=1. Table association with the name "TerminateMission" is solid; whether it's *also* responsible for "drop to death sequence" is now doubted (see layout ambiguity below) — that behavior looks like it actually belongs to the neighboring handler. |
+| `MissionScript_EndMissionDeathSequence` (0x459bd0) | 3 | Calls `FUN_0045d460(&LAB_00459bf0)`, which resets two globals and calls `FUN_0045d480(label, 0)` — shape strongly consistent with scheduling a jump to a death-sequence label/state. Likely the real handler behind "drop to death sequence" text, but exact command-name association is uncertain pending the table-layout ambiguity below. |
+| Mission-scripting command table layout (~0x4f31a8+) | 2 | Confirmed real (name/handler/description/per-arg-metadata), but per-command record is almost certainly NOT fixed-stride — the 116-byte gap seen between 3 sampled entries is likely coincidental (their argument counts happened to size them equally), not a structural constant. **Downgraded from an implicit "fixed stride" assumption in the previous session** — corrected here explicitly rather than silently. |
+
+### Open follow-ups
+
+- Walk further table entries correlating argument count against
+  inter-entry byte distance to resolve the true variable-length record
+  layout.
+- Decompile `FUN_0045d480` to confirm the death-sequence-jump
+  hypothesis.
+- Decompile the `TurretSetTarget` handler (strings already located) to
+  grow the confirmed-handler sample size.
+- Characterize `DAT_00588338`.

@@ -3659,3 +3659,162 @@ were previously scattered across unrelated passes.
 - Pin down what `mission25`/`mission29`/`mission251`/`mission311`
   actually are narratively, now that they're framed as part of
   campaign structure rather than isolated oddities.
+
+## Pass 26 -- Mission-scripting command handlers decompiled (2026-09-08)
+
+Direct follow-up to Pass 25's open item: decompiled the handler function
+pointers found in the mission-scripting command table, to confirm the
+dispatch-table theory behaviorally rather than just structurally.
+
+### Table layout: partially resolved, one real ambiguity found and flagged
+
+Re-read the table region (`0x4f31a8`-`0x4f3340`) and parsed it
+programmatically as 4-byte little-endian words. Confirmed a **116-byte
+(0x74) entry stride** between three consecutive entries (boundaries at
+`0x4f31b8`, `0x4f322c`, `0x4f32a0`). Reading the actual strings each
+entry points at revealed real command data:
+
+- `0x4f40c0` = `"WaitForKey"` (command name)
+- `0x4f40a8` = `"Key number to wait for"` (parameter description)
+- `0x4f4088` = `"Stops script until key pressed"` (command description)
+- `0x4f4074` = `"TerminateMission"` (command name)
+- `0x4f4048` = `"End the mission, and drop to death sequence"` (command description)
+- `0x4f4038` = `"TurretSetTarget"`, `0x4f4030` = `"Turret"`,
+  `0x4f401c` = `"Entity to target"` (a further command + its params, not
+  yet decompiled)
+- `0x4f52f8` = `"Sets an ship/flight group to follow a predefined path"`
+  (a further command's description, referenced from the FIRST word of
+  the `0x4f31b8` entry)
+
+**Found and flagging honestly:** the description string for a given
+command does NOT sit at a fixed offset within that command's own
+116-byte record — e.g. `"Stops script until key pressed"` (WaitForKey's
+description, confirmed by matching it against `WaitForKey`'s decompiled
+behavior below) is stored at offset `+0x00` of the *next* entry
+(`0x4f322c`, which otherwise holds `TerminateMission`'s name/handler),
+not within WaitForKey's own entry (`0x4f31b8`). The likely explanation
+is that per-command records are NOT fixed-size in the true source
+struct — they hold a variable number of trailing per-argument metadata
+blocks (name/type/description triples) sized by that command's own
+argument count, and the overall command DESCRIPTION string is stored as
+a trailing field that lands either at the end of one record or the
+start of the next depending on how many argument slots preceded it.
+The 116-byte stride holding across the 3 samples examined is very
+likely a coincidence of these particular commands' argument counts
+(1, 1, 2) rather than a true fixed stride. **This corrects an implicit
+assumption from Pass 25** (fixed-stride record) — noted explicitly
+rather than silently revised. **Confidence 2** on the general
+name/handler/description/argument-metadata record shape; **confidence
+0** on any single fixed byte-offset layout claim.
+
+### Handler behavior: confirms the dispatch-table theory (confidence 4)
+
+Three handler addresses referenced from the table were not yet defined
+as Ghidra functions (`decompile_function` returned "No function found"
+despite valid code at the address — disassembly showed real
+instructions). Created proper functions there (`create_function`) and
+decompiled all three:
+
+**`MissionScript_WaitForKey` (`0x459ae0`, was `FUN_00459ae0`)** —
+matches `WaitForKey`'s table entry exactly:
+
+```c
+undefined4 __fastcall MissionScript_WaitForKey(int *param_1,int *param_2)
+{
+  short sVar1;
+  DAT_005799bc = *param_2;                       // param_2 = ptr to arg list; arg[0] = key index
+  sVar1 = *(short *)((int)&DAT_004e2380 + DAT_005799bc * 0x4e);
+  if ((sVar1 != -1) && (*(char *)((int)&DAT_00595c68 + (int)sVar1) != '\0')) {
+    sVar1 = *(short *)((int)&DAT_004e2380 + DAT_005799bc * 0x4e + 2);
+    if (sVar1 == 0) { DAT_005799bc = -1; return 1; }
+    if (sVar1 == 1) {
+      if ((DAT_00595c92 != '\0') || (DAT_00595c9e != '\0')) { DAT_005799bc = -1; return 1; }
+    }
+    else if (sVar1 == 2) {
+      if (DAT_00595c85 != '\0') { DAT_005799bc = -1; return 1; }
+      if (DAT_00595d05 != '\0') { DAT_005799bc = -1; return 1; }
+    }
+  }
+  if (((&DAT_004e23cc)[DAT_005799bc * 0x27] != -1) &&
+      ((&DAT_00588370)[(short)(&DAT_004e23cc)[DAT_005799bc * 0x27]] != '\0')) {
+    DAT_005799bc = -1;
+    return 1;
+  }
+  *param_1 = *param_1 + -4;   // rewind script cursor by 4 bytes -> retry this opcode next tick
+  return 0;
+}
+```
+
+This is a textbook mission-script VM opcode handler: `param_1` is the
+script cursor/program-counter pointer, `param_2` points at the
+opcode's argument list (first argument = a key/trigger index). It
+looks up that index in a `0x4e`-byte-stride condition table
+(`DAT_004e2380`) and several related condition-flag tables/arrays; if
+the wait condition is not yet satisfied, it decrements the script
+cursor by 4 bytes so the SAME opcode re-executes next tick (a
+classic busy-wait/yield pattern for a mission scripting interpreter),
+returning 0 ("not done"). Once satisfied, it returns 1 ("done,
+advance"). This exactly matches `WaitForKey`'s catalogued description,
+`"Stops script until key pressed"` — **confidence 4** this is a real
+mission-script VM wait-opcode handler, calling convention `(scriptCursor*,
+argList*) -> bool done`.
+
+**`MissionScript_TerminateMission` (`0x459bb0`, was `FUN_00459bb0`)**:
+
+```c
+undefined4 MissionScript_TerminateMission(void)
+{
+  DAT_00588338 = DAT_00588338 + 1;
+  return 1;
+}
+```
+
+Trivial, no-argument, always-immediately-complete handler that
+increments a single global counter (`DAT_00588338`, not yet otherwise
+characterized — plausibly a mission-termination/end-trigger count).
+Matches `TerminateMission`'s description, `"End the mission, and drop
+to death sequence"`, in spirit (an instant, unconditional
+mission-ending command) though the actual "drop to death sequence"
+behavior is not visibly in THIS handler — see below.
+
+**`MissionScript_EndMissionDeathSequence` (`0x459bd0`, was `FUN_00459bd0`)**:
+
+```c
+void MissionScript_EndMissionDeathSequence(void)
+{
+  FUN_0045d460(&LAB_00459bf0);
+  return 1;
+}
+```
+
+Calls `FUN_0045d460(labelAddr)`, which itself resets two globals
+(`DAT_00537418`, `DAT_00537575`) and calls a further function
+`FUN_0045d480(labelAddr, 0)` (not decompiled) — shape consistent with
+scheduling/queuing a jump to a "death sequence" label/state, i.e. this
+is very likely the ACTUAL handler backing the "drop to death sequence"
+part of `TerminateMission`'s description, suggesting the table's
+name/description pairing may be slightly offset from my Pass-25 naive
+reading (a second, independent piece of evidence for the layout
+ambiguity noted above — the description text describing "drop to death
+sequence" behavior lines up much better with THIS handler than with
+`MissionScript_TerminateMission`'s trivial counter-increment).
+**Confidence 2** on which exact command name this specific handler is
+registered under, pending the layout ambiguity being resolved;
+**confidence 4** on the handler's own mechanical behavior (schedules a
+state/label transition via `FUN_0045d460`/`FUN_0045d480`).
+
+### Open follow-ups
+
+- Resolve the table's true variable-length record layout (walk several
+  more entries, correlating argument counts against inter-entry byte
+  distances) rather than relying on the coincidental 116-byte stride
+  seen in 3 samples.
+- Decompile `FUN_0045d480` (the underlying label/state-jump primitive
+  used by `MissionScript_EndMissionDeathSequence`) to confirm the
+  "schedule a jump to a death-sequence label" hypothesis.
+- Decompile the `TurretSetTarget` handler (name/param strings already
+  located: `0x4f4038`/`0x4f4030`/`0x4f401c`) to extend the confirmed
+  handler sample size to 4.
+- Characterize `DAT_00588338` (incremented by
+  `MissionScript_TerminateMission`) — likely a mission-end-trigger
+  count, not yet cross-referenced elsewhere.
