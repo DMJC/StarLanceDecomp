@@ -1654,3 +1654,243 @@ than resolved by assumption, matching the precedent set by the sibling
   this.
 - The ship-object struct's total size is unknown; `+0xb95` is just the
   highest offset touched by the functions opened this session.
+
+---
+
+# Tenth pass (2026-09-08, same day): `FireWeapon` and the weapon-instance/weapon-type structs
+
+Resolved the two "energy-threshold-crossing event" functions flagged
+last session as `FUN_0047c7b0`/`FUN_0047c800`, plus the actual
+fire-a-shot call `FUN_0047c5f0`.
+
+## `FireWeapon` (`0x0047c5f0`)
+
+```c
+void FireWeapon(void *unused, WeaponInstance *weapon, undefined4 unused2,
+                 char playSound);
+```
+
+The real "fire one shot" function, called both directly (from
+`UpdateWeaponFiring`'s player/AI fire decision) and indirectly (from
+`FireChildTurrets`, below).
+
+1. Reads a sound/visual variant index (0-14, clamped) from the weapon
+   TYPE definition reached via `weapon->+0xac`, field `+0x64`.
+2. Scans a 200-entry global projectile/tracer pool
+   (`DAT_00563148`, each entry `0x31`=49 dwords) for a free slot
+   (sentinel value `-1`) — a flat linear scan, not an explicit
+   free-list.
+3. Special-cases variant index `0xb`: a `rand()%5 < 2` (40%) roll
+   bumps it to `0xc` — an audio/visual variant swap whose purpose
+   isn't determined (a "charged" or upgraded-weapon variant is a
+   plausible guess, not confirmed).
+4. Spawns the projectile (`FUN_0047bdb0`, not decompiled) and sets its
+   transform (`FUN_004c10d0`/`FUN_004c0e80`).
+5. If `playSound` is set, plays a positional sound effect selected from
+   a 15-entry × 11-variant global table (`DAT_00500ce0`, indexed by the
+   variant index from step 1) — the 11 variants per entry plausibly
+   correspond to different listener-distance/perspective mixes (e.g.
+   own-ship-firing vs. another-ship-firing-nearby vs. far away), not
+   confirmed field-by-field.
+6. Links the new projectile into a global active-projectile
+   doubly-linked list (head at `DAT_00563144`).
+7. Sets the weapon instance's cooldown-until-tick value
+   (`weapon+0xbc`, a float) to the current tick (`DAT_005883b0`) plus a
+   per-variant duration from a second 15-entry table (`DAT_00500f64`).
+
+## `FireChildTurrets` (`0x0047c7b0`)
+
+```c
+void __thiscall FireChildTurrets(ShipObject *this, undefined4 param);
+```
+
+Iterates `this`'s child-object list — the SAME `+0xf8` (count) /
+`+0x100` (array) fields documented on the ship-object struct in the
+previous session, now cross-confirmed by a second, independent
+function using them the same way. For every child whose type ID
+(`child+0`) equals `4`, calls `FireWeapon` on it.
+
+This closes a satisfying loop: `UpdateObjectPhysicsAndTimers`'s
+per-object energy-regeneration step (documented last session) scans a
+capacity-group sub-table for threshold crossings and fires one of two
+events — this is one of them. Put together: a capital ship accumulates
+"turret energy" via the regen-curve mechanism, and each time it crosses
+a threshold, EVERY attached type-4 child object (now a reasonably
+confident working guess for "turret") automatically fires. This is a
+complete, mechanistic explanation for capital-ship turret-array autofire
+in this engine — no separate "turret AI" needed, just the same
+generic energy-threshold system already documented, reused.
+
+## `SpawnWeaponVisualEffect` (`0x0047c800`)
+
+```c
+void __fastcall SpawnWeaponVisualEffect(WeaponInstance *weapon);
+```
+
+The OTHER energy-threshold event handler — confirmed to be a genuinely
+different function from `FireChildTurrets` despite both being reached
+the same way from `UpdateObjectPhysicsAndTimers`. Scans an
+effect-anchor sub-table on the weapon instance (`+0xa4` → count
+`+0x214` / array `+0x218`, stride `0x7c`) for entries of type `7`, and
+for each match randomizes a UV sub-tile offset on a global active-effect
+object (`DAT_005636dc`) — picking a random quadrant from a 4-wide,
+2-tall texture atlas (U from a 2-bit random value × 0.25, V from a
+1-bit random value × 0.5). This is the classic "pick a random frame
+from a muzzle-flash/spark sprite sheet" technique — a visual-only
+effect trigger, not a fire-control decision.
+
+## Weapon-instance and weapon-type-definition structs (partial)
+
+Confirmed a two-level chain sitting behind each hardpoint entry
+(`shipObject+0x134[i]`, stride `0x60`, documented previously):
+`hardpoint[2]` → a **weapon instance** (per-mount runtime state) →
+`weaponInstance+0xac` → a shared **weapon type definition** (constant
+data reused by every mount of the same weapon).
+
+| Struct | Offset | Field | Confidence |
+|---|---|---|---:|
+| weapon instance | `+0x24` | reload time | 1 |
+| weapon instance | `+0x28` | energy/ammo cost per shot | 2 — `UpdateWeaponFiring` reads this exact offset via `((int*)piVar8[2])[10]` (index 10 × 4 bytes = `0x28`), a direct cross-check |
+| weapon instance | `+0xa4` | effect-anchor sub-table pointer | 2 |
+| weapon instance | `+0xac` | weapon-type-definition pointer | 2 |
+| weapon instance | `+0xbc` | cooldown-until-tick (float) | 2 |
+| weapon type definition | `+0x64` | sound/visual variant index (int, 0-14) | 2 |
+
+Global tables keyed by the variant index (0-14): `DAT_00500ce0`
+(sound IDs, 11 variants per entry) and `DAT_00500f64` (cooldown
+duration per variant).
+
+### Open follow-ups
+
+- `FUN_0047bdb0` (actual projectile spawn) and `FUN_00499f20` (owner-info
+  lookup feeding the new projectile's `+0xd` field).
+- The 200-entry projectile pool's own layout — only 3 of its 49
+  dword-fields glimpsed (`+0xd` owner info, `+0x2f`/`+0x30` linked-list
+  prev/next).
+- Whether object-class ID `4` really means "turret" — plausible from
+  this session's evidence alone, not cross-checked against the other
+  known class IDs (`0x6d`, `0xa8`, `0x44`, `0xd`, `0x1f`).
+- The `0xb`→`0xc` variant-swap's purpose — **see next pass**: type
+  `0xb` also gets independent random direction-jitter treatment in
+  `SpawnProjectile`, consistent with a spread/shotgun weapon pair.
+
+---
+
+# Eleventh pass (2026-09-08, same day): `SpawnProjectile` and `GetOwningShip`
+
+Resolved `FireWeapon`'s two remaining unknowns from last session. This
+pass produced the richest set of concrete weapon-type semantics so far.
+
+## `GetOwningShip` (`0x00499f20`)
+
+```c
+ShipObject *GetOwningShip(void *weaponOrMountObject);
+```
+
+Walks a parent-link chain (`+0xec` on each object, following until it
+hits `0`, i.e. the root) starting from a weapon or mount object, then
+returns the root object's `+0xa8` field — a pointer to the ship that
+ultimately owns it, correctly handling arbitrarily deep attachment
+(a weapon on a turret on a ship, for instance). The returned pointer's
+own fields (`+4` = owner/player-slot index, `+0x644`, `+0x684` =
+current-target-like pointer) all match ship-object fields already
+documented from earlier sessions — this cross-confirms the existing
+ship struct rather than requiring a new one.
+
+## `SpawnProjectile` (`0x0047bdb0`)
+
+```c
+void __fastcall SpawnProjectile(int poolSlotIndex, int projectileType);
+```
+
+The real per-shot function — fills in the projectile-pool slot
+`FireWeapon` already allocated. Dense and not fully decoded line by
+line, but several concrete, previously-unknown pieces of weapon-type
+behavior are now confirmed:
+
+**The projectile-type table is broader than "sounds."** `DAT_00500ce0`
+(11 ints per entry × 15 entries, previously documented only as a sound
+table from `FireWeapon`) turns out to hold at least: `+0` sound-ish ID,
+`+4` lifetime/duration (used directly as the new projectile's
+expiry-tick delta), `+8` scale/radius (a float used both for visual
+size and, squared and inverted, as a proximity-detection radius
+factor later in the same function). This is really a general
+projectile-type DEFINITION table, sound being only one field of it.
+
+**Force-feedback weapon rumble.** If this is the LOCAL player's own
+shot and force feedback is enabled (`DAT_0050e1a4`), triggers a
+DirectInput force effect — the call shape (`vtable+0x1c`, args
+`(self, 1, 0)`) matches `IDirectInputEffect::Start` exactly — selected
+from a per-projectile-type array of pre-created effect handles
+(`DAT_005ddc58` and 9 siblings, one slot per type 0-10).
+
+**An instant-hit beam-weapon rendering path exists.** Gated by a global
+rendering-feature flag (`*(int*)(DAT_00588730+0x1ac) != 0`), creates a
+separate "beam" visual effect object (`FUN_004c4f30`) with explicit
+color/alpha/width parameters, and recycles a small 2-slot-per-side ring
+buffer of recent beam effects (one buffer for the player's beams,
+another for everyone else's) — fading out the oldest when a new one
+fires. This confirms at least some weapons in this engine render as
+instant hitscan beams rather than physically-simulated travel-time
+projectiles, though the code gates this on a global flag rather than a
+clear per-type check, so which weapon TYPES actually use it isn't
+determined from this function alone.
+
+**Type `0xb` = a spread/shotgun-style weapon**, now confirmed two
+independent ways: `FireWeapon` (documented last session) gives it a
+40% chance to swap to a related variant `0xc`, and `SpawnProjectile`
+independently gives it randomized shot-direction jitter (three
+independent random offsets, each `(rand()/RAND_MAX - 0.5) * 0.12`
+radians-ish, applied via `FUN_004c2410`). Both point the same direction
+— `0xb`/`0xc` reads as a spread-weapon pair, plausibly "tight spread"
+and "wide spread" variants of the same gun.
+
+**A coherent "special weapons" cluster, types `0xa`-`0xe`.** These are
+explicitly exempted from the aim-assist system below (`iVar6 != 0xa &&
+iVar6 != 0xb && iVar6 != 0xc && iVar6 != 0xd && iVar6 != 0xe`) — as
+opposed to standard forward guns (types `0`-`9`, going by the
+force-feedback table's own 0-10 range). Plausibly mines,
+countermeasures, and spread weapons as a group, distinct from regular
+cannons.
+
+**Difficulty-scaled aim assist — a new, concrete difficulty mechanic.**
+If the owning ship's `+0x674` flag is set (the SAME field flagged last
+session as a difficulty-scaled reload-time modifier — now confirmed to
+gate a SECOND, independent difficulty behavior) and the weapon type
+isn't in the special cluster above, applies an aim-correction
+adjustment toward the ship's current target (`+0x684`, resolved via
+`GetOwningShip`): a simpler correction path for the player's own shots,
+a target-flag-gated correction path for AI-controlled shots (checking
+`FUN_00401870`, not decompiled). This is a genuine, previously-unknown
+"easy mode helps you aim" mechanic.
+
+**Types `0xd`/`0xe` get a dramatically larger proximity-detonation
+radius** — the base detection-distance check gets `+1200`/`+3000`
+added respectively (versus `+0` for every other type). Combined with
+being in the aim-assist-exempt cluster, this is strong evidence these
+two types are proximity mines or other area-effect ordnance rather
+than direct-fire weapons.
+
+**A proximity/homing-reaction system runs on every shot fired.** Scans
+every active object in the main array (`DAT_00587ce0`) each time a
+projectile spawns; for any object within the scaled detection radius,
+either queues a "nearby object" record (a small, max-20-entry
+per-projectile array at pool-slot `+0x68`) if that object isn't yet
+flagged "active/awake," or immediately calls `FUN_0049bef0` (not
+decompiled — plausibly an AI-alert/evasive-reaction trigger) if it
+already is. This reads as the mechanism by which nearby ships notice
+and react to incoming fire, though `FUN_0049bef0`'s own behavior isn't
+confirmed.
+
+### Open follow-ups
+
+- `FUN_0047d9a0` (projectile transform/velocity init), `FUN_004c4f30`
+  (beam-effect creation), `FUN_0049bef0` (proximity-alert reaction) —
+  none decompiled.
+- The per-projectile-type mesh/visual table (`&DAT_00500cd0`, stride
+  `0x2c`=44 bytes) — referenced but not opened.
+- Whether the owning ship's `+0x674` flag is really one unified "easy
+  mode" toggle (now confirmed to gate both reload speed and aim
+  assist) or two coincidentally-related settings sharing a field.
+- Which weapon type IDs specifically use the beam-rendering path — the
+  code's gate is a global flag, not obviously per-type.

@@ -275,13 +275,64 @@ UpdateShieldQuadrants (0x476fc0)
 
 UpdateWeaponFiring (0x4770e0)
   -> depends on: ship-object +0x130/+0x134 hardpoint array, +0x140
-                 energy pool, +0x13c ammo count, +0x14c alt-fire toggle
-  -> depends on (NOT YET IN DB): FUN_0047c5f0 ("FireWeapon"?),
-                 FUN_0047c800 (shared with UpdateObjectPhysicsAndTimers
-                 — same address called from both, worth checking
-                 whether it's genuinely one shared function or a
-                 coincidental address collision when this is revisited)
+                 energy pool, +0x13c ammo count, +0x14c alt-fire toggle,
+                 FireWeapon (resolved next session)
   <- depended on by: ProcessMissionSimulationTick
+```
+
+## FireWeapon chain (seventh session)
+
+```
+FireWeapon (0x47c5f0)
+  -> depends on: weapon-instance +0xac (-> weapon-type-def +0x64
+                 variant index), the 200-entry projectile pool
+                 (DAT_00563148), 2 global 15-entry tables keyed by
+                 variant index (DAT_00500ce0 sound, DAT_00500f64
+                 cooldown duration), the active-projectile linked list
+                 (DAT_00563144 head)
+  -> depends on (NOT YET IN DB): FUN_0047bdb0 (actual projectile spawn),
+                 FUN_00499f20 (owner-info lookup)
+  <- depended on by: UpdateWeaponFiring (direct player/AI fire
+                 decision), FireChildTurrets (turret auto-fire)
+
+FireChildTurrets (0x47c7b0)
+  -> depends on: ship-object +0xf8/+0x100 child-object list (SAME
+                 fields UpdateObjectPhysicsAndTimers documented —
+                 cross-confirmed via independent usage), FireWeapon
+  <- depended on by: UpdateObjectPhysicsAndTimers (as one of its two
+                 energy-threshold-crossing event handlers)
+
+SpawnWeaponVisualEffect (0x47c800)
+  -> depends on: weapon-instance +0xa4 effect-anchor sub-table (count
+                 +0x214, array +0x218, stride 0x7c), a global active-
+                 effect object (DAT_005636dc)
+  <- depended on by: UpdateObjectPhysicsAndTimers (the OTHER energy-
+                 threshold-crossing event handler — confirmed distinct
+                 from FireChildTurrets despite both being reached the
+                 same way)
+
+GetOwningShip (0x499f20)
+  -> depends on: a weapon/mount object's +0xec parent-link chain,
+                 walked to root, then that root's +0xa8 field
+  <- depended on by: SpawnProjectile (aim-assist target lookup, local-
+                 player check), FireWeapon (indirectly, via SpawnProjectile)
+
+SpawnProjectile (0x47bdb0)
+  -> depends on: the 200-entry projectile pool slot FireWeapon
+                 allocated, the projectile-type-definition table
+                 (DAT_00500ce0, now known to hold sound+lifetime+scale,
+                 not just sound), a per-type mesh/visual table
+                 (&DAT_00500cd0, stride 0x2c, NOT YET opened), a
+                 per-type DirectInput force-feedback effect-handle
+                 array (DAT_005ddc58 family), a 2-slot-per-side beam-
+                 effect ring buffer (DAT_0056317x/DAT_0056316x),
+                 GetOwningShip (for aim-assist and force-feedback
+                 local-player checks), the main object array
+                 (DAT_00587ce0) for its proximity-detonation scan
+  -> depends on (NOT YET IN DB): FUN_0047d9a0 (transform/velocity
+                 init), FUN_004c4f30 (beam-effect creation),
+                 FUN_0049bef0 (proximity-alert reaction)
+  <- depended on by: FireWeapon
 ```
 
 ## Menu-screen internals (NOT YET IN DB — next layer down)
