@@ -713,6 +713,24 @@ sessions ago) into one coherent structure.
 
 ### Open follow-ups
 
-- `FUN_00453070` (graph-node-to-callback-arg conversion in `ScanNavigationGraphTarget`'s type-2 recursive case), `FUN_0045a440` (invalid-node-type fallback), `FUN_004b9920`/`FUN_004b9830` (the underlying network packet-write primitives — clearly a small, reusable serialization API given how many places call them, worth opening if the multiplayer networking layer becomes a focus).
+- ~~`FUN_00453070`, `FUN_0045a440`, `FUN_004b9920`, `FUN_004b9830`~~ — **all four resolved next, see below: confirms "DP" = DirectPlay and reveals a genuine bit-packed network serialization layer.**
 - What event type `0x69` (105) specifically represents, and why it alone carries extra data.
 - The full node-type enum for the navigation graph (only 0/1/2 observed; a `default` fallback exists implying more types may be possible even if unused).
+
+## DirectPlay confirmed, bit-packed networking, and the emergency crash handler (2026-09-08, twentieth session)
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `GetNavGraphNodeIndexFromPointer` (0x453070, was `FUN_00453070`) | 2 | Sibling utility to `GetObjectIndexFromPointer`, same shape: converts a raw pointer into a navigation-graph node array index by subtracting `DAT_005294fc` and dividing by `0xc`(12) — the exact node stride confirmed in `ScanNavigationGraphTarget` last session. Cross-confirms `DAT_005294fc` as that array's base a second, independent way. |
+| `HandleFatalMissionError` (0x45a440, was `FUN_0045a440`) | 3 | The navigation graph's invalid-node-type fallback is a genuine CRASH HANDLER: formats `"** IT'S A DISASTER! ** Emergency file saved to 'fatal.dte'"` (the exact string found in the very first bootstrap session but never traced to its user), calls `FUN_0045a460` (presumably the actual emergency-state-dump writer, not decompiled) to save an emergency `fatal.dte`, then calls the CRT `exit()` (`FUN_004d04ed`, identified in `mainCRTStartup` in session 1) with code `-1`. A real developer safety net: on unrecoverable mission-data corruption, dump an emergency save file before terminating, rather than crashing uncontrolled. |
+| `BeginNetworkMessage` (0x4b9920, was `FUN_004b9920`) | 2 | Selects a per-player message buffer (`DAT_005dcd1c` = buffer pointer, `DAT_005dd528` = bit-offset cursor pointer) from one of TWO parallel buffer sets based on a flags bit (`param_3 & 1`) — plausibly reliable-vs-unreliable channel selection, a standard networking pattern. Another flag bit (`& 2`) overrides the target player with the local player slot. If given a message-type ID, logs it via `DebugLog_Stub(3, "Sending: %s", ...)` looking up a name from a table anchored near `PTR_s_DPMESSAGE_END_0050ca94` — **confirms a real "DPMessage" enum with debug names exists.** |
+| `WriteMessageBits` (0x4b9830, was `FUN_004b9830`) | 3 | **A genuine bit-packed network serialization primitive** — not byte-aligned. Writes an arbitrary number of BITS (not bytes) from a source buffer into the current player's message buffer at the current bit-offset, handling both the byte-aligned fast path and the general unaligned case (shifting/merging bits across a byte boundary), masking trailing partial-byte bits via a lookup table (`DAT_0050ca88`), and bounds-checking against a 16KB (`0x4000`) max message size. This is genuine bit-level compression — exactly the kind of bandwidth-conscious serialization a 1999 dial-up-era multiplayer game would need. |
+
+**"DP" = DirectPlay, confirmed.** A second string, `"Bad DPMessage number %d"` (alongside `"DPMESSAGE_END"`), settles the "DP" prefix seen in `QueueAiEvent`'s `"DPStack Overflow"` assertion and this message-table naming: Star Lancer's multiplayer layer is built on **Microsoft DirectPlay**, the standard Windows multiplayer networking API of 1996-2002 — a natural, expected choice for a game of this era, now confirmed directly from the binary's own debug strings rather than assumed. This slightly revises the earlier "DPStack ... 'DP' plausibly Decision Process" guess from two sessions ago: "DP" is DirectPlay-related throughout, though `QueueAiEvent`'s own queue might still be an AI-side structure that merely reuses the "DP" naming convention (a per-object stack of pending DirectPlay messages related to AI events) rather than literally being a decision-process queue — the exact relationship isn't fully pinned down, but the acronym source is now clear.
+
+### Open follow-ups
+
+- `FUN_0045a460` (the actual emergency-mission-state-dump writer).
+- The `DPMessage` name table itself (anchored near `0x50ca94`) — reading it directly would give the real names of every DirectPlay message type the game sends, a potentially rich catalog similar to the AI state table.
+- The two parallel per-player buffer sets in `BeginNetworkMessage` (`DAT_005db674`/`DAT_005db678` vs `DAT_005db67c`/`DAT_005db680`) — reliable/unreliable channel guess not confirmed.
+- `DAT_0050ca88`'s trailing-bit-mask table contents (8 bytes expected for a per-bit-count mask table).

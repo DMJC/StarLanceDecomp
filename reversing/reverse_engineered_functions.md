@@ -2981,14 +2981,111 @@ network, not a fixed-size struct blindly copied.
 
 ### Open follow-ups
 
-- `FUN_00453070` (graph-node recursion prep for
-  `ScanNavigationGraphTarget`'s type-2 case), `FUN_0045a440`
-  (invalid-node-type fallback), `FUN_004b9920`/`FUN_004b9830` (the
-  underlying network packet-write primitives — clearly a small, reused
-  serialization API given how many call sites exist; worth opening if
-  the multiplayer networking layer becomes a dedicated focus).
+- ~~`FUN_00453070`, `FUN_0045a440`, `FUN_004b9920`, `FUN_004b9830`~~ — resolved next, see below.
 - What event type `0x69` specifically represents, and why it alone
   carries extra network data.
 - The full navigation-graph node-type enum (only 0/1/2 observed; the
   `default` fallback implies the format allows for more even if unused
   in practice).
+
+---
+
+# Twenty-second pass (2026-09-08, same day): DirectPlay confirmed, and a bit-packed networking layer
+
+Resolved the last 4 follow-ups from the navigation-graph/AI-event
+thread. The headline result: direct confirmation that Star Lancer's
+multiplayer layer is built on **Microsoft DirectPlay**, plus discovery
+of a genuine bit-level packet-compression system.
+
+## `GetNavGraphNodeIndexFromPointer` (`0x00453070`)
+
+Sibling to `GetObjectIndexFromPointer`, identical shape: converts a raw
+pointer into a navigation-graph node index by subtracting
+`DAT_005294fc` and dividing by `0xc` (12, the node record size
+confirmed in `ScanNavigationGraphTarget` last session). Cross-confirms
+`DAT_005294fc` as that array's base a second, independent way.
+
+## `HandleFatalMissionError` (`0x0045a440`) — the emergency crash handler
+
+The navigation graph's fallback for an invalid/unrecognized node type
+turns out to be a genuine developer-authored crash handler:
+
+```c
+void __fastcall HandleFatalMissionError(int badNodeType) {
+    FUN_0045a460(1, "** IT'S A DISASTER! ** Emergency file saved to "
+                     "'fatal.dte'", badNodeType);
+    exit(-1);  // FUN_004d04ed, the CRT exit identified in mainCRTStartup
+}
+```
+
+This is the first time the `"** IT'S A DISASTER! **"` string — found
+in the very first bootstrap session but never traced to an actual
+caller — has been connected to real code. On unrecoverable mission
+data corruption (here: an invalid navigation-graph node type), the
+game writes an emergency `fatal.dte` dump (via `FUN_0045a460`, not
+decompiled — presumably the actual state-serialization call) before
+terminating via the standard CRT exit path, rather than crashing
+uncontrolled. A real safety net for corrupted mission data, not a
+decompiler artifact or dead code.
+
+## `BeginNetworkMessage` (`0x004b9920`) and `WriteMessageBits` (`0x004b9830`) — bit-packed serialization
+
+```c
+void __fastcall BeginNetworkMessage(int targetPlayer, int messageTypeId,
+                                     byte flags);
+bool __fastcall WriteMessageBits(byte *sourceBytes, int bitCount);
+```
+
+`BeginNetworkMessage` selects a per-player message buffer
+(`DAT_005dcd1c` = buffer pointer, `DAT_005dd528` = bit-offset cursor)
+from one of two parallel buffer sets, chosen by a flags bit —
+plausibly a reliable-vs-unreliable channel selector, a standard
+pattern for a networking layer of this era. A second flags bit
+redirects the target to the local player. If given a message-type ID,
+it looks up and logs a debug name from a table rooted near
+`PTR_s_DPMESSAGE_END_0050ca94`.
+
+`WriteMessageBits` is the real payload: a genuine **bit-packed
+serialization primitive**, not byte-aligned. It writes an arbitrary
+number of BITS from a source buffer into the current message buffer at
+the current bit cursor, correctly handling both the byte-aligned fast
+path and the general case (shifting and merging bits across a byte
+boundary when the cursor isn't byte-aligned), masking the trailing
+partial byte via a lookup table (`DAT_0050ca88`) so leftover bits don't
+leak stale data, and bounds-checking against a 16KB (`0x4000`) maximum
+message size. This is real bandwidth-conscious bit-level compression —
+exactly what a 1999 game built around dial-up-modem multiplayer would
+need, and a level of engineering sophistication worth calling out on
+its own.
+
+## "DP" = DirectPlay, confirmed
+
+A second debug string, `"Bad DPMessage number %d"` (found alongside
+`"DPMESSAGE_END"`, the label anchoring `BeginNetworkMessage`'s
+message-name table), settles the "DP" prefix seen throughout this
+investigation — including `QueueAiEvent`'s `"DPStack Overflow"`
+assertion two sessions ago: Star Lancer's multiplayer layer is built
+on **Microsoft DirectPlay**, the standard Windows multiplayer
+networking API of 1996-2002. This is the expected, natural choice for
+a game of this era, now confirmed directly from the binary's own debug
+strings rather than assumed from context. This slightly refines (not
+overturns) the earlier "DP … plausibly Decision Process" guess for
+`QueueAiEvent`'s queue: the acronym's SOURCE is DirectPlay throughout;
+whether `QueueAiEvent`'s specific queue is itself a literal
+DirectPlay-message staging area or an AI-side structure that merely
+borrows the naming convention isn't fully pinned down, but "DP" no
+longer needs a separate, AI-specific explanation.
+
+### Open follow-ups
+
+- `FUN_0045a460` (the actual emergency-mission-state-dump writer called
+  by `HandleFatalMissionError`).
+- The `DPMessage` name table itself (rooted near `0x50ca94`) — reading
+  it directly would reveal the real names of every DirectPlay message
+  type the game sends, a potentially rich catalog similar to the AI
+  state table found two sessions ago.
+- The two parallel per-player buffer sets in `BeginNetworkMessage` —
+  the reliable/unreliable channel interpretation is a guess, not
+  confirmed.
+- `DAT_0050ca88`'s trailing-bit-mask table contents (an 8-entry
+  per-bit-count mask table is expected but not read).

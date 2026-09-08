@@ -586,6 +586,30 @@ GetObjectIndexFromPointer (0x4531c0)
                  array)
   <- depended on by: ScanForTargetCandidate, ScanNavigationGraphTarget
 
+GetNavGraphNodeIndexFromPointer (0x453070)
+  -> depends on: DAT_005294fc (nav-graph node array base, cross-
+                 confirmed a second way — same global ScanNavigationGraphTarget
+                 uses directly)
+  <- depended on by: ScanNavigationGraphTarget (type-2 recursive case)
+
+HandleFatalMissionError (0x45a440)
+  -> depends on: FUN_0045a460 (NOT YET IN DB, actual emergency-dump
+                 writer), FUN_004d04ed (CRT exit, identified session 1)
+  <- depended on by: ScanNavigationGraphTarget (invalid node-type
+                 fallback)
+
+BeginNetworkMessage (0x4b9920) / WriteMessageBits (0x4b9830)
+  -> depends on: two parallel per-player buffer sets (DAT_005db674/
+                 DAT_005db678 vs DAT_005db67c/DAT_005db680, selected by
+                 a flags bit — reliable/unreliable channel guess),
+                 DebugLog_Stub, a DPMessage debug-name table
+                 (PTR_s_DPMESSAGE_END_0050ca94, NOT read), DAT_0050ca88
+                 (trailing-bit mask table)
+  <- depended on by: BroadcastAiEventPacket, and (by design, given the
+                 generic bit-packed-message shape) presumably most/all
+                 of the game's DirectPlay traffic — confirms "DP" =
+                 DirectPlay throughout the codebase (see confidence_db.md)
+
 QueueAiEvent (0x402660)
   -> depends on: object+0xb8c/+0xb90 (event queue count/buffer, lazily
                  allocated 720 bytes), ReportAssertionFailureEx
