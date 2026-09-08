@@ -2593,13 +2593,60 @@ silently editing the earlier sessions' text.
 
 ### Open follow-ups
 
-- `FUN_0040ca50` (called at every `SetShipDestroyedState` command push
-  — likely a "reset/prepare AI command slot" primitive), the `0x6c`
-  command's real meaning, and the full AI command-type enum (only
-  `0xb`/`0x6c`/`100` observed so far).
+- ~~`FUN_0040ca50`~~ — resolved immediately below.
 - The `object+0x600` hull-section array's own element count (shields
   are confirmed 4 quadrants; hull sections aren't confirmed to match).
-- Whether `Ai.cpp`'s command-queue system also drives normal,
-  non-destruction ship behavior (patrol, attack, evade) — plausible
-  given the shared `+0x684` field and lazy-allocation pattern, not
-  confirmed.
+
+## `TrySetAiState` (`0x0040ca50`) — a priority-gated AI finite-state-machine
+
+```c
+bool __fastcall TrySetAiState(int shipSlot, int newStateId);
+```
+
+The function `SetShipDestroyedState` calls to actually push its
+command — and it turns out to be the GENERAL-PURPOSE AI state
+transition function, confirming `Ai.cpp`'s command system drives all
+ship AI behavior changes, not just destruction.
+
+Reveals a genuine state-definition table (`PTR_DAT_004e06e0`, indexed
+`[stateId/100][stateId%100]`, 24 bytes per entry) with real per-state
+metadata:
+
+| Field offset | Meaning |
+|---|---|
+| `+8` | OnExit callback — invoked when leaving this state |
+| `+0xc` | flags byte; bit `0x20` = unconditionally allow transitions INTO this state, bypassing the priority check |
+| `+0x10` | display-name string — used directly in debug/assert messages |
+| `+0x14` | priority (int) |
+
+**A new AI state can only be entered if its priority exceeds the
+ship's CURRENT state's priority** — otherwise the request is rejected
+and logged via `ReportAssertionFailureEx` with a message built from
+both states' display names (`"Cannot set ai '%s' on ship '%s'. Still
+..."` for a normal rejected transition, `"Cannot clear ai on ship '%s'.
+Still ..."` for a rejected clear-AI request via `newStateId == -1`).
+State `0xb` ("destroyed") bypasses this check entirely via the
+special-case flag — explaining exactly why `SetShipDestroyedState`
+still checks `if (currentState != 0xb)` itself before calling this: to
+avoid a redundant OnExit callback on an already-destroyed ship, not
+because the priority system would otherwise block it.
+
+Early exits: a ship with `+0x680==0` (not yet AI-initialized) trivially
+allows any request (nothing to validate against yet); one with
+`+0x688!=0` (mid-transition) also trivially allows it; a
+destroyed/inactive ship (flags `& 0x10000840`) trivially rejects any
+request.
+
+This is a well-designed, general priority-based finite-state-machine —
+not an ad-hoc destruction-only mechanism as it first appeared from
+`SetShipDestroyedState` alone.
+
+### Open follow-ups
+
+- The actual CONTENTS of `PTR_DAT_004e06e0` (the full list of AI
+  states, their names, and their priority values) — only the per-entry
+  field LAYOUT is confirmed; reading the table's static data directly
+  would reveal the complete AI-state catalog, likely a genuinely
+  interesting list (patrol, attack, evade, dock, flee, destroyed, etc.).
+- Whether priority values are universal constants or vary by ship
+  class.

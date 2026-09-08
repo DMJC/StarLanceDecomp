@@ -508,9 +508,20 @@ checked" detail.
 
 ### Open follow-ups
 
-- `FUN_0040ca50` (called at every `SetShipDestroyedState` command-push — likely the real "reset/prepare AI command slot" primitive), the `0x6c` command's exact meaning (pre-destruction NPC state?), and the full AI command-type enum (only `0xb`/`0x6c`/`100` observed so far).
+- ~~`FUN_0040ca50`~~ — **resolved immediately next, see below: a priority-gated AI state machine.**
 - `object+0x600` hull-section array's own size/count (how many sections a ship has — the shield-quadrant array was 4; hull sections aren't confirmed to be the same count).
-- Whether `Ai.cpp`'s command-queue system is the same one driving normal (non-destruction) ship behavior — plausible given the shared `+0x684` field and allocation-on-first-use pattern, not confirmed.
+- Whether `Ai.cpp`'s command-queue system is the same one driving normal (non-destruction) ship behavior — **confirmed below**: `TrySetAiState` is a general priority-gated FSM transition function, not destruction-specific, so yes.
+
+## `TrySetAiState` (2026-09-08, fifteenth session) — a priority-gated AI finite-state-machine
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `TrySetAiState` (0x40ca50, was `FUN_0040ca50`) | 3 | The general-purpose AI state-transition function `SetShipDestroyedState` (and presumably every other AI behavior change) calls. Reveals a genuine state-definition table (`PTR_DAT_004e06e0`, indexed `[commandID/100][commandID%100]`, 0x18=24 bytes/entry) with per-state fields: `+8` an OnExit callback (invoked when leaving a state), `+0xc` a flags byte (bit `0x20` = "always allow this transition unconditionally," bypassing the priority check entirely), `+0x10` a display-name string pointer (used directly in debug/assert messages — `"Cannot set ai '%s' on ship '%s'. Still ..."`/`"Cannot clear ai on ship '%s'. Still ..."`), `+0x14` a PRIORITY integer. **Transitions are only allowed if the new state's priority exceeds the current state's** — otherwise the request is rejected and logged via `ReportAssertionFailureEx`. Command `0xb` ("destroyed", from `SetShipDestroyedState`) and `-1` ("clear AI") get special handling, but ordinary commands go through the full priority gate. Early-exits: a ship not yet AI-initialized (`+0x680==0`) or mid-transition (`+0x688!=0`) trivially allows the request; a destroyed/inactive ship (`+8 & 0x10000840`) trivially rejects it. This is a well-designed, general priority-based FSM — confirms `Ai.cpp`'s command system drives ALL ship AI behavior changes, not just destruction. |
+
+### Open follow-ups
+
+- The full contents of the `PTR_DAT_004e06e0` state-definition table — only its per-entry LAYOUT is confirmed, not its actual list of states/priorities/names (would require reading the table's static data directly).
+- Whether state priority values are fixed constants or vary per ship class.
 
 ## WinMain state-machine cluster (first dive, 2026-09-08)
 

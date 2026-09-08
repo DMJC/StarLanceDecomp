@@ -504,9 +504,18 @@ SetShipDestroyedState (0x401f30)
   -> depends on: object+0x684 (CORRECTED this session — an AI
                  command/state structure, not a "current target"
                  reference as described in 3 earlier sessions; see
-                 confidence_db.md's correction note), FUN_0040ca50
-                 (NOT YET IN DB, called at every command push)
+                 confidence_db.md's correction note), TrySetAiState
   <- depended on by: ApplyHullDamage (on hull depletion)
+
+TrySetAiState (0x40ca50)
+  -> depends on: PTR_DAT_004e06e0 (AI state-definition table: OnExit
+                 callback, flags, display name, priority per state),
+                 object+0x680 (AI-initialized flag), object+0x688
+                 (mid-transition busy flag), ReportAssertionFailureEx
+                 (rejected-transition logging)
+  <- depended on by: SetShipDestroyedState, and (by design, though not
+                 individually traced) presumably every other AI
+                 behavior-change call site in the game
 ```
 
 ## SurrenderLib scene-node primitives (tenth session)
