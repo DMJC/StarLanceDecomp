@@ -5689,3 +5689,105 @@ dependency-free Python port, runnable directly against any `.fnt`/
   in `DecompressRefPackBlock`'s original logic, was not exercised by
   either test file (both used the compact 3-byte-size form) -- not
   independently verified.
+
+## Pass 43 -- Mission briefing / weapons loadout / debriefing: the full flow (2026-09-09)
+
+Direct research request. Re-decompiled `RunMissionBriefingScreen` in
+full (previously only documented at a summary level in Passes 4/7) and
+traced its two direct callees, `InitializeLoadoutScreen` (was
+`FUN_00441aa0`, source-tagged `C:\lancer\interface\loadout\loadout.cpp`
+and `...\loadout_load.cpp`) and `UpdateLoadoutSelection` (was
+`FUN_00443760`). Together these three functions implement the ENTIRE
+pre-mission sequence, and reveal `RunMissionBriefingScreen` also
+doubles as the debriefing/epilogue screen -- resolving several loose
+threads from Passes 4, 6, and 25 in one pass.
+
+### The full sequence, in order
+
+1. **Loadout scene setup** (`InitializeLoadoutScreen`, called first,
+   BEFORE the briefing video, unless the current mission is `0x1d`/29):
+   loads and positions 3 separate ship-model lists -- fighters
+   (`DAT_00523e84` count), missiles (`DAT_00523e74`), and gunships
+   (`DAT_00523aa4`) -- each via `SR_MEM_allocate_named(...,
+   "C:\lancer\interface\loadout_load.cpp",...)`, builds the loadout
+   room's backdrop/panel materials, sets up a master target-reticle
+   mesh and lighting rig ("Loadout cursor light", "Loadout Ambient
+   light", "Loadout bgreen/red/green light" -- confirmed real light
+   names), and converts the shared `.ccb` master palette (Pass 30) for
+   this scene. This is a genuinely huge, expensive one-time setup --
+   consistent with `WinMain`'s `InitializeMissionGameplay`/`RunMission
+   Gameplay`/`UnloadMission` trio pattern of "prepare everything up
+   front."
+
+2. **Briefing video OR the campaign epilogue** (`RunMissionBriefingScreen`
+   itself): builds a filename array covering missions 15,16,18-28
+   (`"new_m15.bik"`..`"new_m28.bik"`, confirming and extending Pass 4's
+   partial list) and, for a normal mission, opens `"<name>.bik"` via
+   `FindBinkMovieInArchive`+`_BinkOpen_8`, playing it in a poll loop
+   (Esc to skip, `'0'` for screenshot via `SaveScreenshotTga`).
+   **Mission `0x1d` (29) takes a completely different path here**:
+   instead of a Bink video, it loads a resource via `HOG_BigRead()`
+   whose filename argument (hidden `__fastcall` register, but its
+   address falls exactly on the `"enddebriefing.ut"` string per a
+   direct data xref) is **`enddebriefing.ut`** -- confirming, at last,
+   that **mission 29 is not a normal mission at all -- it's the
+   campaign's own final debriefing/epilogue sequence**, explaining
+   every one of the "mission 29 special-cased, no speech-tag lookup"
+   observations scattered across Passes 4, 6, and 25.
+
+3. **Interactive loadout configuration** (the huge second half of
+   `RunMissionBriefingScreen`, reached via `goto LAB_004376d2` after
+   the video/epilogue finishes): re-initializes the render pane, then
+   runs a real per-frame loop calling `UpdateLoadoutSelection` every
+   tick. That function toggles per-object visibility flags (`+0x40`)
+   across the fighter/missile/gunship model arrays based on the
+   player's current selection, rebuilds the selection tooltip
+   (`FUN_00446180`), and contains one concrete mission-specific rule:
+   **mission `0x17` (23) hides one specific object from the loadout**
+   (`if (DAT_00562dc8 != 0x17) { show object }` -- i.e. that one item
+   is unavailable during mission 23 specifically; which item and why
+   not decoded further this session). Exit is via `FUN_004394d0`'s
+   confirm dialog (0=keep configuring, 1=confirmed->launch into VR ship
+   interior with the campaign-stage-appropriate hub room, 2=cancel/other
+   ->return 1 without launching).
+
+4. **Closing speech narration**: after loadout confirmation, loads
+   `"ms_speech_enrbr_tag_%02d.ut"` (Pass 4's "enroute briefing" tag,
+   confirmed here as playing AFTER loadout selection, not before) and
+   polls until it completes or `DAT_0051da94` reaches a fixed frame
+   count (`0x3c`=60), with a synced animation trigger at frame `0x11`
+   (17) via `FUN_00461d80(0,0x7f)` -- very likely a talking-head/mouth
+   animation cue for a comm-window portrait, matching this project's
+   earlier-documented pattern of synced portrait animation during
+   dialogue.
+
+5. **Hand-off**: cleans up all loadout resources and returns control to
+   `RunShipInteriorVRLoop` (via the `DAT_0051d478` room-node
+   assignment already documented in Pass 4), or exits to the main menu
+   if the player backed out.
+
+### Confidence
+
+**Confidence 4** on the overall 5-stage sequence and the mission-29-is-
+the-debriefing finding (both directly read from the decompile, with the
+`enddebriefing.ut` connection confirmed via a real data xref rather than
+guessed); **confidence 2** on the specific claim that `UpdateLoadoutSelection`'s
+`0x11`-frame trigger is a talking-head animation cue (a reasonable
+inference from this project's established patterns, not independently
+verified); **confidence 1** on what mission 23's hidden loadout item
+actually is (not decoded).
+
+### Open follow-ups
+
+- `InitializeLoadoutScreen`'s 3 ship-model-list build loops (fighters/
+  missiles/gunships) were decompiled at a structural level only (Pass
+  36-era investigation) -- the actual per-mission AVAILABLE-LOADOUT
+  list (which fighters/weapons the player can choose from, and how it
+  varies by campaign progress) was not extracted.
+- `UpdateLoadoutSelection`'s exact selection/input-handling logic (how
+  clicking a ship model changes `DAT_00523e68`, the "currently selected
+  index") -- not traced.
+- Mission 23's hidden loadout object -- not identified.
+- `FUN_00446180` (tooltip/description text builder) -- not decompiled;
+  likely the most direct path to real weapon/ship names and stats if
+  pursued further.

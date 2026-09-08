@@ -1397,3 +1397,23 @@ Direct request. Hand-ported `DecompressRefPackBlock` (Pass 29, `0x4cc350`) to Py
 - Why `YOVB.SPR` shape index 0 decodes to garbage while 1-4 are clean -- possible special/reserved first entry.
 - `ShapeRecord.headerField0`'s semantic meaning still unresolved (now confirmed readable, not confirmed meaningful).
 - The "large header" (4-byte size) RefPack variant not exercised by either test file.
+
+## Mission briefing / weapons loadout / debriefing: the full flow (2026-09-09, forty-third session)
+
+Direct research request. Full decompile of `RunMissionBriefingScreen` plus its two direct callees.
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `InitializeLoadoutScreen` (0x441aa0, was FUN_00441aa0) | 3 | Confirmed real via `loadout.cpp`/`loadout_load.cpp` source tags; builds fighter/missile/gunship model lists, backdrop, lighting rig. Called directly by `RunMissionBriefingScreen`, not reachable via `RunMenuScreenLoop`. |
+| `UpdateLoadoutSelection` (0x443760, was FUN_00443760) | 3 | Confirmed as the per-frame loadout-UI-update loop body (toggles model visibility flags, rebuilds tooltip). Contains a mission-23-specific hidden-object rule. |
+| The 5-stage briefing/loadout/debriefing sequence (loadout setup -> video/epilogue -> interactive loadout -> closing speech -> VR hand-off) | 4 | Directly read from `RunMissionBriefingScreen`'s full decompile. |
+| Mission 29 (0x1d) = the campaign's final debriefing/epilogue, loading `enddebriefing.ut` instead of a normal briefing video | 4 | Confirmed via a real data xref from `enddebriefing.ut`'s address landing inside the mission-29 special-case block. Resolves the "mission 29 special-cased" observation scattered across Passes 4/6/25. |
+| Speech narration (`ms_speech_enrbr_tag_%02d.ut`) plays AFTER loadout confirmation, not before | 3 | Directly read; corrects/refines the implicit ordering assumption from Pass 4. |
+| Frame-0x11 animation trigger during closing speech = talking-head/portrait animation cue | 2 | Reasonable inference from established project patterns, not independently verified. |
+
+### Open follow-ups
+
+- `InitializeLoadoutScreen`'s per-mission available-loadout list -- not extracted.
+- `UpdateLoadoutSelection`'s input/selection-change handling -- not traced.
+- Mission 23's hidden loadout object -- not identified.
+- `FUN_00446180` (tooltip/description builder) -- not decompiled; likely path to real weapon/ship names.

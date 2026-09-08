@@ -1240,3 +1240,18 @@ reversing/tools/refpack_decompress.py (new project tool)
   -> verified against: gamedata/StarLancer/RESOURCE/FONT.FNT (-> FontResource, Pass 40)
                         gamedata/StarLancer/cd1/YOVB.SPR (-> ShapeSet/ShapeRecord, Pass 40)
   -> confirms: 5-byte RefPack header (2 magic + 3-byte BE size), full 4-form opcode algorithm
+
+## Mission briefing / weapons loadout / debriefing: the full flow (2026-09-09, forty-third session)
+
+```
+RunMissionBriefingScreen (0x437010)
+  -> InitializeLoadoutScreen (0x441aa0)     [stage 1: setup, skipped for mission 0x1d]
+       -> depends on: DAT_00523e84/e74/aa4 (fighter/missile/gunship counts),
+                       .ccb master palette (Pass 30), loadout lighting rig
+  -> FindBinkMovieInArchive + _BinkOpen_8   [stage 2a: normal mission briefing video]
+     OR HOG_BigRead("enddebriefing.ut")     [stage 2b: mission 0x1d = campaign epilogue]
+  -> per-frame loop -> UpdateLoadoutSelection (0x443760)   [stage 3: interactive loadout]
+       -> depends on: FUN_004394d0 (confirm/cancel dialog), FUN_00446180 (tooltip builder,
+                       not decompiled), mission-0x17-specific hidden-object rule
+  -> HOG_BigRead("ms_speech_enrbr_tag_%02d.ut") + FUN_00461d80  [stage 4: closing narration]
+  -> DAT_0051d478 = campaign-stage-appropriate VRRoomNode hub   [stage 5: hand-off to RunShipInteriorVRLoop]
