@@ -1507,3 +1507,26 @@ Combined direct investigation + 4 parallel forks. Key infrastructure finding: `H
 - `RunNewGameSetupScreen`'s 8-entry main button row coordinates.
 - `RunMultiplayerSetupScreen`'s full ~30-alias layout mapping.
 - `RunMultiplayerLobbyScreen`'s remaining unattributed rects; button label text blocked on runtime-only string table.
+
+## Pass 49/50 -- `RunNewGameSetupScreen`'s 8-entry button row: investigated, root-caused, not resolved (2026-09-09)
+
+**Correction**: Pass 49's initial claim of entry 0 = `(239,151,102,275)`
+at confidence 4 is **retracted** (downgraded to 0 / not asserted). It
+was derived from manual ESP-offset bookkeeping across the function's 4
+`PUSH` instructions and did not correctly account for cumulative
+push/pop effects. A follow-up raw-P-code cross-check (see Pass 50 in
+`reverse_engineered_functions.md`) contradicts it directly: no
+instruction anywhere in the function's control-flow path writes to the
+stack region the manual reading pointed at.
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| 10-entry name-picker list array, base = canonical stack offset -100 | 5 | Cross-confirmed via P-code `PTRSUB(ESP,-0x64)` matching the literal `0x8a` write and Pass 48's independent read. Unaffected by this correction. |
+| 8-entry main-button-row array, base = literal `PTRSUB(ESP,-0xa4)` (-164) as decompiled | 0 | Decompiler-emitted offset has zero corresponding writes anywhere in the function; diagnosed as a probable Ghidra stack-tracking precision failure on this one `PTRSUB`, not a real, reliable frame location. Not usable as-is. |
+| `FUN_004aada0` (called at 0x430712) | 5 | Confirmed NOT an array-filler -- two-line function (`DAT_00595d70 = 0; return;`), no arguments. |
+| "8-entry and 10-entry tables are one contiguous stack block" hypothesis | 0 | Retracted -- contradicted by the write-search above. |
+
+### Open follow-ups
+
+- `RunNewGameSetupScreen`'s 8-entry button row real coordinates: still unresolved. Needs either dynamic analysis (live memory read) or a much more careful manual re-derivation, independently cross-checked before being trusted.
+- Methodological note for future passes: don't trust a `PTRSUB`-derived stack constant on its own -- cross-check it against a second, nearby literal-offset write before relying on it (see Pass 50 writeup).

@@ -1314,7 +1314,8 @@ HitTestRectArray (0x43eb30, was FUN_0043eb30) -- shared hotspot hit-test utility
   <- depended on by (hidden-arg technique exposed all at once via set_function_prototype):
        RunOptionsMenuScreen (6-entry stack table)
        RunSoundOptionsScreen (DAT_004e76a0[6] buttons + DAT_004e76d0[4] sliders, contiguous)
-       RunNewGameSetupScreen (8-entry main row @stack + 10-entry name-picker @local_64)
+       RunNewGameSetupScreen (8-entry main row @stack[unresolved, see Pass 50 -- decompiler's
+         PTRSUB(ESP,-0xa4) offset has no confirmed backing writes] + 10-entry name-picker @local_64[confirmed])
        RunVideoOptionsScreen (DAT_004e76f0[17] + DAT_004e7778[1] gamma handle)
        RunMultiplayerSetupScreen (8-entry main row, ~30 chained pointer-alias sub-tables)
        RunMultiplayerLobbyScreen (8-entry button descriptor array + DAT_00524aa0 roster rows)

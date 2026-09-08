@@ -6432,3 +6432,178 @@ consistent with METHODOLOGY's confidence discipline.
 - `RunMultiplayerLobbyScreen`'s remaining unattributed rects and the
   exact button-label text (blocked on the runtime-only string table,
   per Pass 37).
+
+## Pass 49 -- `RunNewGameSetupScreen`'s 8-entry button row: partial resolution, honestly incomplete (2026-09-09)
+
+Direct follow-up on Pass 48's open item. Traced the raw disassembly
+leading up to the `HitTestRectArray(&stack0xffffff5c, 8, ...)` call
+(`0x430810`) using `get_assembly_context`, since the decompiler never
+surfaced the setup as named-local assignments the way it did for the
+10-entry name-picker list (Pass 48).
+
+### What was found
+
+`FUN_00430b80` (called immediately before each hit-test in the loop)
+is **not** the array-builder -- decompiled it and it's actually a
+"recent pilot names" list-maintenance routine (checks the typed name
+against 10 existing slots at `DAT_005d5e8c`, shifts/appends as needed).
+A dead end for this specific question, but now independently
+characterized.
+
+The real setup happens **once, before the main loop**, as a long
+sequence of `MOV word ptr [ESP+N], <value>` instructions starting
+right after the function's `SUB ESP,0x98` prologue. Critically, four
+`PUSH` instructions (`EBX`, `EBP`, `ESI`, `EDI`) occur partway through
+this sequence, each shifting the effective `ESP+N` addressing for
+every instruction that follows -- meaning naive address-order reading
+without accounting for the cumulative 16-byte push offset produces
+wrong offset correlations. Re-derived the sequence correctly by
+identifying the exact push points and adjusting.
+
+**Confirmed, confidence 4**: the array's first entry (immediately at
+`ESP+0x20`, matching the `LEA ECX,[ESP+0x20]` argument to
+`HitTestRectArray`) is `{0xef, 0x97, 0x66, 0x113}` = **(239, 151, 102,
+275)**.
+
+**Confirmed, confidence 4**: several of the values written into this
+region are not compile-time literals at all but **cached register
+copies** of values loaded once and reused across multiple slots --
+specifically `136` (`ECX`), `20` (`EAX`), `400` (`EDX`), and `441`
+(`ESI`), loaded via `MOV ECX,0x88` / `MOV EAX,0x14` / `MOV EDX,0x190`
+/ `MOV ESI,0x1b9` around `0x4304cb`-`0x4304da`. These are the EXACT
+same three values (`136,20,400`) that recur throughout Pass 48's
+already-documented 10-entry name-picker list (`local_64`, entries
+3-9). **This strongly suggests the "8-entry button row" and "10-entry
+name list" are not two independent tables, but two overlapping VIEWS
+into one larger, contiguous stack-allocated layout block**, built in a
+single upfront initialization pass and handed to `HitTestRectArray`
+with different base pointers/counts depending on which UI mode
+(`DAT_005202b8`) is active.
+
+### What was NOT resolved, and why
+
+A complete, entry-by-entry table for all 8 slots was **not** achieved.
+Several expected slot positions (e.g. `ESP+0x28`, `ESP+0x30`) show no
+corresponding literal or register write in the captured instruction
+window, which could mean: (a) my `include_patterns="mov"` filter missed
+a non-MOV clearing instruction (e.g. `XOR reg,reg` followed by a
+narrower write), (b) the true per-entry stride isn't a uniform 8 bytes
+throughout this region, or (c) the capture window, while large (180
+instructions), still didn't reach every relevant instruction. Rather
+than fill these gaps with guesses, this is reported as an honest,
+acknowledged limitation. **Confidence 1** on any claim about entries
+1-7's exact values -- not asserted.
+
+This is a good candidate for a proper P-code-based analysis
+(`get_function_pcode`) rather than further manual disassembly reading,
+if pursued again.
+
+### Open follow-ups (superseded -- see Pass 50 below)
+
+- Entries 1-7 of the 8-entry button row -- genuinely unresolved.
+- Verify the "one contiguous layout block, two views" hypothesis by
+  checking whether `RunSaveGameBrowserScreen`/`RunSaveLoadScreen`
+  (Pass 48's other coordinate-incomplete screens) show the same
+  push-instruction-count pitfall that blocked clean extraction here --
+  if so, the same careful ESP-tracking approach (successful for entry
+  0 here) could unlock them too, ideally with p-code analysis instead
+  of manual reading.
+
+## Pass 50 -- Correction to Pass 49: the "entry 0 = (239,151,102,275)"
+claim and the "contiguous two-view" hypothesis are WRONG; root cause of
+the blocker identified via raw P-code (2026-09-09)
+
+**Explicit correction, per methodology's non-silent-revision rule.**
+Pass 49's confidence-4 claims are retracted:
+
+- The claimed 8-entry-array first value `(239, 151, 102, 275)` --
+  **wrong**, downgraded to confidence 0 (not asserted at all). The
+  manual ESP-offset bookkeeping that produced it did not correctly
+  account for cumulative push/pop effects, exactly the risk Pass 49
+  itself flagged but did not fully resolve.
+- The "one contiguous stack block, two overlapping views" hypothesis
+  -- **wrong**, contradicted by direct evidence below.
+
+### Method: raw P-code cross-check
+
+Pulled `get_function_pcode` (basic granularity) for `RunNewGameSetupScreen`
+and parsed it directly (the raw JSON is ~3.4MB, far too large for
+context, so it was saved to disk and processed with a local Python
+script rather than read directly). P-code's `stack` address space gives
+canonical, push/pop-normalized frame offsets, which sidesteps the
+manual ESP-tracking error mode entirely -- this is a strictly stronger
+method than reading raw disassembly by hand, and should be preferred
+for any future stack-layout archaeology in this codebase.
+
+**Verification of the method**: the confirmed 10-entry table call
+(`HitTestRectArray` at `0x430896`, `rectCount=10`) computes its
+`rectArray` pointer via `PTRSUB(ESP, -0x64)` = canonical stack offset
+**-100**, which exactly matches the independently-confirmed
+`local_64` / literal `0x8a` finding from Pass 48. This cross-check
+**passes** -- the method is sound and the -100 array is correctly
+understood.
+
+**The 8-entry table call** (`HitTestRectArray` at `0x430810`,
+`rectCount=8`) computes its `rectArray` pointer via `PTRSUB(ESP,
+-0xa4)` = canonical stack offset **-164**. This is where Pass 49's
+"contiguous block" hypothesis came from (164 - 100 = 64 = exactly 8
+rects x 8 bytes). But:
+
+1. **No instruction anywhere in the function's entire control-flow
+   path leading to `0x430810` writes to any stack offset in the range
+   -164..-102.** Exhaustively checked every basic block from the
+   function entry through the call site for `COPY`/`STORE` pcode ops
+   targeting that range -- zero hits. Only conservative `INDIRECT`
+   call-clobber markers touch it, which are not real writes.
+2. `get_function_variables` confirms this independently: Ghidra's own
+   decompiler creates local-variable symbols only down to `local_90`
+   (canonical offset -144, magnitude 0x90) -- it never creates a
+   symbol at or beyond -164. The declared frame (`SUB ESP,0x98` = 152
+   bytes) doesn't even reach that deep; -164 falls in or past the
+   region MSVC uses for the 4 callee-saved-register spill slots
+   (`PUSH EBX/EBP/ESI/EDI`), not the declared-locals region.
+3. The one candidate write source considered -- `CALL FUN_004aada0`,
+   which immediately precedes the setup's tail and was hypothesized as
+   a "fill the array by reference" helper -- decompiles to a two-line
+   function (`DAT_00595d70 = 0; return;`) that takes **no arguments at
+   all**. Ruled out directly, confidence 5.
+
+**Diagnosis (confidence 3)**: the `PTRSUB(ESP, -0xa4)` at `0x43080c`
+appears to be a case where Ghidra's decompiler **failed to resolve
+this specific LEA into the canonical, normalized stack frame** the way
+it successfully did for the `-100` case just 0x86 bytes later in the
+same function. Ghidra's stack-pointer tracking is a best-effort
+dataflow analysis, not a proof; it can lose precision across complex
+control flow (this function has several `CALLIND` indirect calls
+through vtable-style global pointers in the setup path, which are
+plausible precision-loss triggers). When that tracking fails, the
+`PTRSUB` constant it emits reflects an unresolved/best-guess offset
+rather than the true frame-relative location, which is consistent with
+this offset having no matching writes anywhere -- the writes exist at
+runtime, but at whatever the TRUE (unrecovered) offset is, not at the
+literal -164 the decompiler printed.
+
+### Conclusion
+
+The 8-entry main-button-row coordinate table for `RunNewGameSetupScreen`
+remains **unresolved** -- now with a concrete, evidence-backed root
+cause (a decompiler stack-tracking precision failure on this one
+`PTRSUB`, not a methodology error on our part) rather than an open
+question. No values are asserted for any of the 8 entries; the
+Pass 49 entry-0 guess is withdrawn. Recovering the true values would
+require either: reading the compiled bytes directly against a live
+memory dump/debugger (dynamic method, not available here), or manually
+re-deriving the true runtime ESP delta at `0x43080c` instruction-by-
+instruction from the prologue (the exact painstaking approach Pass 49
+attempted and got wrong once already) with extreme care re-verified
+against a second, independent cross-check.
+
+### Open follow-ups
+
+- The 8-entry button row's coordinates: unresolved, root-caused, not
+  further pursued this pass.
+- Before trusting a `PTRSUB`-derived stack offset for any future
+  screen's hotspot archaeology, cross-check it the way this pass did
+  (find a second, nearby stack access at a compile-time-literal offset
+  and confirm the P-code offset matches an actual observed write) --
+  don't assume `PTRSUB`'s constant is trustworthy on its own.
