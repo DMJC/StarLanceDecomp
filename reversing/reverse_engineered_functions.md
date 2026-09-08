@@ -2444,3 +2444,162 @@ than the shield pipeline:
   numbers found here — real, load-bearing values, not yet cross-checked
   against any external data source (e.g. a ship-stats file) to see
   whether they're globally hardcoded or per-ship-class tunable.
+
+---
+
+# Seventeenth pass (2026-09-08, same day): difficulty curve, multiplayer authority, hull tier, hit geometry, ship destruction — and a correction
+
+Resolved all 4 functions flagged at the end of last session, plus a
+5th (`SetShipDestroyedState`) found by following `ApplyHullDamage`'s
+depleted-hull path. This round produced the most concrete, precisely
+quantified gameplay-balance data of the whole investigation, and forced
+a correction to how `object+0x684` has been described since it first
+appeared 4 sessions ago.
+
+## `ScaleDamageForDifficulty` (`0x00463d70`) — the exact difficulty curve
+
+```c
+float __fastcall ScaleDamageForDifficulty(int targetSlot, int attackerSlot,
+                                            float rawDamage);
+```
+
+Read directly from the decompiled arithmetic, not inferred:
+
+- **Deathmatch/PvP damage is never difficulty-scaled** — the function
+  returns the raw value unchanged whenever `DAT_00582e8c` (the
+  deathmatch flag) is set.
+- **Outgoing damage** (when the LOCAL PLAYER is the attacker, hitting a
+  non-teammate): difficulty 0 (easy) → **1.5×**, difficulty 1 (normal)
+  → **1.0×** (no scaling), difficulty 2 (hard) → **0.75×**.
+- **Incoming damage** (when the LOCAL PLAYER is the target) carries a
+  baseline **0.5× reduction** that a further difficulty modifier
+  applies on top of: easy → `0.75 × 0.5` = **0.375×**, normal →
+  `1.0 × 0.5` = **0.5×**, hard → `1.5 × 0.5` = **0.75×** (the hard-mode
+  code path returns early with exactly this product, while the other
+  two fall through an unconditional extra `×0.5` at the end of the
+  function). The player always takes at most half of "raw" incoming
+  damage, difficulty only adjusts how much further below that floor.
+
+This is a real, deliberately-authored difficulty curve, not a flat
+per-difficulty multiplier — a concrete, quotable piece of the game's
+actual balance design.
+
+## `HasDamageAuthority` (`0x004b5590`) — distributed multiplayer damage ownership
+
+```c
+bool __fastcall HasDamageAuthority(int objectSlot);
+```
+
+For actual player-controlled ships (`objectSlot < DAT_0058832c`, the
+player count): only the ship's OWNING client has authority to apply
+damage to it (`objectSlot == localPlayerSlot`) — standard
+"you own your own ship's state" networking. For everything else
+(NPCs/AI ships): in deathmatch, only the HOST applies damage
+(`DAT_005dc1e8==1`); in co-op/campaign multiplayer, NPC damage
+authority is **distributed round-robin across all connected clients**
+via a modulo scheme — `(objectSlot - perClientBaseOffset[localSlot]) %
+objectsPerClient == 0`. Rather than the host simulating every NPC and
+broadcasting results (simple but a bottleneck), each client owns and
+authoritatively simulates damage for a distinct subset of the NPC
+population. A genuinely interesting piece of distributed-simulation
+network architecture for a 1999 game.
+
+## `ApplyHullDamage` (`0x004641f0`) — a third defense tier
+
+```c
+void __fastcall ApplyHullDamage(ShipObject *target, int sectionIndex,
+                                 float damageAmount, int attackerSlot,
+                                 int damageType);
+```
+
+Structurally almost identical to `ApplyShieldDamage` (same
+invulnerability check, same difficulty scaling, same multiplayer
+authority gate, same scoring/feedback calls) but operates on a
+COMPLETELY SEPARATE float array: `target+0x600 + sectionIndex*4`,
+distinct from the shields' `+0x5f0` array. **This confirms the damage
+model has three tiers — shields, then hull/armor sections, then
+individually-targetable components — not the two-tier "shields then
+components" picture the previous session's evidence alone suggested.**
+A ship in "disabled/docked" special-mode (`+0xb95=='\x04'`) takes zero
+hull damage regardless of amount (fully absorbed, presumably to
+prevent griefing/damage to non-combat-state ships). When a hull
+section's value drops below zero, calls `SetShipDestroyedState` with a
+boolean flagging whether the killing blow exceeded `1000.0` damage —
+**this is the actual ship-destruction trigger**.
+
+## `ComputeHitQuadrant` (`0x00463ca0`) — the real facing geometry
+
+```c
+int __fastcall ComputeHitQuadrant(ShipObject *ship, float localHitPoint[3]);
+```
+
+`GetShieldFacingIndex`'s real payload. Divides the local-space impact
+point's two relevant axis coordinates by the ship's own bounding-box
+extents on each axis (`ship+0x5a0..+0x5b4`, 4 floats — min/max on 2
+axes), determines which axis the hit is predominantly along (via an
+`fabs`-shaped comparison), and returns a quadrant index 0-3 based on
+the dominant axis and its sign. This is genuine geometric hit-facing
+detection from real 3D impact coordinates — the strongest confirmation
+yet (Confidence 3) that the "4 shield quadrants" structural model
+first guessed 4 sessions ago is correct, and that the game computes
+which facing is actually hit rather than tracking 4 independent values
+some other way.
+
+## `SetShipDestroyedState` (`0x00401f30`) — and a correction to `object+0x684`
+
+```c
+void __fastcall SetShipDestroyedState(int shipSlot, bool wasBigHit,
+                                       char param_3);
+```
+
+Source-tagged `C:\lancer\game\Ai.cpp` (two allocations, lines `0x5d9`
+and `0x5da`) — confirms ship AI/behavior logic lives in a dedicated
+`Ai.cpp` file, distinct from the mission/interface/bigfile/particle
+files already identified in other sessions. Reveals that
+`shipObject+0x684` is a pointer to an **AI command/state structure**,
+lazily allocated (0x208 bytes) the first time it's needed. The
+function pushes a command onto it: type `0xb` (11) meaning
+"destroyed" (skipped if the ship is already in that state — no
+double-destruction), or type `0x6c` (108) under specific NPC-only
+conditions (non-player slot, a small counter under `0x28`=40, or a
+"special mode 3" state) — a distinct, not-yet-understood
+pre-destruction state, plausibly something like "critically damaged" or
+an eject/bail-out trigger for AI pilots. The "big hit" boolean passed
+in gets stored directly into the queued command's own data, presumably
+selecting a bigger explosion effect downstream.
+
+### Correction: `object+0x684` is an AI command/state pointer, not a "current target"
+
+Three earlier sessions — `GetOwningShip`, `ProcessMissionSimulationTick`,
+and `SpawnProjectile`'s aim-assist logic — described `+0x684` as
+pointing to something read as "the ship's current target," based on
+how it was dereferenced at those call sites. `SetShipDestroyedState`
+now shows this field is actually the head of an AI command/state
+queue: a lazily-allocated structure whose first field is a
+command-type short (observed values: `0xb`=destroyed, `0x6c`=108, and
+separately `100` checked by `ProcessMissionSimulationTick`, all
+plausible members of one AI-command enum). This is a genuine
+correction, not a refinement — "current target" and "current AI
+command" are different concepts, and the earlier label was wrong.
+
+What stays true: the field's existence, its role as something
+`GetOwningShip` resolves through the object hierarchy, and the fact
+that `SpawnProjectile`'s aim-assist logic checks it before adjusting
+aim — only the semantic meaning of WHAT is being checked changes (the
+target's current AI behavior/state, not a target reference). The
+aim-assist mechanism's existence and difficulty-gating are unaffected
+by this correction. Recorded explicitly per METHODOLOGY rather than
+silently editing the earlier sessions' text.
+
+### Open follow-ups
+
+- `FUN_0040ca50` (called at every `SetShipDestroyedState` command push
+  — likely a "reset/prepare AI command slot" primitive), the `0x6c`
+  command's real meaning, and the full AI command-type enum (only
+  `0xb`/`0x6c`/`100` observed so far).
+- The `object+0x600` hull-section array's own element count (shields
+  are confirmed 4 quadrants; hull sections aren't confirmed to match).
+- Whether `Ai.cpp`'s command-queue system also drives normal,
+  non-destruction ship behavior (patrol, attack, evade) — plausible
+  given the shared `+0x684` field and lazy-allocation pattern, not
+  confirmed.

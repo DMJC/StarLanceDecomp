@@ -437,30 +437,76 @@ HandleComponentDestroyedEvent (0x495ac0)
 
 ```
 GetShieldFacingIndex (0x463d30)
-  -> depends on (NOT YET IN DB): FUN_00463ca0 (the real facing-index
-                 computation this function wraps)
+  -> depends on: ComputeHitQuadrant (the real facing-index computation
+                 this function wraps — resolved this session)
   <- depended on by: ProcessProjectileImpact
 
 ApplyShieldDamage (0x463ee0)
   -> depends on: ship-object +0x5f0..+0x5fc shield-quadrant floats
-                 (damage committed here), _DAT_0051cf34/_DAT_0051cf78
-  -> depends on (NOT YET IN DB): FUN_00463d70 (difficulty damage
-                 scaling), FUN_004641f0 (hull-damage spillover),
-                 FUN_004b5590 (multiplayer damage-authority check),
-                 FUN_00474c80 (scoring/kill-credit), FUN_00456dd0/
-                 FUN_00463e10 (local-player hit feedback)
+                 (damage committed here), _DAT_0051cf34/_DAT_0051cf78,
+                 ScaleDamageForDifficulty, HasDamageAuthority
+  -> depends on (NOT YET IN DB): FUN_004641f0... resolved as
+                 ApplyHullDamage this session (see below — NOT actually
+                 called from ApplyShieldDamage's own overflow path in
+                 the code read so far; the two are siblings under
+                 ProcessProjectileImpact, not caller/callee — corrected
+                 from the tentative "hull-damage spillover" dependency
+                 guessed last session), FUN_00474c80 (scoring/kill-
+                 credit), FUN_00456dd0/FUN_00463e10 (local-player hit
+                 feedback)
   <- depended on by: ProcessProjectileImpact
 
 ApplyComponentDamage (0x4645c0)
   -> depends on: ship-object +0xf8/+0x100 child list (component-group
                  lookup), ReportAssertionFailureEx (attackerSlot bounds
                  check — confirms general-purpose assert usage outside
-                 bootstrap code)
-  -> depends on (NOT YET IN DB): FUN_00463d70, FUN_004b5590 (shared
-                 with ApplyShieldDamage), FUN_00474e00 (component-
+                 bootstrap code), ScaleDamageForDifficulty, HasDamageAuthority
+  -> depends on (NOT YET IN DB): FUN_00474e00 (component-
                  destroyed reaction), FUN_00415270 (wingman/comm
                  chatter trigger), FUN_0047d1f0 (per-turret hit mark)
   <- depended on by: ProcessProjectileImpact, HandleComponentDestroyedEvent
+```
+
+## Difficulty/authority/hull/destruction (fourteenth session)
+
+```
+ScaleDamageForDifficulty (0x463d70)
+  -> depends on: DAT_00582e8c (deathmatch flag), DAT_00562f14
+                 (difficulty level 0/1/2)
+  <- depended on by: ApplyShieldDamage, ApplyComponentDamage,
+                 ApplyHullDamage (shared difficulty curve across all
+                 three defense tiers)
+
+HasDamageAuthority (0x4b5590)
+  -> depends on: DAT_0058832c (player count), DAT_005dc1e8 (host
+                 flag), a per-client NPC-ownership offset table
+                 (DAT_005dccc4) and modulo divisor (DAT_005db8e0) for
+                 the distributed co-op NPC-authority scheme
+  <- depended on by: ApplyShieldDamage, ApplyComponentDamage (shared
+                 multiplayer-authority gate)
+
+ApplyHullDamage (0x4641f0)
+  -> depends on: ship-object +0x600 hull-section float array (a THIRD
+                 defense tier, sibling to the +0x5f0 shield array, NOT
+                 nested under it), ScaleDamageForDifficulty,
+                 HasDamageAuthority, SetShipDestroyedState (called on
+                 hull depletion)
+  <- depended on by: (caller not directly traced — reached via the
+                 same ProcessProjectileImpact-driven damage dispatch
+                 as the other two tiers, exact call site not pinpointed)
+
+ComputeHitQuadrant (0x463ca0)
+  -> depends on: ship-object bounding-box extents (+0x5a0/+0x5a8/
+                 +0x5ac/+0x5b4), a local-space hit-point input
+  <- depended on by: GetShieldFacingIndex
+
+SetShipDestroyedState (0x401f30)
+  -> depends on: object+0x684 (CORRECTED this session — an AI
+                 command/state structure, not a "current target"
+                 reference as described in 3 earlier sessions; see
+                 confidence_db.md's correction note), FUN_0040ca50
+                 (NOT YET IN DB, called at every command push)
+  <- depended on by: ApplyHullDamage (on hull depletion)
 ```
 
 ## SurrenderLib scene-node primitives (tenth session)
