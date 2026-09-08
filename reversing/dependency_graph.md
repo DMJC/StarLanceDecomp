@@ -1163,3 +1163,16 @@ RunControlsOptionsScreen (0x42b690)
                  DAT_004e23ae (bound device/joystick name string),
                  DAT_004e23cc (mode/type field),
                  GetLanguageString (0x491030, was FUN_00491030)
+
+## THE COMPLETE DEFAULT FLIGHT CONTROL SCHEME (2026-09-09, thirty-eighth session)
+
+```
+DAT_004e2380 (now typed ControlBinding[74], 78-byte stride)
+  -> read by: CheckKeyEdgeState-driven flight/gameplay input code (UpdateMissionFrame and others,
+              not individually cross-referenced this session -- table content itself was read
+              directly rather than traced from a consumer),
+              MissionScript_WaitForKey (Pass 26, shares this table for scripted key-wait conditions),
+              RunControlsOptionsScreen (Pass 36/37, rebind UI reads/writes this table directly)
+  -> depends on (per-entry): GetLanguageString(langStringIndex) for the real localized display name
+  <- documents: the complete 74-binding default keyboard control scheme (cameras, targeting,
+              flight, weapons, ship-system windows, Spectral Shields, wingman commands, menu)

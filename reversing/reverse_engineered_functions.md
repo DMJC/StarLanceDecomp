@@ -5182,3 +5182,110 @@ display text, otherwise undetermined).
   strings are recoverable without a live session.
 - `FUN_0042c5f0` (used in the rebind-conflict-detection path, returns
   -1 for "no conflict") -- not decompiled.
+
+## Pass 38 -- THE COMPLETE DEFAULT FLIGHT CONTROL SCHEME (2026-09-09)
+
+Direct continuation of Pass 37's flagged follow-up: read `DAT_004e2380`
+(the real per-control runtime binding table, corrected in Pass 37 to be
+distinct from the `DAT_004e5cd0` scancode-candidate table) directly out
+of memory in full. Created a real Ghidra struct, `ControlBinding` (78
+bytes), and applied it as `ControlBinding[74]` over the table.
+
+```c
+struct ControlBinding {
+    int16_t scancode;         // +0x00: bound PC Set-1 scancode
+    int16_t modifierMode;     // +0x02: 0/1/2 = none/Shift/Ctrl (matches CheckKeyEdgeState's mode arg)
+    char    debugName[40];    // +0x04: plain-English internal control name (NOT localized --
+                               //        the developer-facing name, always present regardless of language)
+    int16_t langStringIndex;  // +0x2C: index into the runtime-loaded localized string table
+                               //        (via GetLanguageString) -- the REAL in-game display name
+    char    keyLabelText[30]; // +0x2E: a short printable label for the bound key (e.g. "TAB",
+                               //        "ENTER", "PAGE UP", "CURSOR DIWN" [sic]) -- NOT a joystick
+                               //        device name as guessed in Pass 36/37; it's the UI's
+                               //        "currently bound key" readout text
+    int16_t actionSlot;       // +0x4C: -1 for most entries; a small distinct index (0-7, missing
+                               //        6) for exactly 7 entries -- plausibly a persistent
+                               //        per-frame-polled action-state slot for continuously-held
+                               //        flight controls, vs. -1 for edge-triggered/UI-toggle
+                               //        controls (hypothesis, confidence 2, not confirmed)
+};  // sizeof == 0x4E (78) bytes, exactly matching every stride already documented
+    // for this table across Passes 26/27/36/37
+```
+
+**74 entries total** (`DAT_004e2380` through `+74*0x4e`, confirmed
+exactly by both the byte count matching a whole multiple of 78 and the
+data transitioning cleanly into an unrelated pointer table -- the `.ut`
+speech-file string-pointer array documented in Pass 29 -- immediately
+afterward, with no partial/trailing entry).
+
+### The full list, read directly from the shipped binary's initial `.data` image
+
+Grouped by natural category (the table's own storage order, not
+re-sorted):
+
+**Camera (8):** Cockpit(1) / Left View(2) / Right View(3) / Rear
+View(4) / Flyby(5) / Target(6) / External(7) / Missile(8) Camera.
+
+**Targeting (12):** Next/Previous Enemy Target (E / Shift+E), Next/
+Previous Friendly Target (Q / Shift+Q, actionSlot=5 on the "Next"
+entry), Next/Previous Subtarget (S / Shift+S), Target Under
+Reticule (Y), Target Nearest Enemy (R, actionSlot=3), Target Nearest
+Friendly (W), Target Torpedo (T), Smart Target (Ctrl+E), Primary
+Target (A).
+
+**Flight/Throttle (18):** Afterburners (TAB, actionSlot=2) / Afterburner
+Toggle (`` ` ``) / Reverse Thrust (Shift+TAB), Jump Drive (J), Match
+Speed (Z), Accelerate (+) / Decelerate (-) / Zero Throttle (BACKSPACE)
+/ Full Throttle (\\), Roll Ship Clockwise/Anti-Clockwise (Page Up/Page
+Down), Nose Up/Down (Cursor Down/Up -- **note the game's own shipped
+label text literally reads "CURSOR DIWN", a genuine developer typo
+preserved verbatim in the binary**), Rotate Clockwise/Anti-Clockwise
+(Cursor Left/Right), Strafe Left/Right (END actionSlot=7 / Page Down
+actionSlot=4), Joystick Roll (Insert).
+
+**Weapons (10):** Fire Lasers (SPACE, actionSlot=0), Full Guns (F),
+Gunnery Window / Locked / Synchronise Guns (G / Shift+G / Ctrl+G),
+Toggle Blindfire (Shift+F), Launch Missile (ENTER, actionSlot=1),
+Missile Window (M), Rotate Missiles Clockwise/Anti-Clockwise (. / ,).
+
+**Ship systems / info windows (15):** Comms Window (C), Powerball
+Window / Locked (P / Shift+P), Full Power to Gunnery/Engines/Shields
+(U/I/O), Equalize Power ([), Objectives Window (B), Wing Status Window
+/ Locked (X / Shift+X), Damage Window / Locked (D / Shift+D), Radar
+Ranges (V), Shield Balancing (N), Countermeasures (H).
+
+**Special abilities (4):** Eject (F12), Cloak Ship (K), ECM (L),
+Spectral Shields (`;`) -- the last directly confirms and extends the
+already-documented Spectral Shields mechanic (temporary invulnerability,
+several sessions ago) with its real default keybind.
+
+**Wingman/comms commands (6):** Attack My Target (F5), Back Off (F6),
+Help Me (F7), Permission to Land (F8), Display Kills (F10), Send Comms
+Message (`'`).
+
+**Menu (1):** Key Config (F1) -- opens `RunControlsOptionsScreen`
+itself.
+
+### Confidence
+
+**Confidence 5** on every scancode/modifier/name/keyLabelText value --
+this is direct, literal, unambiguous data read from the shipped
+binary's static image (not inferred, not runtime-only). **Confidence
+2** on the `actionSlot` field's "continuously-polled vs. edge-triggered"
+interpretation (a reasonable hypothesis given which 7 entries have a
+non -1 value -- Fire Lasers, Launch Missile, Afterburners, Target
+Nearest Enemy, Strafe Right, Next Friendly Target, Strafe Left -- all
+plausibly analog/held-style controls, but not traced to confirming
+consumer code this session). `langStringIndex` values are real and
+directly read, but their actual localized TEXT remains unrecoverable
+from the static image (Pass 37 already established `DAT_0057dbbc`, the
+loaded string table, is runtime-only and reads as all-zero here).
+
+### Open follow-ups
+
+- Trace what reads `ControlBinding.actionSlot` to confirm/refute the
+  "persistent action index" hypothesis.
+- The `langStringIndex` values are real but their text is unrecoverable
+  without a live session or an extracted language resource file.
+- Whether this exact 74-entry list matches the manual/in-game options
+  screen's own displayed order -- not cross-checked.

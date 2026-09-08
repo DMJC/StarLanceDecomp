@@ -1312,3 +1312,20 @@ Continuation of Pass 34's flagged follow-up.
 - Read `DAT_004e2380`'s full range to produce the real control list + default bindings (the corrected version of Pass 36's original goal).
 - `FUN_0042c5f0` (rebind-conflict check) -- not decompiled.
 - Language string table content is runtime-only, unrecoverable from the static image.
+
+## THE COMPLETE DEFAULT FLIGHT CONTROL SCHEME (2026-09-09, thirty-eighth session)
+
+Direct continuation of Pass 37. Read `DAT_004e2380` in full (74 entries x 78 bytes, exact clean boundary) and created a real Ghidra struct.
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `ControlBinding` struct (78 bytes: scancode, modifierMode, debugName[40], langStringIndex, keyLabelText[30], actionSlot) applied as `ControlBinding[74]` at `DAT_004e2380` | 5 | Directly read from the shipped binary's static `.data` image -- not inferred, not runtime-dependent. Table boundary confirmed exactly (74*78=5772 bytes, immediately followed by the unrelated Pass-29 `.ut` string-pointer table). |
+| All 74 scancode/modifier/debugName/keyLabelText values (full default keyboard control scheme: cameras, targeting, flight, weapons, ship-systems windows, special abilities incl. Spectral Shields=`;`, wingman commands, menu) | 5 | Literal data, directly read. |
+| A genuine shipped developer typo preserved in the binary: "CURSOR DIWN" (entry 31, Nose Up) | 5 | Directly read, verbatim. |
+| `actionSlot` field = plausibly a persistent/continuously-polled action index (7 entries have one: Fire Lasers=0, Launch Missile=1, Afterburners=2, Target Nearest Enemy=3, Strafe Right=4, Next Friendly Target=5, Strafe Left=7 -- note 6 is missing) | 2 | Hypothesis based on which controls have a value vs. -1; not traced to a consumer. |
+| `langStringIndex` values are real but their localized text is unrecoverable | N/A | `DAT_0057dbbc` (the loaded string table) is runtime-only, confirmed all-zero in the static image (Pass 37). |
+
+### Open follow-ups
+
+- Trace `ControlBinding.actionSlot`'s consumer.
+- Localized string text remains unrecoverable without a live session or extracted language resource.
