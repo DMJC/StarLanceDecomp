@@ -1434,3 +1434,18 @@ Direct research request. Decompiled `FUN_0043c1c0` (the per-frame VR-loop callba
 - Cross-reference the full 145-node VR graph (Pass 5) for other `roomType==3` fish-tank instances.
 - Whether `fish.spr` serves as a hotspot cursor/icon for this prop -- not traced.
 - Whether the table's uneven 7/3/1/2 weighting toward `move_a_` is deliberate.
+
+## The briefing-hub "news report" TV, and tracing the path to mission briefing (2026-09-09, forty-fifth session)
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `RunBriefingHubNewsReport` (0x43ba40, was FUN_0043ba40) | 4 | Confirmed via own `"news_report_resource"` error strings; plays a mission-indexed news broadcast (table of ~27-28 short numeric strings) before the briefing-hub room settles into its own ambient video. |
+| Mission 1 gets a distinct 3-state news cycle (idle loop <-> `tv_cald_.bik` calendar interstitial) vs. simple play-once for other missions | 3 | Directly read. |
+| `RunShipInteriorVRLoop` never writes `DAT_0051dac4` -- roomType==7 alone does not launch the briefing screen | 4 | Confirmed via exhaustive `get_xrefs_to`. |
+| `RunMissionBriefingScreen` is called directly by `WinMain` at two sites (0x4aa027, 0x4aa6f2), not just via `RunMenuScreenLoop` | 4 | Confirmed via `get_xrefs_to`. Exact triggering condition under investigation (forked). |
+
+### Open follow-ups
+
+- WinMain-level trigger investigation (forked, pending).
+- Exact mission-number-to-news-clip-string mapping direction.
+- Narrative significance of mission 1's distinct news cycle.

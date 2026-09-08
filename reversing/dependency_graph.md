@@ -1268,3 +1268,15 @@ FUN_0043c1c0 (per-frame VR-loop callback, installed at DAT_00588730+0x88)
        DAT_0051dac0 (cycling index), DAT_0051d9d8 (shared hover-prop overlay buffer, Pass 33)
   -> other-room arrival-clip completion path: _BinkGoto_12(bink, 2, 1) -- loops near-start,
        no new file opened
+
+## The briefing-hub "news report" TV, and tracing the path to mission briefing (2026-09-09, forty-fifth session)
+
+```
+RunShipInteriorVRLoop, roomType==7 transition
+  -> RunBriefingHubNewsReport (0x43ba40)
+       -> depends on: DAT_00562dc8 (mission index, selects news clip from ~27-28-entry table @0x4e90d0-0x4e91a8),
+                       FindBinkMovieInArchive, _BinkOpen_8 (rel_tv_in_loop.bik / b_tv_news_.bik / tv_cald_.bik)
+  -> (after RunBriefingHubNewsReport returns) settles into briefing-hub room (tv2brd.bik, Pass 5)
+
+RunMissionBriefingScreen callers: RunMenuScreenLoop (screen ID 7) AND WinMain directly (0x4aa027, 0x4aa6f2)
+  -> WinMain-level triggering condition: under investigation (forked)

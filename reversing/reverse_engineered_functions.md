@@ -5900,3 +5900,66 @@ the actual clips).
   wraparound increment, confirmed; whether the table's uneven 7/3/1/2
   weighting is deliberate "mostly A, rarely C" design or an authoring
   artifact -- not determined).
+
+## Pass 45 -- the briefing-hub "news report" TV, and tracing the path to mission briefing (2026-09-09)
+
+Direct continuation of "work on the rest of the VR engine all the way
+to mission briefing." `RunShipInteriorVRLoop`'s `roomType == 7`
+transition (Pass 5/33: the briefing-hub door) calls a previously
+unexamined function -- `RunBriefingHubNewsReport` (was `FUN_0043ba40`)
+-- BEFORE settling into the briefing-hub room's own ambient video. This
+is a genuine, newly-found step in the VR-to-briefing pipeline.
+
+### `RunBriefingHubNewsReport` (`0x43ba40`, was `FUN_0043ba40`)
+
+A blocking, self-contained mini-scene: plays a **mission-indexed news
+broadcast** on what is presumably an in-room TV/monitor, confirmed via
+its own error strings (`"news_report_resource: error searching %s"`)
+and literal filenames (`"rel_tv_in_loop.bik"`, `"b_tv_news_.bik"`,
+`"tv_cald_.bik"`). Builds the actual clip name from a ~27-28-entry
+stack table of short numeric strings (`"0005a"`, `"0015"`, `"0025"`,
+... up to `"0275"`, read directly from `0x4e90d0`-`0x4e91a8`), indexed
+by the current mission number (`DAT_00562dc8`) via
+`"%s_box.bik"`-style formatting (`s__s_box_004e8d90`) -- i.e. **a
+different news clip plays depending on which mission you're heading
+into**, giving in-universe news updates that track campaign progress.
+
+For mission 1 specifically, the function runs a distinct 3-state cycle
+(`local_a8`: 0=idle-loop TV, 1=a "calendar/date" interstitial clip
+`tv_cald_.bik`, 2=back to idle loop) rather than the simple
+play-once-then-exit-on-click behavior every other mission gets. The
+whole thing is blocking -- the calling `RunShipInteriorVRLoop` does not
+proceed to the briefing-hub room's own steady-state video (`tv2brd.bik`,
+Pass 5) until the player dismisses this news report (Esc, mouse click,
+or movement).
+
+**Confidence 4** on the mechanism and mission-indexing (directly read);
+**confidence 1** on the exact string-to-mission-number mapping
+direction (the stack-frame layout makes this genuinely ambiguous
+without deeper analysis -- not resolved this session).
+
+### Tracing the actual trigger for `RunMissionBriefingScreen`
+
+Confirmed via `get_xrefs_to` that `RunShipInteriorVRLoop` never writes
+`DAT_0051dac4` (the menu-screen-ID selector `RunMenuScreenLoop` reads)
+anywhere -- so simply walking through the VR ship interior's roomType-7
+door does NOT, by itself, launch the briefing screen. `RunMission
+BriefingScreen`'s callers are `RunMenuScreenLoop` (screen ID 7, as
+already known) AND, importantly, **`WinMain` directly**, at two call
+sites (`0x4aa027`, `0x4aa6f2`). Investigating exactly what state in
+`WinMain`'s top-level loop gates those two direct calls -- the real
+missing link between "player reaches the mission-select star map" and
+"the briefing screen actually launches" -- is in progress (forked to
+avoid pulling `WinMain`'s ~7.6KB decompile into this session's own
+context; `WinMain` is the single largest, most central function in the
+game and this is the first time this project has looked at the exact
+mechanics of its top-level dispatch rather than just individual state
+writes within it).
+
+### Open follow-ups
+
+- The WinMain-level trigger investigation (forked, pending).
+- The exact mission-number-to-news-clip-string mapping direction.
+- Whether the mission-1-specific 3-state news cycle has special
+  narrative significance (a scripted "first mission" intro sequence
+  seems likely, not confirmed).
