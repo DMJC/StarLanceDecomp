@@ -1111,3 +1111,16 @@ RunMainMenuScreen (0x428b60)
   -> depends on: CheckKeyEdgeState (cheat sequence + post-cheat input),
                  DAT_005d5641 (cheat-armed flag), DAT_00562dc8 (mission index, set by digit entry),
                  _DAT_00588400 (debug destination code, consumer not traced)
+
+## `_DAT_00588400`'s consumer traced: 12 debug codes = 12 real squadron-roster files (2026-09-08, thirty-fifth session)
+
+```
+RunMainMenuScreen (Ctrl+Potato + F1-F12/Enter combos)
+  -> writes: _DAT_00588400 (unindexed = slot 0)
+       -> read by: InitializeMissionGameplay
+            iVar6 = DAT_0050c2e8; if (DAT_00582e8c==0) iVar6 = DAT_00588400[slot*0x54];
+            -> outcome-code switch (0-0xb aliases 0xf4-0xff, Pass 25) -> DAT_005883c0 (id) +
+               a literal roster filename (e.g. "wolv_frm_shp")
+            -> LoadSquadronRoster (0x4a44d0, was FUN_004a44d0)
+                 -> depends on: srofiles.cpp-tagged parser, DAT_0057e048 (loaded roster handle,
+                                consumed later in the same function for ship/wing setup)

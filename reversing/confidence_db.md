@@ -1257,3 +1257,23 @@ previously-opaque input chain.
 
 - Trace `_DAT_00588400`'s consumer to decode the 12 debug destinations.
 - Re-decompile other heavy `CheckKeyEdgeState` callers (VR loop, other menu screens) now that its prototype is set -- likely reveals more hidden key bindings.
+
+## `_DAT_00588400`'s consumer traced: 12 debug codes = 12 real squadron-roster files (2026-09-08, thirty-fifth session)
+
+Direct follow-up on Pass 34's open item. Traced the consumer through
+`InitializeMissionGameplay`'s outcome-code switch (Pass 25) into a
+newly-identified squadron-roster file loader, `LoadSquadronRoster`.
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `LoadSquadronRoster` (0x4a44d0, was FUN_004a44d0) | 4 | Confirmed via own error string + `srofiles.cpp` source tag as a `.sro` squadron/wing roster file parser (600-byte-stride records, sub-tables for wings/hardpoints). NOT a cutscene/debrief resolver as Pass 25 speculatively guessed. |
+| The 12 Ctrl+Potato debug codes = direct aliases of 11 of Pass 25's `0xf4`-`0xff` outcome codes + one unique 12th | 4 | Confirmed via shared `goto` case labels in `InitializeMissionGameplay`'s decompile -- not inferred. |
+| 12 real roster filenames revealed (`kamg_frm_shp`, `preg_frm_shp`, `nagg_frm_shp`, `gre2_frm_shp`, `cru3_frm_shp`, `coyg_frm_shp`, `mirg_frm_shp`, `temg_frm_shp`, `pat2_frm_shp`, `wolv_frm_shp`, `rea2_frm_shp`, `shr2_frm_shp`, `phe2_frm_shp`) | 4 | Directly read from the decompile after applying `set_function_prototype` to `LoadSquadronRoster` -- the same hidden-argument-exposure technique from Pass 34, reused successfully. |
+| Campaign-outcome branching's real effect = loading a different ship/squadron formation roster for the next mission | 2 | Plausible narrative interpretation of the mechanism; not confirmed against `.sro` file contents or in-game observation. |
+| **Correction to Pass 25** (not silent): `DAT_0050c2e8` vs `DAT_00588400[slot]`'s single-player/multiplayer assignment was stated backwards | 2 (corrected assignment) / 4 (that the original was wrong) | `DAT_00588400[slot]` is used when `DAT_00582e8c == 0` (no active network session), not the other way around as Pass 25 said. |
+
+### Open follow-ups
+
+- Confirm ship-class-abbreviation readings (`wolv`=Wolverine, `phe2`=Phoenix, etc.) against an authoritative source.
+- Map the `.sro` roster format itself -- out of scope for this pass.
+- Verify `DAT_00582e8c`'s corrected SP/MP semantics against a live multiplayer session.

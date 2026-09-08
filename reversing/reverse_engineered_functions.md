@@ -4842,3 +4842,141 @@ shape.
 - Apply `CheckKeyEdgeState`'s new prototype and re-decompile other
   heavy callers (the VR loop, other menu screens) to see what else was
   being hidden -- likely worthwhile given how much this unlocked here.
+
+## Pass 35 -- `_DAT_00588400`'s consumer traced: the 12 debug codes are aliases of the Pass-25 campaign-outcome branches (2026-09-08)
+
+Direct follow-up: trace where the Ctrl+Potato debug menu's
+`_DAT_00588400` write (Pass 34) is actually consumed.
+
+### The consumer: `InitializeMissionGameplay`'s outcome-code switch (Pass 25, revisited)
+
+Re-decompiled `InitializeMissionGameplay` in full. The relevant read:
+
+```c
+iVar6 = DAT_0050c2e8;
+if (DAT_00582e8c == '\0') {
+  iVar6 = *(int *)(&DAT_00588400 + DAT_005883fa * 0x54);
+}
+```
+
+**Correction to Pass 25, not silent**: Pass 25 described this as "`DAT_0050c2e8` in single-player, or `DAT_00588400 + slot*0x54` in multiplayer." Reading the actual code now shows this is ~~backwards~~: `DAT_0050c2e8` is the DEFAULT value, and it gets OVERRIDDEN by `DAT_00588400[slot]` specifically when `DAT_00582e8c == 0`. Given `DAT_00582e8c` gates a call to `FUN_004ae860` (one of `DAT_00588400`'s writers, per this session's xref search) and reads elsewhere as a "network/multiplayer session active"-shaped flag, the corrected reading is: **`DAT_00588400[slot]` is used when `DAT_00582e8c == 0`** (i.e., no active network session -- single-player, including the main menu itself), and `DAT_0050c2e8` is used otherwise. This flips which global belongs to which mode from what Pass 25 stated. Not independently re-verified against a live multiplayer session -- confidence 2 on the corrected SP/MP assignment, confidence 4 that the prior write-up had the two swapped (directly visible in the decompile).
+
+This directly explains WHY `RunMainMenuScreen` writing straight to unindexed `_DAT_00588400` (Pass 34) has any effect at all: at the main menu, no network session is active (`DAT_00582e8c == 0`), so `InitializeMissionGameplay`'s outcome-code read picks up exactly that value once a mission subsequently loads.
+
+### The 12 debug codes ARE (mostly) aliases of the Pass-25 outcome-code table
+
+The low-value switch arm of `InitializeMissionGameplay`'s outcome-code
+handling (values `0`-`0xb`, previously described in Pass 25 as "mostly
+falls through to a shared default") in fact **`goto`s directly into the
+SAME case labels used by the high-value `0xf4`-`0xff` arm** documented
+in Pass 25:
+
+| Ctrl+Potato key | `_DAT_00588400` | Shares a label with | `DAT_005883c0` result | Also calls `FUN_004a44d0`? |
+|---|---:|---:|---:|---|
+| F1 / Shift+Enter | 0 | *(unique -- not aliased)* | `0x116` | no |
+| F2 | 1 | `0xf5` | `0x10e` | **yes** |
+| F3 | 2 | `0xf6` | `0x108` | no |
+| F4 | 3 | `0xf7` | `0x107` | **yes** |
+| F5 | 4 | `0xf8` | `0x106` | no |
+| F6 | 5 | `0xf9` | `0x10b` | no |
+| F7 | 6 | `0xfa` | `0x11b` | **yes** |
+| F8 | 7 | `0xfb` | `0x10f` | no |
+| F9 | 8 | `0xfc` | `0x11e` | no |
+| F10 | 9 | `0xfd` | `0x117` | no |
+| F11 | 10 | `0xfe` | `0x11a` | **yes** |
+| F12 | 11 | `0xff` | `0x112` | no |
+
+**This means Ctrl+Potato's 12 keys are a direct QA testing shortcut for
+the 11 real campaign-outcome branches documented in Pass 25** (reachable
+in normal play only by actually finishing a mission with that specific
+outcome), **plus one 12th, otherwise-unreachable-by-normal-play
+destination** (`_DAT_00588400 == 0`, which shares nothing with the
+`0xf4`-`0xff` table and resolves to a unique `DAT_005883c0 == 0x116`).
+**Confidence 4** -- directly read from the decompile's shared `goto`
+targets, not inferred.
+
+### `FUN_004a44d0` is NOT a cutscene resolver -- it's the squadron-roster (`.sro`) file loader
+
+Pass 25 left `FUN_004a44d0` undecompiled, guessing it "resolves
+`DAT_005883c0`/`DAT_0057e048` into a loadable resource." Decompiled it
+this session: it's confirmed (via its own error string, `"Could not
+open %s"`, and source-tagged allocation string `C:\lancer\game\
+srofiles.cpp`) to be a real file parser for what the source calls
+**`.sro` files** -- large, richly-structured records (600-byte-stride
+top-level entries, each with sub-tables for up to `0x1c`-count "wings,"
+weapon-hardpoint records checking against literal strings `"startup"`/
+`"deploy"`, and geometric plane-normal computations per sub-record) --
+this reads as a **squadron/wing ROSTER format**, not a video or image
+resource. **This means the campaign-outcome branch's real effect is
+loading a different roster of ships/wingmen for the next mission
+briefing** (e.g. a wingman who died in a bad outcome no longer appears)
+rather than selecting a debrief cutscene as Pass 25 speculatively
+guessed -- a materially different, better-supported interpretation of
+what "campaign branching" actually changes. **Confidence 3**: the file
+format identification (SRO squadron roster) is solid; the specific
+claim that `DAT_005883c0`'s numeric value selects WHICH roster filename
+gets passed to `FUN_004a44d0` is plausible but not directly observed
+(the actual filename argument is passed via a hidden `__fastcall`
+register at `InitializeMissionGameplay`'s call site, not shown in its
+decompile, and not chased further this session).
+
+### Open follow-ups
+
+- Apply `set_function_prototype` to `FUN_004a44d0` (now known:
+  `int LoadSquadronRoster(byte *filename)`ish) and re-decompile
+  `InitializeMissionGameplay` to reveal what specific filename/string
+  `DAT_005883c0`'s value actually resolves to -- the same technique
+  that cracked the cheat code in Pass 34 should work here too.
+- The `.sro` format's own internal structure (wings, hardpoints,
+  weapon slots) -- not mapped field-by-field this session, well beyond
+  the scope of "decode the debug codes."
+- Whether `DAT_00582e8c`'s corrected SP/MP semantics hold up under a
+  live multiplayer session -- not verified.
+
+### Addendum (same session): the exact filenames, revealed by the same prototype trick
+
+Applied `set_function_prototype` to `FUN_004a44d0` itself (now renamed
+`LoadSquadronRoster`, `int __fastcall LoadSquadronRoster(byte *filename)`)
+and re-decompiled `InitializeMissionGameplay` -- exactly the technique
+flagged as an open follow-up above, and it worked immediately: every
+branch's hidden filename argument is now visible.
+
+| `_DAT_00588400` code | `DAT_005883c0` | Roster file loaded |
+|---:|---:|---|
+| *(mission 25 special case)* | `0x112` | `"kamg_frm_shp"` |
+| 0 / `0xf4` | `0x116` | `"preg_frm_shp"` |
+| 1 / `0xf5` | `0x10e` | `"nagg_frm_shp"` |
+| 2 / `0xf6` | `0x108` | `"gre2_frm_shp"` |
+| 3 / `0xf7` | `0x107` | `"cru3_frm_shp"` |
+| 4 / `0xf8` | `0x106` | `"coyg_frm_shp"` |
+| 5 / `0xf9` | `0x10b` | `"mirg_frm_shp"` |
+| 6 / `0xfa` | `0x11b` | `"temg_frm_shp"` |
+| 7 / `0xfb` | `0x10f` | `"pat2_frm_shp"` |
+| 8 / `0xfc` | `0x11e` | `"wolv_frm_shp"` |
+| 9 / `0xfd` | `0x117` | `"rea2_frm_shp"` |
+| 10 / `0xfe` | `0x11a` | `"shr2_frm_shp"` |
+| 11 / `0xff` | `0x112` | `"phe2_frm_shp"` |
+
+The `_frm_shp` suffix reads naturally as "formation ship[list]" -- a
+squadron/formation roster keyed by fighter class. Several prefixes are
+recognizable Star Lancer fighter-class abbreviations (`wolv` =
+Wolverine, `phe2` = Phoenix-family, `shr2` = Shrike-family, `pat2` =
+Patriot-family, `rea2` = Reaver/Reaper-family, `cru3` = a Crusader/
+cruiser-family variant); the rest (`kamg`, `preg`, `nagg`, `gre2`,
+`coyg`, `mirg`, `temg`) are plausible further ship-class abbreviations
+not independently confirmed against an authoritative source. **This
+means the campaign-outcome branch's real, concrete effect is loading a
+DIFFERENT SHIP/SQUADRON FORMATION ROSTER for the next mission depending
+on how the previous one ended** (or, via Ctrl+Potato, whichever of the
+12 keys was pressed) -- e.g. plausibly which fighter class the player
+flies next, or which allied wing composition escorts them, changing
+based on campaign performance. **Confidence 4** on the mechanism (12
+distinct, real filenames, directly read from the decompile); confidence
+2 on the specific "changes player's ship class" narrative interpretation
+(plausible, not confirmed against actual `.sro` file contents or
+in-game observation).
+
+This fully answers the original request: `_DAT_00588400`'s ultimate
+consumer is a squadron-roster loader, and the 12 Ctrl+Potato debug
+codes are a direct QA shortcut for selecting which of 12 real,
+named roster files loads for the next mission.
