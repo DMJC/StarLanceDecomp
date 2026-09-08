@@ -4720,3 +4720,125 @@ per METHODOLOGY's live-debugging guidance).
   `FUN_004bd570` internals or live debugging).
 - `DAT_0051dab4`'s two-mode Bink playback selection
   (`*(DAT_00588730+0x162e) != 0x3e0`) -- not investigated.
+
+## Pass 34 -- `CheckKeyEdgeState` decoded; the "CTRL+POTATO" cheat code confirmed (2026-09-08)
+
+Direct request: decode `FUN_004bd570`, the input-polling function called
+throughout the codebase as `FUN_004bd570(1)` with its other two
+arguments always invisible (the recurring hidden-fastcall-argument
+artifact this project has hit dozens of times). Fully decoded it, and
+as a direct, satisfying side effect, **recovered the exact key sequence
+for the mission-select cheat code** flagged as unrecoverable in Pass 6.
+
+### `CheckKeyEdgeState` (`0x4bd570`, was `FUN_004bd570`)
+
+```c
+undefined4 __fastcall CheckKeyEdgeState(int keyIndex, undefined4 modifierMode, int pressOrRelease);
+```
+
+A general-purpose, edge-triggered keyboard polling primitive:
+
+- `keyIndex` -- a raw PC keyboard scancode (Set 1), used to index a
+  per-key raw-down-state byte array at `DAT_00595c68` (**the same
+  global `MissionScript_WaitForKey`'s condition-table lookup reads**,
+  confirmed in Pass 26 -- this is the game's single shared raw keyboard
+  state array).
+- `modifierMode` -- which modifier must ALSO be held for the check to
+  pass: `0` = none (and no modifier at all may be held), `1` = Shift,
+  `2` = Ctrl, `3` = Alt. Each modifier is tracked as a pair of globals
+  (Left/Right variants ORed together): Shift = `DAT_00595c92`/
+  `DAT_00595c9e`, Ctrl = `DAT_00595c85`/`DAT_00595d05`, Alt =
+  `DAT_00595ca0`/`DAT_00595d20`. The Shift/Ctrl identification is
+  independently cross-confirmed by the HUD-render function's own
+  `local_160[]` display-string array from Pass 31 (`["", "SHIFT",
+  "CONTROL"]`, indexed by this exact same `modifierMode` value); Alt
+  (mode 3) is inferred from the parallel structure alone (no display
+  string seen), confidence 3.
+- `pressOrRelease` -- `0` checks for a RELEASE edge, nonzero checks for
+  a PRESS edge (every observed caller passes `1`).
+
+Uses a second per-key array, `DAT_005d54ec`, as an edge-detection latch
+(so a held key fires the "pressed" check exactly once, not every
+frame), with dedicated "combo-latched" globals per modifier
+(`DAT_005d5744`=Shift, `DAT_005d5634`=Ctrl, `DAT_00595d80`=Alt) so a
+modifier+key combo's release doesn't spuriously also fire the
+plain-key release check. **Confidence 5** -- fully mechanical, no
+ambiguity once the hidden arguments were exposed.
+
+### How the hidden arguments were recovered
+
+Every prior sighting of this function (VR loop, `RunMainMenuScreen`,
+etc.) showed only `FUN_004bd570(1)` because Ghidra's decompiler doesn't
+display `__fastcall` register arguments (ECX/EDX) unless the callee's
+prototype is explicitly declared. Called `set_function_prototype` on
+`0x4bd570` with the 3-int `__fastcall` signature above, then
+re-decompiled every caller -- **all hidden arguments immediately became
+visible in every caller's decompile**, all at once, project-wide (no
+per-call-site disassembly needed). This is a broadly reusable technique
+worth remembering for any other function in this codebase exhibiting
+the "same call, no visible args" symptom.
+
+### `RunMainMenuScreen`'s hidden input, decoded
+
+Re-decompiling `RunMainMenuScreen` (`0x428b60`) with the new prototype
+in place reveals the ENTIRE previously-opaque input chain:
+
+**The cheat code itself**, read directly from the now-visible scancode
+array `local_c[] = {0x19, 0x18, 0x14, 0x1e, 0x14, 0x18}`, each checked
+via `CheckKeyEdgeState(local_c[i], 2, 1)` (i.e. **with Ctrl held**), in
+strict sequence (a running index `iStack_10` only advances on a correct
+next-key match):
+
+| Scancode | Key | | Scancode | Key |
+|---|---|---|---|---|
+| `0x19` | P | | `0x1e` | A |
+| `0x18` | O | | `0x14` | T |
+| `0x14` | T | | `0x18` | O |
+
+**Spelled out: `P-O-T-A-T-O`, held with Ctrl.** Star Lancer's
+mission-select cheat code is **Ctrl+P-O-T-A-T-O** ("Ctrl+Potato").
+**Confidence 5** -- this is about as directly confirmed as a finding
+gets: real scancodes, read straight out of a real array, matched
+against the standard IBM PC Set-1 scancode table.
+
+Completing the sequence (`iStack_10 == 6`) sets a new global,
+`DAT_005d5641` (arms `g_..MissionSelectCheatArmed`-equivalent state).
+Once armed, EVERY subsequent frame first polls a chain of Shift-modified
+function keys (`CheckKeyEdgeState(0x3b..0x44, 1, 1)` = Shift+F1
+through Shift+F10, then `0x57`/`0x58` = Shift+F11/F12) and
+`CheckKeyEdgeState(0x1c, 1|2, 1)` (Shift+Enter / Ctrl+Enter) -- each
+bound key sets a distinct debug/status code (`_DAT_00588400 = 0..11`)
+and a "handled" flag (`DAT_005883b4` or `DAT_0051db48`), evidently
+selecting one of a dozen otherwise-inaccessible debug destinations (NOT
+decoded further this pass -- `_DAT_00588400`'s consumer wasn't traced).
+
+**If none of those F-keys/Enter combos are pressed**, the code instead
+reads plain NUMBER-ROW keys (scancodes `0x02`-`0x0b` = `'1'`..`'9'`,
+`'0'`) with no modifier, accumulating up to 2 digits into
+`DAT_00562dc8` (the mission-index global, confirmed independently by
+5 different functions across this project now):
+
+```c
+iVar1 = CheckKeyEdgeState(digitScancode, 0, 1);  // one of '1'..'9','0'
+if (iVar1 != 0) {
+  iVar1 = (typedDigitIndex + 1) % 10;              // '1'->1 .. '9'->9, '0'->0
+  if (DAT_00562dc8 < 10) {                          // already-typed digit becomes the "tens" place
+    iVar1 = iVar1 + DAT_00562dc8 * 10;
+  }
+}
+```
+
+This exactly confirms the Pass 6 guess mechanically: after arming with
+Ctrl+Potato, typing a 1- or 2-digit number on the main menu directly
+sets the current mission index -- a genuine, now fully mechanically
+understood developer mission-select cheat, not merely inferred from
+shape.
+
+### Open follow-ups
+
+- The 12 debug destination codes (`_DAT_00588400` values 0-11, selected
+  via Shift+F1-F12/Ctrl+Enter/Shift+Enter once Ctrl+Potato is armed) --
+  not traced to their consumer.
+- Apply `CheckKeyEdgeState`'s new prototype and re-decompile other
+  heavy callers (the VR loop, other menu screens) to see what else was
+  being hidden -- likely worthwhile given how much this unlocked here.

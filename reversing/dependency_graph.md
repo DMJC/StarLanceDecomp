@@ -1093,3 +1093,21 @@ WinMain
        -> RunMissionSelectMapScreen (0x44f3d0)   [roomType==5 hub, already documented]
   -> RunMenuScreenLoop (0x4289d0)   [also called directly by WinMain's own state machine]
 ```
+
+## `CheckKeyEdgeState` decoded; the "CTRL+POTATO" cheat code confirmed (2026-09-08, thirty-fourth session)
+
+```
+CheckKeyEdgeState (0x4bd570)
+  -> depends on: DAT_00595c68 (raw per-key down-state array, shared with MissionScript_WaitForKey),
+                 DAT_005d54ec (per-key edge-latch array),
+                 DAT_00595c92/DAT_00595c9e (Shift L/R), DAT_00595c85/DAT_00595d05 (Ctrl L/R),
+                 DAT_00595ca0/DAT_00595d20 (Alt L/R),
+                 DAT_005d5744/DAT_005d5634/DAT_00595d80 (per-modifier combo-latch flags)
+  <- depended on by: RunMainMenuScreen (0x428b60, Ctrl+Potato cheat + post-cheat debug/mission-select
+                 input), RunShipInteriorVRLoop, MissionScript_WaitForKey (via DAT_00595c68 only,
+                 not this function directly), and other menu screens (not re-audited this session)
+
+RunMainMenuScreen (0x428b60)
+  -> depends on: CheckKeyEdgeState (cheat sequence + post-cheat input),
+                 DAT_005d5641 (cheat-armed flag), DAT_00562dc8 (mission index, set by digit entry),
+                 _DAT_00588400 (debug destination code, consumer not traced)

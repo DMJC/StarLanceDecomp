@@ -1237,3 +1237,23 @@ Follow-up on the already-complete 145-node graph walk (Passes 4-5); the
 - Whether the roomType 3/4 interactive-prop content varies by room or is a single shared asset.
 - Mission-select cheat code's exact key sequence (needs `FUN_004bd570` internals or live debugging).
 - `DAT_0051dab4`'s display-mode-dependent Bink playback selection.
+
+## `CheckKeyEdgeState` decoded; the "CTRL+POTATO" cheat code confirmed (2026-09-08, thirty-fourth session)
+
+Direct request: decode `FUN_004bd570`. Setting its function prototype
+explicitly made Ghidra reveal hidden `__fastcall` arguments across
+EVERY caller project-wide, immediately unlocking `RunMainMenuScreen`'s
+previously-opaque input chain.
+
+| Name (address) | Confidence | Notes |
+|---|---|---|
+| `CheckKeyEdgeState` (0x4bd570, was FUN_004bd570) = edge-triggered key+modifier poll `(keyIndex, modifierMode, pressOrRelease) -> bool` | 5 | Fully mechanical once hidden args exposed. Shares `DAT_00595c68` (raw key state) with `MissionScript_WaitForKey` (Pass 26). |
+| modifierMode 0/1/2/3 = none/Shift/Ctrl/Alt | 4 (Shift/Ctrl) / 3 (Alt) | Shift/Ctrl cross-confirmed via Pass 31's HUD `local_160[]` display-string array (`["","SHIFT","CONTROL"]`) using the same index; Alt inferred from parallel structure only, no display-string confirmation seen. |
+| Mission-select cheat code = **Ctrl+P-O-T-A-T-O** (scancodes 0x19,0x18,0x14,0x1e,0x14,0x18, each with Ctrl held, in sequence) | 5 | Read directly from `RunMainMenuScreen`'s now-visible `local_c[]` array and matched against standard PC Set-1 scancodes. Resolves the "not recoverable from static analysis" caveat from Pass 6. |
+| Post-cheat debug menu (Shift+F1-F12, Ctrl+Enter, Shift+Enter each set a distinct `_DAT_00588400` code 0-11) | 3 | Structure and trigger keys confirmed; the 12 destination codes' actual meanings not traced. |
+| Post-cheat digit-entry mission-select (plain '1'-'9'/'0', 2-digit accumulation into `DAT_00562dc8`) | 4 | Mechanically confirmed, matches Pass 6's structural guess exactly. |
+
+### Open follow-ups
+
+- Trace `_DAT_00588400`'s consumer to decode the 12 debug destinations.
+- Re-decompile other heavy `CheckKeyEdgeState` callers (VR loop, other menu screens) now that its prototype is set -- likely reveals more hidden key bindings.
