@@ -1894,3 +1894,309 @@ confirmed.
   assist) or two coincidentally-related settings sharing a field.
 - Which weapon type IDs specifically use the beam-rendering path — the
   code's gate is a global flag, not obviously per-type.
+
+---
+
+# Twelfth pass (2026-09-08, same day): the real weapon arsenal
+
+Decompiled `SpawnProjectile`'s 3 remaining dependencies. One of them
+turned out to be the best find of the whole weapon-system investigation
+— a function whose `switch` cases are keyed by weapon type ID and whose
+mesh-filename arguments are the game's actual weapon names, read
+directly from the string table (Confidence 3, not inferred).
+
+## `CreateWeaponProjectileVisual` (`0x0047d9a0`) — the weapon catalog
+
+```c
+void __fastcall CreateWeaponProjectileVisual(WeaponOrProjectile *obj, int mode);
+```
+
+`obj[0]` (the same "type" field used throughout this whole weapon
+subsystem) selects one of 15 cases, each building a different mesh (or
+cluster of meshes) and storing the resulting handles back into the
+struct. The full arsenal, by type ID:
+
+| Type | Weapon name | Mesh arrangement |
+|---:|---|---|
+| 0 | **LaserCannon** | single mesh |
+| 1 | **PulseCannon** | 2 meshes (BMO1/BMO2), randomized rotation |
+| 2 | **MessonBlaster** (Meson Blaster) | 3-mesh radial cluster |
+| 3 | **ProtonCannon** | single mesh |
+| 4 | **Gattlinglaser** | 3-mesh cluster, 120° spacing |
+| 5 | **TachyonCannon** | 2 meshes |
+| 6 | **Neutronparticle** (Neutron Particle Cannon) | single mesh |
+| 7 | **Collapsergun** | 2 meshes (BMO1/BMO2) |
+| 8 | **Gattlingplasma** | 4-mesh cluster |
+| 9 | **Vulcanbattery** | 4-mesh square arrangement |
+| 10 | **Novacannon** | single mesh, distinct rotation rigging |
+| 0xb | **Turretflak** (Turret Flak) | matches the spread/shotgun jitter found in `SpawnProjectile` exactly |
+| 0xc | **TurretLaser** | the `0xb`→`0xc` variant-swap partner — turret-mounted precision laser |
+| 0xd | **AlliedHugeGun** ("Allied_big_gun") | capital-ship superweapon, Allied faction |
+| 0xe | AlliedHugeGun mesh + "Coal_big_gun" effect | same base mesh as `0xd` but a visibly larger glow/burst scale — the Coalition-faction equivalent |
+| default | **gundefault** | fallback mesh for any unrecognized type |
+
+Each case also sets a small color/tint pair (`local_40`/`local_44`)
+gated by the `mode` parameter and a deathmatch flag (`DAT_00582e8c`) —
+plausibly a friendly/hero color distinction (e.g. tinting the local
+player's own shots differently), not confirmed field-by-field. The two
+"huge gun" cases (`0xd`/`0xe`) get visibly richer treatment than every
+other type: a full 24-field transform block set to defaults, PLUS a
+dedicated glow effect via `CreateEffectObject`, PLUS a second special
+object via `FUN_0049c600` (not decompiled) — consistent with these
+being the game's showcase capital-ship superweapons.
+
+**This corrects last session's guess.** Types `0xd`/`0xe` were
+tentatively called "proximity mines" based on their larger
+detonation-radius bonus in `SpawnProjectile`. They're actually
+**faction-specific capital-ship superweapons** (Allied vs. Coalition —
+matching Star Lancer's known two-faction setting), and the larger
+detection radius makes much more sense as generous hit-detection for a
+massive shot than as a mine's blast radius. Marked down rather than
+silently dropped, per METHODOLOGY's confidence discipline.
+
+## `CreateEffectObject` (`0x004c4f30`)
+
+```c
+void *__thiscall CreateEffectObject(void *unused_this, int ownerTag,
+                                     float x, float y, float z,
+                                     float rx, float ry, float rz);
+```
+
+A small, genuinely generic renderable-effect-object constructor:
+allocates 220 bytes (`SR_MEM_allocate`, tagged `surrenderlib\...` line
+`0x2b5` — confirming this lives in the SurrenderLib engine core, not
+game-specific code), sets position and orientation, stores an owner tag
+at `+4`, and defaults a scale/alpha-like field (`+0x48`) to `1.0`. Used
+by two independent callers now — the beam-weapon visual in
+`SpawnProjectile` and the huge-gun glow effect here — confirming it's
+real shared infrastructure, not a one-off.
+
+## `PropagateAlertToChildren` (`0x0049bef0`)
+
+```c
+void __thiscall PropagateAlertToChildren(GameObject *obj, void *alertSource);
+```
+
+Simpler than its name (and its role in `SpawnProjectile`'s
+proximity-detection scan) suggested: tests a predicate
+(`FUN_0049bd30(alertSource)`, not decompiled) and, if true, recurses
+into `obj`'s child-object list — the SAME `+0xf8`(count)/`+0x100`(array)
+fields documented in two earlier sessions, now confirmed a THIRD
+independent way — calling itself on every child not flagged `0xa0`.
+There is no other logic in this function: whatever "alert" or
+"reaction" actually happens must live inside `FUN_0049bd30` itself,
+which remains completely unopened. This function is purely a
+hierarchy-propagation wrapper, not the reaction logic itself as
+originally assumed.
+
+### Open follow-ups
+
+- `FUN_0049bd30` — the real predicate/reaction logic behind
+  `PropagateAlertToChildren`. Now the clearest single next step if the
+  "how do nearby ships react to incoming fire" question matters.
+- `FUN_0049c600` — the second special object attached to huge-gun
+  weapons only.
+- The `mode` parameter's exact meaning in `CreateWeaponProjectileVisual`
+  (tentatively a friendly/hero color-tint selector).
+- ~~The low-level draw primitives called throughout this whole session~~ — **resolved next session, see below.**
+
+---
+
+# Thirteenth pass (2026-09-08, same day): SurrenderLib scene-node primitives
+
+Opened the 5 low-level draw/transform primitives flagged last session.
+All are genuinely generic SurrenderLib engine core — confirmed by the
+same recurring `SR_MEM_allocate` source-tag pattern
+(`C:\lancer\surrender\surrenderlib\...`) seen for `SR_printf` and the
+assertion functions back in the second session, at distinct line
+numbers per call site — not game- or weapon-specific despite being
+found via the weapon-rendering trace.
+
+## `SetPosition` (`0x004c0e60`)
+
+```c
+void __thiscall SetPosition(Transform *this, float x, float y, float z);
+```
+
+Exactly what it looks like: `this->x, this->y, this->z = x, y, z`. No
+surprises — confirms the "set position" guess carried since the
+weapon-firing investigation began.
+
+## `SetOrientationMatrix` (`0x004c2410`)
+
+```c
+void __thiscall SetOrientationMatrix(float matrix[9], float angle1,
+                                      float angle2, float angle3);
+```
+
+Builds a full 3×3 rotation matrix (9 floats, `matrix[0]` through
+`matrix[8]`) from 3 Euler-style angles, computing sine and cosine of
+each (`FUN_004c30e0`/`FUN_004c3100`, one call of each per angle — not
+individually confirmed as cos/sin, but the pattern is consistent with
+it) and combining them with the standard rotation-matrix-composition
+arithmetic. Confirms this engine represents orientation as a 3×3
+matrix rather than a quaternion, typical for its era (1999).
+
+## `CreateMeshInstance` (`0x004c4bd0`)
+
+```c
+void *__fastcall CreateMeshInstance(void *parentGroup, MeshTemplate *tmpl,
+                                     uint flags, void *ownerTag);
+```
+
+The core "instantiate a renderable mesh" factory. If `parentGroup` is
+given, aggregates bounding-box/radius info across its list of
+sub-templates; otherwise reads the bounding info directly from `tmpl`.
+Computes an exact allocation size that grows if `flags` requests
+optional per-instance override buffers (bits `0x200000`/`0x400000`,
+each adding a buffer sized `faceCount*8` bytes — plausibly per-vertex
+color or per-face UV override arrays, not confirmed). This is
+real, general-purpose SurrenderLib rendering infrastructure — used for
+weapon meshes in the functions traced this session, but with no
+weapon-specific logic of its own; it's presumably the same factory
+used to instantiate every renderable mesh in the game (ships, ship
+interior VR-room props, etc.), though this session's trace only
+reached it via the weapon system.
+
+## `CreateMultiPartMeshGroup` (`0x004c4db0`)
+
+```c
+void *__fastcall CreateMultiPartMeshGroup(int partCount, void *parentRef,
+                                           const char *name);
+```
+
+A related but distinct factory: allocates a variable-sized structure
+holding `partCount` 100-byte sub-part records (each defaulted to unit
+scale), with a name/tag stored separately. Note: at
+`CreateWeaponProjectileVisual`'s call sites, the visible argument
+(e.g. `"PulseCannon_BMO1"`) is the STACK-passed third parameter
+(`name`), not `partCount` — `partCount`/`parentRef` are passed via the
+implicit `ECX`/`EDX` fastcall registers the decompiler doesn't surface
+at those call sites, consistent with the recurring pattern seen all
+session for `__fastcall`/`__thiscall` functions. This is almost
+certainly the real constructor behind the "BMO" naming convention seen
+throughout the weapon mesh catalog (`PulseCannon_BMO1`/`BMO2`,
+`Collapsergun_bmo1`/`bmo2`, the huge guns' bmo effects) — a multi-part
+object whose parts can be transformed independently (e.g. a
+dual-barrel weapon's two barrels animating on separate recoil cycles).
+"BMO" itself doesn't appear spelled out anywhere in the string table
+found so far.
+
+## `CreateGroupNode` (`0x004c51c0`)
+
+```c
+void *__thiscall CreateGroupNode(void *ownerTag, float x, float y, float z,
+                                  float rx, float ry, float rz);
+```
+
+A small (180-byte) generic scene-node constructor: position +
+orientation (via `SetPosition`/`SetOrientationMatrix`) + owner tag.
+Structurally almost identical to `CreateEffectObject` (220 bytes,
+documented last session) but calls a different secondary
+initialization step (`FUN_004c4190`, not decompiled, vs. none for
+`CreateEffectObject`). Likely the base "parent/group" node type used to
+hold multiple child mesh instances together under one transform — e.g.
+a multi-barrel weapon's group root, or a projectile's root transform
+kept separate from its visible mesh instance(s).
+
+### Open follow-ups
+
+- `FUN_004c30e0`/`FUN_004c3100` (presumed cos/sin, not confirmed).
+- `FUN_004c1be0`/`FUN_004c0e30` (each called twice in both
+  `CreateMeshInstance` and `CreateMultiPartMeshGroup` — likely
+  default-initializing two sub-blocks such as a bounding box and a
+  local transform).
+- `FUN_004c4190` (`CreateGroupNode`'s extra init step).
+- The exact meaning of `CreateMeshInstance`'s `0x200000`/`0x400000`
+  flag bits.
+- What "BMO" actually stands for.
+
+---
+
+# Fourteenth pass (2026-09-08, same day): the effect-anchor callback system, and a correction
+
+## `CreateParticleEmitter` (`0x0049c600`)
+
+```c
+ParticleEmitter *__fastcall CreateParticleEmitter(void *ownerTag);
+```
+
+Real name confirmed directly — `SR_MEM_allocate` tags this allocation
+`C:\lancer\game\particles.cpp` line `0x100`. Allocates a 252-byte,
+mostly-zeroed particle-emitter object: creation timestamp
+(`DAT_005883b0`, the tick counter), a few default-scale fields (`1.0`),
+and an owner tag. This is the second special effect object
+`CreateWeaponProjectileVisual` attaches to the two huge-gun weapon
+types (`0xd`/`0xe`) — confirms they get both a glow light
+(`CreateEffectObject`, documented previously) AND a genuine particle
+effect, consistent with these being the game's flagship capital-ship
+superweapons.
+
+## `InvokeEffectAnchorCallback` (`0x0049bd30`) — and a correction to last session's write-up
+
+```c
+undefined4 __fastcall InvokeEffectAnchorCallback(void *object,
+                                                   char (*callback)(void));
+```
+
+Turns out to be more general than assumed: this is a **generic
+callback-invoking tree walker**, not a simple true/false predicate.
+The second parameter is a genuine function pointer — confirmed
+directly by the decompiler's own `(*param_2)()` call syntax, not
+inferred.
+
+Two modes, selected by whether `object+0xa8` is set:
+
+- **Unset** (`+0xa8==0`): walks the object's own effect-anchor
+  sub-table (`+0xa4` → count at `+0x20c`, array at `+0x210`) using a
+  manual worklist stack (the same "local array as an explicit stack"
+  idiom seen in `UpdateObjectPhysicsAndTimers` two sessions ago).
+  For each anchor node, applies a visual/transform setup, then:
+  if the node is a "leaf" (`+0x48==0`)... actually the logic is
+  inverted from what that reads like — when `+0x48==0` the callback is
+  invoked and, if it returns nonzero, the node's own two child-offset
+  fields (`+0x50`/`+0x54`) get pushed onto the worklist for further
+  descent; when `+0x48!=0` the callback is invoked unconditionally
+  with no further recursion. Either way, the callback decides whether
+  traversal continues past a given node.
+- **Set** (`+0xa8!=0`): skips the anchor-table walk entirely, does one
+  simplified visual/transform pass targeting `object+0xa8`'s own
+  `+0x5a0` sub-field, and invokes the callback exactly once.
+
+This is a THIRD distinct effect-anchor table shape found in this
+investigation — `+0xa4 → +0x20c/+0x210` here, versus `+0xa4 →
++0x214/+0x218` on the object `SpawnWeaponVisualEffect` operates on.
+Whether these are the same conceptual table with different exact
+offsets on different sub-object types, or genuinely unrelated
+tables that happen to share the `+0xa4` base offset, is NOT resolved.
+
+### Correction: `PropagateAlertToChildren`'s second parameter is a callback, not an "alert source"
+
+Last session's write-up described `PropagateAlertToChildren`'s
+`param_2` as "an alert source" being propagated to child objects. With
+`InvokeEffectAnchorCallback` now decompiled, it's clear `param_2` in
+BOTH functions is the same kind of value: a callback function pointer.
+`PropagateAlertToChildren` recurses through a ship's child-OBJECT
+hierarchy (`+0xf8`/`+0x100`) passing the callback down unchanged at
+each level; `InvokeEffectAnchorCallback`, called once per such object
+by `SpawnProjectile`'s actual usage, separately walks that SAME
+object's own internal effect-ANCHOR tree, invoking the callback there
+too. Put together, `SpawnProjectile`'s proximity-reaction scan installs
+one callback and runs it across BOTH axes — every object in a
+hierarchy, and every effect-anchor point on each object — rather than
+the simpler "check a predicate, then alert children" picture the
+previous session's more limited view suggested.
+
+**What the callback actually DOES on each invocation remains unknown**
+— the traversal SHAPE is now clear, but the real function pointer(s)
+passed in at actual call sites haven't been identified. This is an
+explicit correction, not a silent edit, per METHODOLOGY's confidence
+discipline: the earlier "proximity-alert reaction" framing is
+downgraded from an implied-confirmed mechanism to "traversal shape
+confirmed, purpose still open."
+
+### Open follow-ups
+
+- The real callback function(s) passed to `InvokeEffectAnchorCallback`/`PropagateAlertToChildren` — identifying these would finally reveal what "happens" during this traversal.
+- Whether the `+0xa4→+0x20c/+0x210` anchor-table shape here and the `+0xa4→+0x214/+0x218` shape on `SpawnWeaponVisualEffect`'s target object are related or coincidental.
+- The anchor-node `+0x50`/`+0x54` child-offset fields' own structure.

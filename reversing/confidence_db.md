@@ -308,7 +308,7 @@ concrete, previously-unknown weapon-type semantics.
 - **Type `0xb` = a spread/shotgun-style weapon**: gets BOTH randomized effect-variant selection (documented last session, in `FireWeapon`) AND randomized shot-direction jitter (±0.06 radians-ish per axis, `FUN_004c2410`) — two independent pieces of evidence now pointing the same direction.
 - **Types `0xa`-`0xe` are a coherent "special weapons" cluster**, exempted from the difficulty-scaled aim-assist system (below): plausibly mines, countermeasures, and spread weapons, as opposed to standard forward-firing guns (types `0`-`9`).
 - **Difficulty-scaled aim assist**: if the owning ship's difficulty flag (`+0x674` — the SAME field flagged last session as a "difficulty-scaled reload-time modifier," now confirmed to gate a SECOND difficulty-related behavior too) is set, and the weapon type isn't in the `0xa`-`0xe` special cluster, applies an aim-correction adjustment toward the current target (the ship's `+0x684` field, matching `GetOwningShip`'s return value's own `+0x684`) — a simpler correction for the player's own shots, a target-flag-gated correction for AI shots. A concrete, previously-unknown difficulty-assist mechanic.
-- **Types `0xd`/`0xe` get a much larger proximity-detonation radius** (+1200/+3000 added to the base detection-distance check, versus 0 for other types) — strong evidence these are proximity mines or other area-effect ordnance, consistent with being in the aim-assist-exempt cluster above.
+- **Types `0xd`/`0xe` get a much larger proximity-detonation radius** (+1200/+3000 added to the base detection-distance check, versus 0 for other types) — **CORRECTED next session (see below): these are capital-ship "Huge Gun" superweapons, not mines** — the larger radius is a bigger hit-detection allowance for a massive shot, not a mine blast radius. Marked down rather than silently dropped, per METHODOLOGY.
 - **Proximity/homing reaction system**: scans every active object each spawn, and for anything within the scaled detection radius, either queues a "nearby object" record (a small max-20-entry per-projectile array) if the target isn't yet "active/awake," or immediately calls `FUN_0049bef0` (not decompiled — plausibly "alert this object to an incoming threat," triggering evasive AI) if it already is.
 
 ### Open follow-ups
@@ -327,6 +327,105 @@ concrete, previously-unknown weapon-type semantics.
   reload-time modifier (previous session) AND aim-assist (this
   session) — worth checking whether it's a single "easy mode" flag
   rather than two separate difficulty settings.
+
+## `CreateWeaponProjectileVisual` — the real weapon arsenal (2026-09-08, ninth session)
+
+Decompiled the 3 remaining `SpawnProjectile` dependencies flagged last
+session. One of them, `FUN_0047d9a0`, turned out to be a major find: a
+per-weapon-type visual mesh builder whose `switch` cases embed the
+game's **real weapon catalog** as literal mesh filenames — Confidence 3
+for every name (directly read from the string table, not inferred).
+
+| Type ID | Weapon name (from embedded mesh filename) | Notes |
+|---:|---|---|
+| 0 | LaserCannon | single mesh |
+| 1 | PulseCannon | 2 meshes (BMO1/BMO2), random rotational jitter applied |
+| 2 | MessonBlaster ("Meson Blaster") | 3-mesh radial cluster |
+| 3 | ProtonCannon | single mesh |
+| 4 | Gattlinglaser | 3-mesh cluster, 120° radial spacing |
+| 5 | TachyonCannon | 2 meshes |
+| 6 | Neutronparticle ("Neutron Particle Cannon") | single mesh |
+| 7 | Collapsergun | 2 meshes (BMO1/BMO2) |
+| 8 | Gattlingplasma | 4-mesh cluster |
+| 9 | Vulcanbattery | 4-mesh square arrangement |
+| 10 | Novacannon | single mesh, distinct rotation setup |
+| 0xb | Turretflak ("Turret Flak") | matches the spread/shotgun-pattern finding from `SpawnProjectile` exactly — a flak weapon plausibly explains the shot-direction jitter |
+| 0xc | TurretLaser | matches the `0xb`→`0xc` variant-swap finding — a turret-mounted laser, the "precision" sibling of the flak gun |
+| 0xd | AlliedHugeGun ("Allied_big_gun") | capital-ship-scale weapon, faction-specific (Allied) |
+| 0xe | AlliedHugeGun mesh + "Coal_big_gun" effect/glow | same base mesh as 0xd but a distinctly LARGER glow/burst effect scale (`0x45ea6000`≈7500 vs `0x459c4000`≈5000) — reads as the Coalition-faction equivalent of the same superweapon class, not a literally different mesh |
+| default | gundefault | fallback mesh for unrecognized types |
+
+**This directly corrects last session's guess** that types `0xd`/`0xe`
+were proximity mines: they're capital-ship "Huge Gun" superweapons,
+Allied and Coalition faction variants respectively — matching Star
+Lancer's known two-faction setting (Alliance vs. Coalition). The larger
+detonation-radius bonus documented last session now reads as a
+bigger hit-detection allowance for a massive shot, not a mine blast
+radius. Marked down rather than silently dropped, per METHODOLOGY.
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `CreateWeaponProjectileVisual` (0x47d9a0, was `FUN_0047d9a0`) | 3 | The weapon-catalog function documented above. Takes a pointer to a weapon/projectile struct (`param_1[0]`=type ID, matching the type switch used throughout this whole subsystem) and a mode flag (`param_2`, 0/1, gates a "hero"/"friendly" color-tint pair — `local_40`/`local_44` — applied to some meshes' vertex-color-like fields). Stores created mesh handles back into the struct at several offsets (`+0x3c`, `+0x40`, `+0x44`, `+0x48`, `+0x5c`). For the huge-gun cases (`0xd`/`0xe`), also creates a `CreateEffectObject` glow effect and a second object via `FUN_0049c600` (not decompiled) — visibly richer VFX rigging for the two "hero" superweapons than any other type. |
+| `CreateEffectObject` (0x4c4f30, was `FUN_004c4f30`) | 3 | A small (220-byte, `SR_MEM_allocate`-tagged `surrenderlib\...` line `0x2b5`), generic renderable-effect-object constructor: takes a type/owner tag plus a position triple and orientation triple, sets a default scale/alpha field (`+0x48=1.0`). Genuinely generic — used for the huge-gun glow effect here and the earlier-documented beam-weapon visual in `SpawnProjectile`. |
+| `PropagateAlertToChildren` (0x49bef0, was `FUN_0049bef0`) | 1 | Simpler than expected: tests a predicate (`FUN_0049bd30`, not decompiled) on `param_2`, and if true, recurses into `param_1`'s child-object list (the SAME `+0xf8`/`+0x100` fields documented twice already — third independent confirmation) calling itself on each child not flagged `0xa0`. Contains NO other logic — the real "alert/react" behavior, if any, must live inside `FUN_0049bd30` itself, which is unopened. This function is purely a hierarchy-propagation wrapper. |
+
+### Open follow-ups
+
+- `FUN_0049bd30` — the actual predicate/reaction logic `PropagateAlertToChildren` wraps; still completely unknown.
+- `FUN_0049c600` — the second special object created for huge-gun weapons.
+- Exact meaning of the `param_2` mode flag (0/1) in `CreateWeaponProjectileVisual` — tentatively a friendly/hero color-tint selector.
+
+## SurrenderLib scene-node primitives (2026-09-08, tenth session)
+
+Opened the low-level draw/transform primitives called throughout the
+whole weapon-visual investigation. All five are genuinely generic
+SurrenderLib engine core (not game-specific), confirmed by the
+recurring `SR_MEM_allocate` source-tag pattern (`surrenderlib\...`,
+distinct line numbers per allocator call site).
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `SetPosition` (0x4c0e60, was `FUN_004c0e60`) | 3 | Trivial 3-float store (`this->x,y,z = params`) — exactly matches the "set position" guess from prior sessions, now confirmed directly. |
+| `SetOrientationMatrix` (0x4c2410, was `FUN_004c2410`) | 3 | Builds a full 3×3 rotation matrix (9 floats) from 3 Euler-style angles, via `FUN_004c30e0`/`FUN_004c3100` (cos/sin, not individually confirmed but consistent with the call pattern — each angle gets exactly one of each). Standard yaw/pitch/roll → rotation-matrix construction for a 1999-era 3D engine using matrices rather than quaternions for orientation. |
+| `CreateMeshInstance` (0x4c4bd0, was `FUN_004c4bd0`) | 2 | The core "instantiate a renderable mesh" factory. Takes an optional parent/group list (aggregates bounding info from sub-meshes if given), a mesh TEMPLATE pointer (face/vertex/radius fields), a flags word controlling optional per-instance override buffers (bits `0x200000`/`0x400000`, plausibly per-vertex color or UV override arrays), and an owner tag. Computes an exact allocation size depending on which optional buffers are requested — real, general-purpose engine infrastructure, used everywhere a 3D model is instantiated (weapons here, but not weapon-specific). |
+| `CreateMultiPartMeshGroup` (0x4c4db0, was `FUN_004c4db0`) | 2 | A related but distinct factory: allocates a variable-sized struct holding N (a count, passed via the elided `ECX` register — NOT the string literal visible at `CreateWeaponProjectileVisual`'s call sites, which is actually the THIRD, stack-passed argument, a display-name tag) 100-byte sub-part records, each defaulted to unit scale. This is almost certainly the real constructor behind the "BMO" naming convention seen in weapon mesh filenames (`PulseCannon_BMO1`, `Collapsergun_bmo1`, etc.) — a multi-part object where each part can be independently transformed (e.g. a dual-barrel gun's two barrels animating separately). "BMO" itself is not spelled out anywhere in the string table found so far — its expansion remains unknown. |
+| `CreateGroupNode` (0x4c51c0, was `FUN_004c51c0`) | 2 | A small (180-byte) generic scene-node constructor — position + orientation + owner tag, structurally almost identical to `CreateEffectObject` (220 bytes) but calling a different secondary init (`FUN_004c4190` vs. none) — likely the base "parent/group" node type used to hold multiple child mesh instances together (e.g. a multi-barrel weapon's group root, or a projectile's root transform separate from its visible mesh). |
+
+### Open follow-ups
+
+- `FUN_004c30e0`/`FUN_004c3100` (presumed cos/sin — not confirmed), `FUN_004c1be0`/`FUN_004c0e30` (called twice each in both mesh factories, likely default-initializing 2 sub-blocks — e.g. bounding box and transform), `FUN_004c4190` (`CreateGroupNode`'s extra init step).
+- The exact meaning of `CreateMeshInstance`'s `0x200000`/`0x400000` flag bits.
+- "BMO" itself — a real, load-bearing naming convention in this engine's asset pipeline, but its expansion (Bind Mesh Object? Bone Model Object? something else?) hasn't turned up in the string table.
+
+## `InvokeEffectAnchorCallback` / `CreateParticleEmitter` (2026-09-08, eleventh session) — and a correction
+
+| Name (address) | Confidence | Notes |
+|---|---:|---|
+| `CreateParticleEmitter` (0x49c600, was `FUN_0049c600`) | 3 | Real name confirmed directly: `SR_MEM_allocate` tags it `C:\lancer\game\particles.cpp` line `0x100`. Allocates a 252-byte, mostly-zeroed particle-emitter object, stamped with the creation tick (`DAT_005883b0`), default scale fields (`1.0`), and an owner tag. This is the second effect object the huge-gun weapons (`0xd`/`0xe`) attach — confirms those weapons get a genuine particle effect (charge-up glow or muzzle particles) in addition to the `CreateEffectObject` glow light documented last session. |
+| `InvokeEffectAnchorCallback` (0x49bd30, was `FUN_0049bd30`) | 2 | **A generic callback-invoking tree walker, not a simple predicate as assumed last session.** Its second parameter is a genuine function pointer (confirmed by the decompiler's own `(*param_2)()` call syntax). Two modes, selected by whether `object+0xa8` is set: if unset, walks the object's effect-anchor sub-table (`+0xa4` → count `+0x20c` / array `+0x210` — a THIRD anchor-table shape seen this investigation, distinct from the `+0x214`/`+0x218` one documented for `SpawnWeaponVisualEffect` two sessions ago, meaning weapon/effect objects carry MULTIPLE independent anchor-point sub-tables, not just one) with a manual worklist stack, invoking the callback on each anchor node and recursing into two child-offset fields (`+0x50`/`+0x54`) when the callback returns nonzero on a non-leaf node (`+0x48==0`); if set, does a single simplified visual/transform pass and invokes the callback once, unconditionally. |
+
+### Correction to `PropagateAlertToChildren` (documented two sessions ago)
+
+That function's second parameter is this SAME kind of callback, not
+"an alert source" as previously described — `PropagateAlertToChildren`
+recurses through a ship's child-OBJECT hierarchy (`+0xf8`/`+0x100`)
+passing the callback down unchanged, while `InvokeEffectAnchorCallback`
+(called on each such object, per `SpawnProjectile`'s actual usage)
+separately walks that SAME object's own internal effect-ANCHOR tree
+invoking the callback there. Put together: `SpawnProjectile`'s
+proximity-reaction scan installs a callback and runs it across both
+axes — every object in a hierarchy, and every effect-anchor point on
+each — rather than "checking a predicate then alerting children" as
+the earlier session's more limited view suggested. The callback
+function itself (passed at each real call site) has not been
+identified, so what actually HAPPENS when it fires is still unknown —
+only the traversal shape is now clear. Marked as a correction, not a
+silent edit, per METHODOLOGY.
+
+### Open follow-ups
+
+- The actual callback function(s) passed to `InvokeEffectAnchorCallback`/`PropagateAlertToChildren` at real call sites — not identified; this is what would reveal the actual "reaction" behavior.
+- The `+0x50`/`+0x54` "child" fields on effect-anchor nodes, and how the `+0xa4`/`+0x20c`/`+0x210` anchor-table shape relates to (or differs from) the `+0xa4`/`+0x214`/`+0x218` shape seen on `SpawnWeaponVisualEffect`'s target — possibly two different sub-object types sharing the `+0xa4` offset by coincidence, possibly a real structural relationship. Not resolved.
 
 ## WinMain state-machine cluster (first dive, 2026-09-08)
 

@@ -329,10 +329,101 @@ SpawnProjectile (0x47bdb0)
                  GetOwningShip (for aim-assist and force-feedback
                  local-player checks), the main object array
                  (DAT_00587ce0) for its proximity-detonation scan
-  -> depends on (NOT YET IN DB): FUN_0047d9a0 (transform/velocity
-                 init), FUN_004c4f30 (beam-effect creation),
-                 FUN_0049bef0 (proximity-alert reaction)
+  -> depends on: CreateWeaponProjectileVisual (per-weapon-type mesh
+                 builder — NOT transform/velocity init as first
+                 guessed), CreateEffectObject (beam/glow effect
+                 creation), PropagateAlertToChildren (proximity-alert
+                 hierarchy propagation)
   <- depended on by: FireWeapon
+```
+
+## Weapon visual/arsenal chain (ninth session)
+
+```
+CreateWeaponProjectileVisual (0x47d9a0)
+  -> depends on: weapon/projectile struct's type field (param_1[0]),
+                 15 embedded mesh-filename literals (the real weapon
+                 arsenal — see confidence_db.md table), CreateEffectObject
+                 (huge-gun glow effect, types 0xd/0xe only)
+  -> depends on: SetPosition, SetOrientationMatrix, CreateMeshInstance,
+                 CreateMultiPartMeshGroup, CreateGroupNode (all
+                 resolved this session — see below)
+  -> depends on (NOT YET IN DB): FUN_0049c600 (second huge-gun-only
+                 effect object)
+  <- depended on by: SpawnProjectile
+
+CreateEffectObject (0x4c4f30)
+  -> depends on: SR_MEM_allocate (220-byte alloc, tagged surrenderlib
+                 line 0x2b5)
+  <- depended on by: SpawnProjectile (beam-weapon visual),
+                 CreateWeaponProjectileVisual (huge-gun glow effect) —
+                 confirmed genuinely generic, used by 2 independent
+                 callers now
+
+PropagateAlertToChildren (0x49bef0)
+  -> depends on: ship-object +0xf8/+0x100 child-object list (THIRD
+                 independent confirmation of these fields),
+                 InvokeEffectAnchorCallback (called per object, resolved
+                 this session — param_2 is a CALLBACK, not an "alert
+                 source" as first described; correction noted in
+                 confidence_db.md)
+  <- depended on by: SpawnProjectile (proximity-detection reaction)
+```
+
+## Effect-anchor callback system (eleventh session)
+
+```
+InvokeEffectAnchorCallback (0x49bd30)
+  -> depends on: object+0xa8 (mode switch), object+0xa4 -> +0x20c
+                 (count) / +0x210 (array) effect-anchor sub-table (a
+                 THIRD distinct anchor-table shape, alongside the
+                 +0xa4 -> +0x214/+0x218 shape used by
+                 SpawnWeaponVisualEffect — relationship between the two
+                 NOT resolved), anchor-node +0x48 (leaf flag) / +0x50,
+                 +0x54 (child-node offsets)
+  -> depends on (NOT YET IN DB): the actual callback function(s)
+                 passed in by real callers — unidentified, so the
+                 traversal's PURPOSE remains unknown even though its
+                 SHAPE is now clear
+  <- depended on by: PropagateAlertToChildren
+
+CreateParticleEmitter (0x49c600)
+  -> depends on: SR_MEM_allocate
+  <- depended on by: CreateWeaponProjectileVisual (huge-gun weapons
+                 0xd/0xe only — the second of their two extra effect
+                 objects, alongside CreateEffectObject)
+```
+
+## SurrenderLib scene-node primitives (tenth session)
+
+```
+SetPosition (0x4c0e60) -> trivial 3-float store, no dependencies
+SetOrientationMatrix (0x4c2410)
+  -> depends on (NOT YET IN DB): FUN_004c30e0/FUN_004c3100 (presumed
+                 cos/sin)
+
+CreateMeshInstance (0x4c4bd0)
+  -> depends on: SR_MEM_allocate
+  -> depends on (NOT YET IN DB): FUN_004c1be0 (x2), FUN_004c0e30 (x2)
+                 — likely default-init for 2 sub-blocks (bounding
+                 box + transform)
+  <- depended on by: CreateWeaponProjectileVisual (single/multi-mesh
+                 weapon cases), generic engine infrastructure —
+                 presumably called far more widely than this session's
+                 weapon-focused trace has covered
+
+CreateMultiPartMeshGroup (0x4c4db0)
+  -> depends on: SR_MEM_allocate
+  -> same NOT-YET-IN-DB deps as CreateMeshInstance
+  <- depended on by: CreateWeaponProjectileVisual ("BMO"-suffixed
+                 multi-part weapons: PulseCannon, Collapsergun, and
+                 the huge guns)
+
+CreateGroupNode (0x4c51c0)
+  -> depends on: SR_MEM_allocate, SetPosition, SetOrientationMatrix
+  -> depends on (NOT YET IN DB): FUN_004c4190 (extra init step not
+                 shared with CreateEffectObject)
+  <- depended on by: SpawnProjectile (projectile root node)
 ```
 
 ## Menu-screen internals (NOT YET IN DB — next layer down)
