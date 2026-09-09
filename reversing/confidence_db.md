@@ -1676,3 +1676,18 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - The 5 ribbon-bar icons in the screenshot -- no matching filename found in `gamedata/`.
 - `ShapeRecord.headerField0`/`headerField1` still unresolved.
 - Whether the "fake shape 0 = palette" convention applies outside the medal-case files.
+
+## Pass 60 -- `INTERFACE\*.bik` menu-transition videos: full call map (2026-09-09)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| 18 of 26 requested `.bik` filenames mapped to their exact calling menu screen | 5 | Every entry from direct `get_xrefs_to`/`get_bulk_xrefs` results, not filename inference. |
+| 8 of 26 requested filenames unused (`FADIGOPT`, `IGOPTFAD.bik`, `MUL2OPT`, `MULFA2OPT`, `MULTI2MM`, `OLDOPFAD2MM`, `SIN2OPT`, `SINFA2OP`) | 5 | Not present anywhere in the string table under multiple independent searches. `OLDOPFAD2MM`'s name is self-explanatory (deprecated leftover). |
+| `RunInGameOptionsScreen` (0x4394d0, was `FUN_004394d0`) -- mid-mission pause-menu options screen | 5 | Called from `RunMissionBriefingScreen`/`RunShipInteriorVRLoop`; reuses `RunSaveGameBrowserScreen`/`RunSoundOptionsScreen`/`RunControlsOptionsScreen`/`RunVideoOptionsScreen`. |
+| `RunMultiplayerDebriefScreen` (0x4296a0, was `FUN_004296a0`) -- post-mission MP results/ready-check screen | 4 | Called 3x from `WinMain`; loads `mpdebr.spr`, tracks per-player ready state. |
+| Shared sub-screens get two parallel fade-clip sets depending on which parent invoked them (main-menu-Options path vs. in-game-pause path) | 5 | Directly observed across `RunControlsOptionsScreen`/`RunSoundOptionsScreen`/`RunVideoOptionsScreen`/`RunSaveGameBrowserScreen`'s call sites. |
+
+### Open follow-ups
+
+- `RunMultiplayerDebriefScreen`'s relationship to the main mission-completion flow -- not traced.
+- Whether `WinMain`'s 3 call sites for `RunMultiplayerDebriefScreen` have their own surrounding `.bik` transitions.

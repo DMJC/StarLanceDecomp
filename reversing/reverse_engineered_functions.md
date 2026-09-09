@@ -7618,3 +7618,91 @@ pixel-for-pixel in overall appearance across 6 separate files.
   for `.spr` files outside the medal-case UI (e.g. `.fnt` files, or
   other UI `.spr` assets) -- only checked for the 6 medal files this
   pass.
+
+## Pass 60 -- The `INTERFACE\*.bik` menu-transition videos: full call map (2026-09-09)
+
+Direct request: find where/when each of the 26 `INTERFACE\*.bik`
+fade/transition clips is played. Searched the full string table for
+every requested filename, then mapped every hit's cross-references to
+the menu-screen function that plays it.
+
+### 8 of the 26 requested filenames are not referenced anywhere in the binary
+
+`FADIGOPT.BIK`, `IGOPTFAD.BIK` (only `interface\igoptfad.tga` -- a
+static backdrop image, not a video, exists), `MUL2OPT.BIK`,
+`MULFA2OPT.BIK`, `MULTI2MM.BIK`, `OLDOPFAD2MM.BIK`, `SIN2OPT.BIK`,
+`SINFA2OP.BIK` do not appear anywhere in the string table, as a
+substring or otherwise -- confirmed with multiple independent regex
+searches, not just one miss. **Confidence 5** these files are unused
+by the shipped executable. `OLDOPFAD2MM` literally has "OLD" in its
+name, strongly suggesting it's a deprecated leftover superseded by the
+(real, used) `OPFAD2MM.BIK`; the others are plausibly from an earlier,
+more fully-connected menu-transition design (every screen-pair having
+its own dedicated fade) that got simplified down to the shared-fade
+scheme actually shipped (below) before release.
+
+### The other 18: full call map
+
+Two previously-unnamed functions had to be identified first:
+
+- **`RunInGameOptionsScreen`** (`0x4394d0`, was `FUN_004394d0`) --
+  called from `RunMissionBriefingScreen` and `RunShipInteriorVRLoop`.
+  The **pause-menu options screen reachable mid-mission/mid-VR**:
+  offers save/load (via `RunSaveGameBrowserScreen`), and the same
+  `RunSoundOptionsScreen`/`RunControlsOptionsScreen`/
+  `RunVideoOptionsScreen` sub-screens the main-menu Options screen
+  uses.
+- **`RunMultiplayerDebriefScreen`** (`0x4296a0`, was `FUN_004296a0`) --
+  called 3x directly from `WinMain`. Loads `interface\mpdebr.spr`
+  and `itacbig.fnt`/`itacsml.fnt`, tracks per-player ready/disconnect
+  state (`DAT_005db83c`-indexed), and can drop into
+  `RunSaveGameBrowserScreen` -- the **post-mission multiplayer
+  results/ready-check screen.**
+
+| `.bik` file | Played from | When |
+|---|---|---|
+| `main2opt.bik` | `RunMainMenuScreen` | Main Menu -> Options |
+| `main2mul.bik` | `RunMainMenuScreen` | Main Menu -> Multiplayer Setup |
+| `main2sin.bik` | `RunMainMenuScreen` | Main Menu -> New Game Setup (single-player) |
+| `opt2main.bik` | `RunOptionsMenuScreen` | Options -> Main Menu |
+| `optfade.bik` | `RunOptionsMenuScreen` (3 sites) | Options -> its sub-screens (Sound/Controls/Video), returning to the SAME Options menu |
+| `optfade2.bik` | `RunControlsOptionsScreen`/`RunSoundOptionsScreen`/`RunVideoOptionsScreen` | Sub-screen -> Options Menu (entered FROM the main-menu Options screen) |
+| `igofade2.bik` | same 3 sub-screens | Sub-screen -> `RunInGameOptionsScreen` (entered FROM the in-game pause overlay) |
+| `opfad2mm.bik` | same 3 sub-screens | Sub-screen -> Main Menu, exiting all the way out (main-menu-Options context) |
+| `igof2mm.bik` | same 3 sub-screens, plus `RunSaveGameBrowserScreen` | Sub-screen/Save-browser -> Main Menu, exiting all the way out (in-game-pause context) |
+| `sin2main.bik` | `RunNewGameSetupScreen` | New Game Setup -> Main Menu |
+| `sinfade.bik` | `RunNewGameSetupScreen` | New Game Setup -> (a sub-flow, e.g. name/callsign picker) |
+| `sinfade2.bik` | `RunSaveGameBrowserScreen` | Save/Load Browser -> `RunNewGameSetupScreen` context (single-player) |
+| `sifad2mm.bik` | `RunSaveGameBrowserScreen` | Save/Load Browser -> Main Menu (single-player context) |
+| `mulfade.bik` | `RunMultiplayerSetupScreen` (5 sites) | Multiplayer Setup <-> its own sub-dialogs (host/join/session-list) |
+| `mul2main.bik` | `RunMultiplayerSetupScreen` (2 sites) | Multiplayer Setup -> Main Menu |
+| `mulfade2.bik` | `RunSaveLoadScreen` | Save/Load screen -> Main Menu (multiplayer context) |
+| `igo2mm.bik` | `RunInGameOptionsScreen` | In-game pause menu -> Main Menu (quitting the mission entirely) |
+| `igofade.bik` | `RunInGameOptionsScreen` (5 sites) | In-game pause menu <-> each of its own sub-screens |
+
+### The pattern: every options sub-screen plays a different fade depending on which parent invoked it
+
+`RunControlsOptionsScreen`/`RunSoundOptionsScreen`/
+`RunVideoOptionsScreen` and `RunSaveGameBrowserScreen` are each reused
+from TWO different parent contexts -- the ordinary main-menu Options
+screen / New-Game-Setup flow, and the in-game pause overlay
+(`RunInGameOptionsScreen`) reachable mid-mission. Rather than track
+which context is active with a flag and pick a background at draw
+time, the game simply gives each shared sub-screen **two parallel
+sets of transition clips** (`OPTFADE2`/`OPFAD2MM` for the main-menu
+path, `IGOFADE2`/`IGOF2MM` for the in-game-pause path; `SINFADE2`/
+`SIFAD2MM` similarly for the save-browser's two contexts) -- a
+call-site-selected pair rather than a state-selected one.
+**Confidence 5** on the whole map -- every entry above is a direct
+`get_xrefs_to`/`get_bulk_xrefs` result, not inferred from filenames
+alone.
+
+### Open follow-ups
+
+- `RunMultiplayerDebriefScreen`'s exact relationship to the main
+  mission-completion flow (`InitializeMissionGameplay`/
+  `RunMissionGameplay`, documented many passes ago) -- not traced this
+  pass, only its own internals were read.
+- Whether any additional `.bik` calls exist inside `WinMain` itself
+  for the 3 `RunMultiplayerDebriefScreen` call sites' own surrounding
+  transitions.

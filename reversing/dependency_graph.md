@@ -1506,3 +1506,37 @@ MEDAL1-6.SPR (gamedata/StarLancer/cd1/) -- the 6 medal-case UI images
   -> VERIFIED: decode_spr.py's output for all 6 files, arranged in a 2x3 grid,
      exactly matches a real user-supplied screenshot of the medal case
 ```
+
+## `INTERFACE\*.bik` menu-transition videos: full call map (2026-09-09, Pass 60)
+
+```
+RunInGameOptionsScreen (0x4394d0, was FUN_004394d0) -- mid-mission pause menu
+  <- called from: RunMissionBriefingScreen, RunShipInteriorVRLoop
+  -> calls: RunSaveGameBrowserScreen, RunSoundOptionsScreen, RunControlsOptionsScreen,
+     RunVideoOptionsScreen
+  -> plays: igofade.bik (x5, <-> its own sub-screens), igo2mm.bik (-> Main Menu, quit mission)
+
+RunMultiplayerDebriefScreen (0x4296a0, was FUN_004296a0) -- post-mission MP results screen
+  <- called from: WinMain (3x)
+  -> calls: RunSaveGameBrowserScreen
+  -> loads: interface\mpdebr.spr, itacbig.fnt, itacsml.fnt
+
+Shared options sub-screens get TWO parallel transition-clip sets depending on caller:
+  RunControlsOptionsScreen / RunSoundOptionsScreen / RunVideoOptionsScreen:
+    from RunOptionsMenuScreen (main menu path)  -> optfade2.bik / opfad2mm.bik
+    from RunInGameOptionsScreen (in-game path)  -> igofade2.bik / igof2mm.bik
+  RunSaveGameBrowserScreen:
+    from RunNewGameSetupScreen (single-player path) -> sinfade2.bik / sifad2mm.bik
+    from RunInGameOptionsScreen (in-game path)       -> igofade2.bik / igof2mm.bik
+
+Other direct transitions:
+  RunMainMenuScreen -> main2opt.bik / main2mul.bik / main2sin.bik
+  RunOptionsMenuScreen -> opt2main.bik (exit), optfade.bik x3 (-> its sub-screens)
+  RunNewGameSetupScreen -> sin2main.bik x2, sinfade.bik
+  RunMultiplayerSetupScreen -> mul2main.bik x2, mulfade.bik x5
+  RunSaveLoadScreen -> mulfade2.bik
+
+NOT referenced anywhere in Lancer.exe (checked exhaustively): FADIGOPT.BIK, IGOPTFAD.BIK
+  (only the .tga backdrop variant exists), MUL2OPT.BIK, MULFA2OPT.BIK, MULTI2MM.BIK,
+  OLDOPFAD2MM.BIK, SIN2OPT.BIK, SINFA2OP.BIK -- unused/leftover assets
+```
