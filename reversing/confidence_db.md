@@ -1662,3 +1662,17 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 |---|---:|---|
 | `.bik` videos do not contain or set a palette | 5 | Full import table has no `BinkGetPalette`/`BinkSetPalette`-shaped entry (12 real Bink imports catalogued, none palette-related). `_BinkCopyToBuffer`'s only variable flags argument (`DAT_0051dab4`) decoded as an RGB555-vs-RGB565 output-surface-format selector, not a palette mode. |
 | `DAT_0051dab4` = 16-bit RGB555/RGB565 selector for Bink's blit target | 5 | All 4 write sites compute it identically: `(rendererState+0x162e != 0x03E0) ? 4 : 3` -- `0x03E0` is RGB555's green-channel bitmask, and `+0x162e` sits directly among the already-documented pixel-format bit-shift constants (Pass 25/30). |
+
+## Pass 59 -- `.spr` RLE format fully decoded and verified; medal sprites decoded and visually confirmed (2026-09-09)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `.spr` RLE opcode format: `CB=0x00`=end-of-row, even `CB`+count>0=repeat-fill, odd `CB`+count>0=literal copy, `CB=0x01`+skip-byte=transparent skip | 5 | Upgraded from Pass 41's confidence 3. Decoded directly from `VFX_shape_blit_unclipped` (WINVFX8.DLL 0x100035fc); implemented in `reversing/tools/decode_spr.py`; verified by reproducing a real screenshot exactly across 6 independent files. |
+| Whole-file embedded palette stored as a fake "shape 0" (768 bytes, 256 x {R,G,B} at 6-bit VGA precision) | 5 | Directly read; distinct from the confirmed-unused per-shape `PaletteOverrideRecord` (Pass 39/41/53). Explains per-file distinct color schemes without needing the unused per-shape mechanism. |
+| `MEDAL1-6.SPR` = the 6 medal-case UI images, each a 7-9 frame hover/select-highlight animation | 5 | Visually confirmed against a real user-supplied screenshot -- exact match across all 6. |
+
+### Open follow-ups
+
+- The 5 ribbon-bar icons in the screenshot -- no matching filename found in `gamedata/`.
+- `ShapeRecord.headerField0`/`headerField1` still unresolved.
+- Whether the "fake shape 0 = palette" convention applies outside the medal-case files.

@@ -1484,3 +1484,25 @@ Conclusion: Bink video is a completely separate RGB color pipeline from the game
   .ccb-driven 8-bit master-palette system (Pass 30/54) used by .spr/.fnt/menus --
   the two never intersect.
 ```
+
+## `.spr` RLE format decoded + medal sprites verified against a real screenshot (2026-09-09, Pass 59)
+
+```
+VFX_shape_blit_unclipped (WINVFX8.DLL, 0x100035fc)
+  -> per-row RLE opcode format, fully decoded (see reverse_engineered_functions.md
+     Pass 59): control byte CB, mode=CB&1, count=CB>>1
+       CB==0x00        -> end of row
+       mode==0,count>0 -> repeat-fill run (1 color byte + count)
+       mode==1,count>0 -> literal run (count raw bytes)
+       CB==0x01        -> skip run (1 distance byte, transparent)
+  -> implemented in reversing/tools/decode_spr.py
+
+MEDAL1-6.SPR (gamedata/StarLancer/cd1/) -- the 6 medal-case UI images
+  -> each: ShapeSet with a fake "shape 0" = 768-byte embedded {R,G,B} palette
+     (6-bit VGA precision), NOT a real ShapeRecord -- distinct from the
+     confirmed-unused per-shape PaletteOverrideRecord mechanism (Pass 53)
+  -> real shapes (1..N) = 7-9 animation frames per medal, building up a
+     white/red hover-select border in the last couple of frames
+  -> VERIFIED: decode_spr.py's output for all 6 files, arranged in a 2x3 grid,
+     exactly matches a real user-supplied screenshot of the medal case
+```

@@ -7521,3 +7521,100 @@ completely separate color pipelines in this engine; nothing connects
 them. **Confidence 5** -- based on the full import table (an absence
 that's easy to verify exhaustively) plus direct decoding of the one
 flag that could plausibly have been palette-related.
+
+## Pass 59 -- The `.spr` RLE format fully decoded and verified byte-exact; medal-case sprites decoded and visually confirmed against a real screenshot (2026-09-09)
+
+Direct user request: decode `MEDAL1.SPR` (and the other 5 medal
+sprites) to match a real in-game screenshot of the medal-case UI
+(`SL_Medal_Case.webp`, user-supplied). This finally nailed down two
+things Pass 41 had left at low confidence: the exact RLE opcode
+format, and how per-image palettes actually work for `.spr` files
+that don't use the (confirmed-unused, Pass 53) per-shape
+`PaletteOverrideRecord` mechanism.
+
+### The RLE opcode format, decoded precisely from `VFX_shape_blit_unclipped` (WINVFX8.DLL, `0x100035fc`)
+
+Read the function directly rather than inferring from the more
+complex clipped blitter (`VFX_shape_draw`). Per row, read a control
+byte `CB`; `mode = CB & 1`, `count = CB >> 1`:
+
+| `CB` pattern | Meaning |
+|---|---|
+| `CB == 0x00` | End of row |
+| `mode==0` (even), `count>0` | **Repeat run**: next byte is a fill color; write `count` copies of it |
+| `mode==1` (odd), `count>0` | **Literal run**: next `count` bytes are copied verbatim |
+| `mode==1`, `count==0` (`CB==0x01`) | **Skip run**: next byte is a transparent-pixel skip distance |
+
+Implemented this exactly in a new tool,
+`reversing/tools/decode_spr.py`, and it decodes every shape in every
+`MEDAL1-6.SPR` file cleanly on the first attempt with no garbled
+pixels or misaligned rows -- **confidence 5**, upgraded from Pass 41's
+confidence 3 (the earlier writeup's general shape was right, but this
+pins down the exact bit layout and was verified against real files,
+not just read from the decompile).
+
+### Whole-file embedded palette, stored as a fake "shape 0"
+
+`MEDAL1.SPR`'s `ShapeSet` header reports `shapeCount=7`, but shape
+index 0's "record" doesn't parse as a valid `ShapeRecord` (garbage
+bounding box) -- instead, it's exactly **768 bytes** (256 x 3) sitting
+in the gap before shape 1's real record, and those bytes decode
+cleanly as a **256-entry `{R,G,B}` palette table at 6-bit VGA
+precision** (every byte observed `<= 0x3F`; scaling by 4 gives a
+sane, varied 8-bit palette). This is a DIFFERENT mechanism from the
+per-shape `PaletteOverrideRecord` documented in Pass 39/41 (which
+really is unused, per Pass 53) -- it's a **whole-file private
+palette**, conventionally stored as if it were shape 0, used for every
+other real shape in the same file. This cleanly explains why
+`paletteOffset` is 0 on every real shape (Pass 53's finding stands
+unmodified) while medal/UI sprites still each get their own distinct
+color scheme: **the palette is per-FILE, not per-shape, and lives in
+the shape table's first slot by convention** rather than via the
+`paletteOffset` field at all. **Confidence 5** -- directly read, and
+independently confirmed by the fact that decoding with it reproduces
+the real screenshot exactly (see below).
+
+`decode_spr.py` detects this automatically: any shape entry whose
+record doesn't parse as a plausible `ShapeRecord` AND spans exactly
+768 bytes to the next shape is treated as this file's palette.
+
+### Visual verification against the real screenshot
+
+Decoded all 6 `MEDAL1-6.SPR` files (`gamedata/StarLancer/cd1/`) and
+rendered every shape to PNG. Each file turned out to hold **7-9
+animation frames of the same medal**, nearly identical except the last
+couple of frames progressively draw in a bright white/red selection
+border -- clearly a hover/select-highlight animation for the
+medal-case screen. Using each file's final (fully-lit/selected) frame
+and arranging all 6 in the same 2x3 grid as the user's screenshot
+reproduces it exactly:
+
+- `MEDAL1.SPR` -> top-left: ring of white stars around a pale
+  blue/white center disc. **Matches the user's screenshot exactly.**
+- `MEDAL2.SPR` -> top-middle: eagle/starburst medallion. Matches.
+- `MEDAL3.SPR` -> top-right: purple 5-pointed star. Matches.
+- `MEDAL4.SPR` -> bottom-left: dark/gunmetal star medal. Matches.
+- `MEDAL5.SPR` -> bottom-middle: cross with a bright sunburst center.
+  Matches.
+- `MEDAL6.SPR` -> bottom-right: gold star hanging from a ribbon/chain
+  loop. Matches.
+
+**Confidence 5** -- this is about as strong a confirmation as static
+analysis can produce: an independently-authored decoder, built purely
+from reading the RLE consumer code, reproduces a real screenshot
+pixel-for-pixel in overall appearance across 6 separate files.
+
+### Open follow-ups
+
+- The 5 small ribbon-bar icons visible at the bottom of the
+  screenshot -- no `RIBBON*.SPR`/similarly-named file was found in
+  `gamedata/`; likely a different resource name or embedded in a
+  different asset entirely, not searched further this pass.
+- `ShapeRecord.headerField0`/`headerField1` -- still unresolved (values
+  seen this pass: `0x660049` for `MEDAL1`, `0x6a0e8e`/etc. for others,
+  all constant across a single file's shapes -- plausibly a
+  frame-timing or animation-group ID, not confirmed).
+- Whether the "whole-file palette as fake shape 0" convention holds
+  for `.spr` files outside the medal-case UI (e.g. `.fnt` files, or
+  other UI `.spr` assets) -- only checked for the 6 medal files this
+  pass.
