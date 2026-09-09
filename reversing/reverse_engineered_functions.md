@@ -7029,3 +7029,56 @@ first hit in each category.
   `extracted`/`out_palettes`/`out_softpal` dumps, to understand its
   real extraction logic -- out of scope for static analysis of
   `Lancer.exe` itself.
+
+## Pass 54 -- Which palette is used for the menus? Direct answer (2026-09-09)
+
+Direct follow-up on Pass 53. Applied `set_function_prototype` to
+`SR_CCB_load` (`0x4cb9d0`, was `param_count: 0` -- hidden `__fastcall`
+filename argument, same recurring technique from Passes 34/35/37/51)
+and re-decompiled its only two callers.
+
+### The menus use whichever of `softpal.ccb`/`palette.ccb` was loaded once at startup
+
+`SR_CCB_load` has exactly 2 call sites in the whole binary:
+
+1. **`InitializeGraphicsDevice`** (`0x4acbe0`, was `FUN_004acbe0` --
+   renamed this pass; called 4x from `FUN_004a8600`, a device-mode
+   try/fallback loop run once during startup):
+   ```c
+   if (*(int *)(DAT_00588730 + 0x1ac) == 0) {
+       filename = "softpal.ccb";
+   } else {
+       filename = "palette.ccb";
+   }
+   pvVar2 = SR_CCB_load(filename);
+   *(void **)(DAT_00588730 + 0x1606) = pvVar2;   // stored in renderer state, persists
+   ```
+2. **`InitializeLoadoutScreen`** (`0x441aa0`): unconditionally loads
+   `"palette3.ccb"` into a separate local (`DAT_005246d0`), for its own
+   3D ship-preview rendering -- and, per Pass 53, explicitly restores
+   the *original* pre-screen palette pointer before re-deriving the
+   final 2D/WinVFX global palette at teardown, so this third file never
+   leaks into the menu system.
+
+No menu screen (`RunMainMenuScreen`, `RunMenuScreenLoop`, or any of its
+12 dispatched screens) calls `SR_CCB_load` itself. **Confidence 5**:
+the menus therefore render through whichever palette
+`InitializeGraphicsDevice` loaded once at startup and left in
+`rendererState+0x1606`/`+0x1602` -- **`softpal.ccb`** if
+`rendererState+0x1ac == 0` (the flag Pass 25/30 already tied to a
+software-vs-hardware renderer distinction -- "softpal" reads naturally
+as "software-rendering palette"), or **`palette.ccb`** otherwise (the
+hardware-accelerated path). This is a single, persistent, whole-game
+default -- not something that changes per menu screen -- and it is the
+exact same palette the mission-briefing/loadout screen restores when
+it exits back to the menu (closing the loop with Pass 53's
+per-render-context finding).
+
+### Open follow-ups
+
+- The exact condition that sets `rendererState+0x1ac` (hardware vs.
+  software renderer selection) -- not traced this pass, referenced
+  from `FUN_004a8600`'s fallback loop.
+- `palette3.ccb`'s actual RGB content vs. `palette.ccb`'s, to see how
+  different the loadout-screen's 3D lighting environment really looks
+  from the menu's -- not compared byte-for-byte this pass.

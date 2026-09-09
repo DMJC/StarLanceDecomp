@@ -1354,3 +1354,20 @@ RunMainMenuScreen -- uses its OWN inline hit-test (not HitTestRectArray), DAT_00
   "watch ending" mission-0x1d trigger, index 3 -> inert (never reaches the action switch).
 
 RunNetworkDisconnectScreen (0x43ca30, screen 8) -- confirmed zero hotspots, non-interactive
+
+## Which palette is used for the menus (2026-09-09, Pass 54)
+
+```
+SR_CCB_load (0x4cb9d0) -- exactly 2 call sites total, revealed via set_function_prototype:
+  <- InitializeGraphicsDevice (0x4acbe0, was FUN_004acbe0, renamed this pass) --
+       runs ONCE at startup (called 4x from FUN_004a8600's device try/fallback loop):
+         rendererState+0x1ac == 0  -> SR_CCB_load("softpal.ccb")
+         rendererState+0x1ac != 0  -> SR_CCB_load("palette.ccb")
+       result stored persistently at rendererState+0x1606/+0x1602
+       -> THIS is the palette every menu screen renders through -- no menu
+          screen calls SR_CCB_load itself
+  <- InitializeLoadoutScreen (0x441aa0) -- loads "palette3.ccb" separately into
+       DAT_005246d0 for its own 3D ship-preview rendering, then restores the
+       original rendererState+0x1602/+0x1606 before returning (Pass 53) --
+       palette3.ccb never reaches the menu system
+```

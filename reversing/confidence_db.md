@@ -1587,3 +1587,15 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - `.tga` files (142, not examined) may carry their own embedded palettes independent of the `.ccb`/WinVFX system -- a plausible next target if 3D ship texture palettes specifically are wanted.
 - `FUN_004a3040`/`FUN_004a3cb0` (per-wing post-processing inside `LoadSquadronRoster`) not decompiled.
 - The third-party tool that produced the `gamedata/` extraction dumps is unidentified; its real logic is out of scope for static analysis of `Lancer.exe`.
+
+## Pass 54 -- Which palette is used for the menus (2026-09-09)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| Menus use the startup-loaded global palette (`softpal.ccb` or `palette.ccb`, chosen by `rendererState+0x1ac`), never their own | 5 | `SR_CCB_load` has exactly 2 call sites total (revealed via `set_function_prototype`); neither is in any menu screen. `InitializeGraphicsDevice` (was `FUN_004acbe0`) loads the startup one once; `InitializeLoadoutScreen` loads `palette3.ccb` separately and restores the original before returning to the menu (Pass 53). |
+| `InitializeGraphicsDevice` (0x4acbe0) | 5 | Renamed from `FUN_004acbe0`. Runs the softpal.ccb/palette.ccb selection; called 4x from a device try/fallback loop (`FUN_004a8600`), once at startup. |
+
+### Open follow-ups
+
+- The exact condition setting `rendererState+0x1ac` (hardware vs. software renderer selection) -- not traced.
+- Byte-level comparison of `palette.ccb` vs `palette3.ccb` content -- not done.
