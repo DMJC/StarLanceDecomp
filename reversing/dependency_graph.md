@@ -1371,3 +1371,29 @@ SR_CCB_load (0x4cb9d0) -- exactly 2 call sites total, revealed via set_function_
        original rendererState+0x1602/+0x1606 before returning (Pass 53) --
        palette3.ccb never reaches the menu system
 ```
+
+## The `.SHP`/`.sro` 3D object format: a generic tagged-chunk container (2026-09-09, Pass 55)
+
+```
+SR_FileAlloc (0x4cb420, was FUN_004cb420)
+  -> depends on: FUN_004c8110 (resource cache lookup), GetBigFileEntrySize,
+                 SR_MEM_allocate_named, LoadNamedResource
+  -> loads a named resource WHOLE into memory, returns raw byte buffer
+
+ReadTaggedChunk (0x4a2eb0, was FUN_004a2eb0) -- {tag:u16,stride:u16,count:u16}+payload
+  scanner over SR_FileAlloc's buffer, forward-only cursor (DAT_005959f8)
+  <- depended on by: LoadSquadronRoster (0x4a44d0) -- EVERY field read, tags 0,1,2,3,4,
+       6,7,8,9,0xa,0xb,0xc,0xd,0xe,0xf,0x10 (see reverse_engineered_functions.md Pass 55
+       for the full per-tag catalog). Shared by both .sro (squadron roster) and .SHP
+       (438 ship/turret/pod model files) -- confirmed same loader, same chunk format.
+  -> tag 1 = named parts array (part name = null-padded ASCII at record start,
+       confirmed directly: "Gren frame", "arms")
+  -> tag 0xf = the actual renderable polygon/face list (triangle/quad flag +
+       live cross-product face-normal computation from referenced vertex data)
+  -> tag 0xa = hardpoint/socket records (embedded "startup"/"deploy" keyword string)
+  -> tag 0x10 = file-scope array read once after all parts -- natural home for a
+       materials/textures table, but ABSENT from the one sample checked (gren_frm.SHP)
+  -> texture/material assignment mechanism: UNRESOLVED. No texture filename found
+     embedded in a fully-decompressed sample; candidate numeric index at per-part
+     offset +0x138 (copied into every tag-7 record) not traced to its source.
+```

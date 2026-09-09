@@ -7082,3 +7082,107 @@ per-render-context finding).
 - `palette3.ccb`'s actual RGB content vs. `palette.ccb`'s, to see how
   different the loadout-screen's 3D lighting environment really looks
   from the menu's -- not compared byte-for-byte this pass.
+
+## Pass 55 -- The `.SHP`/`.sro` 3D object format decoded: a generic tagged-chunk container (2026-09-09)
+
+Direct follow-up on Pass 53's open item ("decode graphics formats for
+ships, 3D objects, and textures"). Cracked the on-disk binary format
+underlying both `.SHP` (438 ship/turret/pod models) and `.sro`
+(squadron roster) files -- they share one loader
+(`LoadSquadronRoster`, `0x4a44d0`) and one file format.
+
+### The primitive: a generic tagged-chunk reader
+
+`LoadSquadronRoster` doesn't read fields directly -- every single field
+it populates comes from repeated calls to a small helper, `FUN_004a2eb0`,
+which had `param_count: 0` (fully hidden `__fastcall` arguments,
+exactly the recurring pattern from Passes 34/35/37/51/54).  Applied
+`set_function_prototype` (`ReadTaggedChunk(void** outPtr, ushort tag,
+uint elemSize)`, renamed from `FUN_004a2eb0`) and re-decompiled --
+every hidden `tag` argument at every call site became visible at once,
+across the whole function.
+
+`ReadTaggedChunk`'s own logic, decoded directly:
+
+```c
+struct ChunkHeader {          // 6 bytes, repeats throughout the file
+    uint16_t tag;
+    uint16_t stride;          // bytes per item, AS STORED ON DISK
+    uint16_t count;           // 0xffff tag = end-of-file sentinel
+    uint8_t  payload[stride * count];
+};
+```
+
+A single forward-only cursor (`DAT_005959f8`, seeded from
+`SR_FileAlloc`'s -- renamed from `FUN_004cb420` -- whole-file memory
+buffer) walks chunk-to-chunk, skipping any chunk whose `tag` doesn't
+match the caller's request, until it finds one that matches or hits
+the `0xffff` end sentinel. On a match, it allocates
+`count * elemSize` bytes (the CALLER's expected element size, not
+necessarily the disk stride) and copies `min(stride, elemSize)` bytes
+per item -- a deliberately version-tolerant reader: old-format files
+with a smaller on-disk record still load cleanly into a newer,
+larger in-memory struct, with the extra tail bytes left zeroed.
+**Confidence 5** -- directly read, and independently confirmed by
+writing a Python chunk-walker against a real decompressed `.SHP` file
+(`gren_frm.SHP`) that exactly reproduces this framing.
+
+### Confirmed tag catalog (from `LoadSquadronRoster`'s full call sequence)
+
+| Tag | elemSize | Scope | Role (confidence) |
+|---:|---:|---|---|
+| 0 | 0x68 (104) | once/file | File header, 1 record (5) |
+| 1 | 600 | once/file | **Parts array** -- each record begins with a null-padded ASCII part name (confirmed directly in raw bytes: `"Gren frame"`, `"arms"`) (5) |
+| 2 | 0x1c (28) | per-part | Sub-record array, further expands via tags 3/4/6 (4) |
+| 3 | 0x50 (80) | per tag-2 item | Unresolved -- likely vertex-position or joint data (2) |
+| 4 | 0x20 (32) | per tag-2 item | Unresolved -- likely per-vertex normal/UV (2) |
+| 6 | 0x48 (72) | per tag-2 item | Unresolved (1) |
+| 7 | 0x5c (92) | per-part | Mesh-adjacency-like array: each item optionally computes two "neighbor" pointers into the SAME array from stored indices (offset+0x40/+0x44), and copies a shared per-part value (offset+0x138 -- plausible material/color index, not confirmed) into every item (3) |
+| 8 | 4 | per tag-7 item | A single index/flag driving the tag-7 adjacency computation above (2) |
+| 9 | 0x7c (124) | per-part | Unresolved (1) |
+| 0xa | 0x28 (40) | per-part | **Hardpoint/socket records** -- each contains an embedded ASCII keyword string at offset+6, matched against `"startup"`/`"deploy"` (and a third, garbled-in-decompile string) to classify animation state; further expands via tags 0xb/0xc (4) |
+| 0xb | 0x1c (28) | per tag-0xa item | Unresolved (1) |
+| 0xc | 0xc (12) | per tag-0xa item | Unresolved (1) |
+| 0xd | 0xc (12) | per-part | Sub-record array, expands via tag 0xe (2) |
+| 0xe | 0x14 (20) | per tag-0xd item | Unresolved (1) |
+| 0xf | 0x54 (84) | per-part | **The renderable polygon/face list.** Confirmed via its consumer loop: a per-record vertex-count flag (`< 0` -> 3 = triangle, else 4 = quad), then a **cross-product face-normal computation** from 3 referenced vertex positions, normalized and stored back into the record (offset+0x44/+0x48/+0x4c = normal xyz, +0x50 = magnitude). This is unambiguously the 3D mesh's actual triangle/quad face data (5) |
+| 0x10 | 0x4c (76) | once/file, read AFTER all parts | Unresolved -- read once at file scope, the natural place for a materials/textures table, but **not present at all** in the one sample file checked this pass (5 on "absent from this file", 0 on any semantic guess) |
+
+### Textures: not embedded by filename in `.SHP` -- referenced indirectly, mechanism unresolved
+
+Dumped every printable ASCII string in a fully-decompressed `.SHP`
+file (`gren_frm.SHP`, 37686 bytes) looking for texture filenames
+(`.tga`/`.mat`/`.bmp`) -- found only the two part names already noted
+and one truncated fragment (`"cpit0"`, plausibly part of a hardpoint
+name like `"cockpit0"`). **No texture/material filename is embedded
+in this file.** Combined with tag 0x10 (the one file-scope array read
+after all per-part data, and the most natural home for a
+materials/textures table) being entirely absent from this sample,
+texture assignment for `.SHP` models is **not** done by embedding a
+filename per model or per part -- it must be either (a) a numeric
+material index (the unresolved per-part `+0x138` field feeding every
+tag-7 face record) resolved against some separately-loaded global
+materials table, or (b) driven by filename convention/context outside
+the `.SHP` file entirely (e.g. the same base name with a different
+extension, or a fixed per-ship-class texture set loaded alongside).
+**Not resolved this pass -- confidence 0 on any specific mechanism.**
+
+### Open follow-ups
+
+- Tags 3/4/6/8/9/0xb/0xc/0xe's exact field semantics -- structurally
+  located (offsets, strides, nesting) but not decoded field-by-field.
+- The per-part `+0x138` field's source and meaning (candidate
+  material/texture index) -- not traced to where it's actually
+  populated.
+- Tag 0x10's content and purpose -- check a `.SHP`/`.sro` file that
+  actually contains one (`gren_frm.SHP` doesn't) to see real payload
+  bytes.
+- `FUN_004a3040`/`FUN_004a3cb0` (per-hardpoint post-processing, called
+  in `LoadSquadronRoster`'s second pass) -- not decompiled.
+- `FUN_004c14f0`/`FUN_004c1370`/`FUN_004c11c0` (the vertex-fetch/
+  normalize/length helpers used by the tag-0xf face-normal loop) --
+  not decompiled; would likely reveal exactly how vertex indices map
+  to positions.
+- Whether `.tga` files (142 in `gamedata/`, still unexamined) are
+  associated with ships via a naming convention observable in the
+  BigFile TOC, independent of anything found in `.SHP` itself.

@@ -1599,3 +1599,23 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 
 - The exact condition setting `rendererState+0x1ac` (hardware vs. software renderer selection) -- not traced.
 - Byte-level comparison of `palette.ccb` vs `palette3.ccb` content -- not done.
+
+## Pass 55 -- The `.SHP`/`.sro` 3D object format: a generic tagged-chunk container (2026-09-09)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `ReadTaggedChunk` (0x4a2eb0, was `FUN_004a2eb0`) -- `{tag:u16,stride:u16,count:u16}` chunk scanner | 5 | Directly decompiled; independently confirmed via a Python chunk-walker against a real `.SHP` file, exactly reproducing the framing. |
+| `SR_FileAlloc` (0x4cb420, was `FUN_004cb420`) -- loads a named resource whole into memory (cache-or-disk) | 5 | Directly decompiled; matches its own `"SR_falloc: error loading %s"` string. |
+| Tag 1 = named parts array, tag 0xf = renderable polygon/face list | 5 | Tag 1: part names directly visible in raw decompressed bytes. Tag 0xf: consumer computes a real cross-product face normal from 3 referenced vertex positions, with a triangle/quad flag -- unambiguous 3D mesh geometry. |
+| Tag 0xa = hardpoint/socket records w/ embedded keyword strings | 4 | Embedded string at +6 matched against `"startup"`/`"deploy"`, directly read. |
+| Tags 2/3/4/6/7/8/9/0xb/0xc/0xd/0xe -- structurally located (offset, stride, nesting) | 2-3 | Exact field semantics not decoded. |
+| Tag 0x10 (file-scope, read once after all parts, natural home for a materials/textures table) | 0 | Present in the reader code but absent from the one sample file checked (`gren_frm.SHP`) -- no semantic content confirmed. |
+| `.SHP` texture/material assignment mechanism | 0 | No texture/material filename found embedded anywhere in a fully-decompressed sample file; not resolved whether it's a numeric-index lookup (candidate: unresolved per-part `+0x138` field) or an external naming convention. |
+
+### Open follow-ups
+
+- Field semantics for tags 3/4/6/8/9/0xb/0xc/0xe.
+- The per-part `+0x138` field's source (candidate material/texture index).
+- Find a `.SHP`/`.sro` sample that actually contains a tag-0x10 chunk.
+- `FUN_004a3040`/`FUN_004a3cb0` (per-hardpoint post-processing) and `FUN_004c14f0`/`FUN_004c1370`/`FUN_004c11c0` (vertex fetch/normalize/length helpers) not decompiled.
+- `.tga` (142 files, unexamined) association with ships via naming convention.
