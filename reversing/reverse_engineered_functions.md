@@ -4246,7 +4246,24 @@ repeatedly elsewhere in this project (contrast with `bigfile.cpp`'s
 native x86 byte order, unlike the BigFile archive's own big-endian
 header/TOC).
 
-### Block A confirmed as a 256-color master RGB palette
+### Block A confirmed as a 256-color master RGB palette -- CORRECTED in Pass 61: wrong source, right size
+
+**Correction (2026-09-09, Pass 61)**: the write-up below correctly
+identified that a 256-entry RGB palette gets packed into native pixel
+format from a `0x300`-byte renderer-state field -- but wrongly assumed
+that field was `CcbResource.blockA`, i.e. that it came from the `.ccb`
+file. It doesn't. Re-reading `FUN_004acbe0`/`FUN_00441aa0` (now
+`InitializeGraphicsDevice`/`InitializeLoadoutScreen`) with their hidden
+`__fastcall` arguments exposed (`set_function_prototype` on the actual
+loader) shows the `+0x1602` field is populated by a **separate call to
+`SR_TGA_allocate_palette`** against a same-named `.tga` file
+(`"softpal.tga"`/`"palette.tga"`/`"palette3.tga"`), NOT by
+`SR_CCB_load`'s return value (which goes to the adjacent-but-distinct
+`+0x1606` field instead). The two loads happen right next to each
+other in the same function, which is exactly what led to the original
+mis-attribution -- but they are two independent resources. See Pass 61
+for the full writeup. The paragraph below is kept for history but its
+"Block A" attribution to the `.ccb` file is superseded.
 
 `0x300 = 768 = 256 x 3` -- and this is independently confirmed, not
 just size-inferred. Tracing `SR_CCB_load`'s two callers:
@@ -7064,6 +7081,17 @@ and re-decompiled its only two callers.
    final 2D/WinVFX global palette at teardown, so this third file never
    leaks into the menu system.
 
+**Correction (2026-09-09, Pass 61)**: the sentence below treats
+`+0x1606` (the `.ccb` result) and `+0x1602` as if they were the same
+palette resource -- they aren't. Pass 61 found `+0x1602` is actually
+populated by a *separate* call, `SR_TGA_allocate_palette("softpal.tga"
+/"palette.tga")`, made in the exact same `if`/`else` branch right
+before the `.ccb` load shown above. The conclusion below (menus use
+whichever of the `softpal`/`palette` PAIR was loaded at startup, never
+their own) still holds -- it's the mechanism/attribution of "the
+palette" to `.ccb`'s own bytes specifically that needs correcting to
+"the `.tga` sibling of whichever `.ccb` gets loaded."
+
 No menu screen (`RunMainMenuScreen`, `RunMenuScreenLoop`, or any of its
 12 dispatched screens) calls `SR_CCB_load` itself. **Confidence 5**:
 the menus therefore render through whichever palette
@@ -7706,3 +7734,115 @@ alone.
 - Whether any additional `.bik` calls exist inside `WinMain` itself
   for the 3 `RunMultiplayerDebriefScreen` call sites' own surrounding
   transitions.
+
+## Pass 61 -- The `.tga` format decoded: genuine standard Targa, and a major correction to the master-palette source (2026-09-09)
+
+Direct request: decode StarLancer's `.tga` format. Short answer:
+**it's real, standard Targa** -- no custom framing at all, beyond the
+same optional whole-file RefPack wrapper already documented for
+`.spr`/`.fnt`/`.SHP` (loose files in `RESOURCE/` are RefPack-compressed;
+the raw `cd1`/`cd2` disc-extracted copies are plain, uncompressed
+standard TGA). Verified directly against real files' headers
+(`idLength`, `colorMapType`, `imageType`, `width/height`, `bpp` all
+exactly where the TGA 1.0 spec puts them) and, far more importantly,
+against the engine's OWN functions -- which name themselves.
+
+### `SR_TGA_allocate_palette`/`SR_TGA_get_palette` (`0x4cacb0`/`0x4ca9b0`, were `FUN_004cacb0`/`FUN_004ca9b0`)
+
+Both self-identify via their own `ReportAssertionFailureEx` strings
+(`"SR_TGA_allocate_palette: ..."`/`"SR_TGA_get_palette: ..."`) -- no
+guessing involved. Together: load a named `.tga` file whole
+(`SR_FileAlloc`), assert its `bpp` field (offset `0x10`/16, exactly
+where the TGA spec puts bits-per-pixel) equals 8, then read its
+**standard embedded 256-entry BGR color map** (only when `imageType`
+is 1 or 9 -- uncompressed or RLE color-mapped, and `colorMapType != 0`
+-- exactly the TGA spec's own color-map presence flag) starting right
+after the header + image-ID field (`18 + idLength`, per spec), into a
+freshly-allocated 768-byte RGB buffer.
+
+### Major correction: the master 256-color RGB palette comes from a `.tga` file, not the `.ccb` file
+
+Pass 25/30 attributed the RGB-triple-to-native-pixel-format packing
+loop's source data ("Block A") to the `.ccb` loader's own result.
+Tracing the actual literal string arguments at `InitializeGraphicsDevice`
+(`0x4acbe0`) shows this was wrong: **two separate calls happen, to two
+separate files**:
+
+```c
+// InitializeGraphicsDevice, real sequence (ECX args now visible):
+renderState->tgaPalette = SR_TGA_allocate_palette(mode==0 ? "softpal.tga" : "palette.tga");
+renderState->ccbData    = SR_CCB_load(mode==0 ? "softpal.ccb" : "palette.ccb");
+```
+
+`renderState->tgaPalette` (`+0x1602`) is what the packing loop
+documented in Pass 25/30/54 actually reads -- **the master RGB
+palette is a standard TGA color map, not `.ccb` data.** The `.ccb`
+file's own content (`+0x1606`) is something else entirely (Pass 30's
+"Block B" 12-shade-ramp hypothesis remains open, now definitely
+NOT competing with Block A for the same source). Same pattern
+confirmed at `InitializeLoadoutScreen` (loads `palette3.tga`
+alongside `palette3.ccb`, mirroring Pass 53's finding) and inside a
+large HUD-initialization function (loads `oldpalette.tga` for a
+HUD-local gradient-icon palette copy, separate from the main render
+palette). **Confidence 5** -- this is about as direct as reverse
+engineering gets: the loader's own assertion strings name the file
+format, and the exact filenames are read as literal call arguments,
+not inferred.
+
+### This resolves 2 of Pass 53's 3 mystery "extracted" palette dumps
+
+Decoded `palette.tga`/`softpal.tga`/`palette3.tga`/`oldpalette.tga`'s
+real embedded color maps directly (per the algorithm above,
+implemented ad hoc in Python) and compared against the unexplained
+`gamedata/StarLancer/extracted`/`out_softpal` dumps flagged in Pass 53:
+
+- `palette.tga`'s color map: `(125,190,120), (120,182,115),
+  (115,173,111), ...` -- **matches** `extracted/PALETTE_0_32cols.pal`'s
+  `(125,190,121), (121,182,113), (113,174,109), ...` to within
+  rounding. **Confirmed: `extracted/PALETTE_N` = `palette.tga`'s color
+  map.**
+- `softpal.tga`'s color map: `(0,0,0), (8,8,8), (16,16,16), (25,25,25),
+  ...` -- **matches** `out_softpal/SOFTPAL_0_32cols.pal`'s `(0,0,0),
+  (8,8,8), (16,16,16), (24,24,24), ...` to within rounding.
+  **Confirmed: `out_softpal/SOFTPAL_N` = `softpal.tga`'s color map.**
+
+`out_palettes/POWER_N`'s warm fire/glow-toned ramp remains unexplained:
+checked every color-mapped `.tga` in `RESOURCE/` (`curpal`, `ddlaserr`,
+`ddwarp128`, `interpal`, `oldpalette`, `palette`, `palette2`,
+`palette3`, `softpal`) and none match; `powerball.TGA` -- the one file
+whose name plausibly matches "POWER" -- turns out to be a 24bpp
+TRUE-COLOR targa (`imageType=2`, no color map at all), definitively
+ruling it out. **Confidence 5 that POWER_N's source is not any `.tga`
+file examined this pass**; its provenance is still an open question.
+
+### Other `.tga` usage catalogued (from the full `.tga` string sweep)
+
+- **Splash screens**: `sl_splash.tga`/`sl_splash800.tga`/
+  `sl_splash1024.tga` (resolution-specific variants), `splash.tga`.
+- **Screenshot output**: `screenshot%04d.tga` -- confirms `.tga` is
+  also this game's save-a-screenshot format (a standard, sensible
+  choice, unrelated to the palette system above).
+- **Transition-video poster frames**: nearly every `INTERFACE\*.bik`
+  fade clip catalogued in Pass 60 has an identically-named `.tga`
+  sibling (`main2opt.tga`, `sinfade.tga`, `igofade.tga`, `mulfade.tga`,
+  `optfade.tga`, `igoptfad.tga`, `ingameop.tga`, etc.) -- almost
+  certainly a static first/last-frame still shown instantly while the
+  real `.bik` loads, or a fallback for when video is disabled, though
+  the actual display code for these wasn't traced this pass.
+- **VR room backdrops**: `brd2cd.tga`/`rel_bunk2cd.tga` -- real
+  640x480 24bpp RLE-compressed (`imageType=10`) true-color images,
+  confirmed via direct header read.
+- **Misc textures**: `powerball.tga` (24bpp truecolor, not
+  color-mapped), `space.tga`, `fpanels.tga`/`background.tga`/
+  `rbackground.tga` (generic UI backdrop panels), `nebula\starref12.tga`.
+
+### Open follow-ups
+
+- `out_palettes/POWER_N`'s real source -- not any `.tga` file checked
+  this pass; may need to check `.SHP`/`.spr` embedded palettes (Pass
+  59's "fake shape 0" mechanism) or non-`RESOURCE/`-directory assets.
+- The actual consumer/display code for the `.bik`-sibling `.tga`
+  poster-frame stills -- not traced.
+- Pass 30's "Block B" (`.ccb`'s own real content, `renderState+0x1606`)
+  -- still not independently pinned down now that it's confirmed NOT
+  to be the RGB palette.

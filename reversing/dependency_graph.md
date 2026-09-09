@@ -1021,15 +1021,42 @@ SR_CCB_load (0x4cb9d0)
   -> depends on: HOG_BigRead (0x4c7f60), FUN_004cb540 (native-endian cursor read),
                  SR_MEM_allocate (5 allocations: struct, blockA, blockB, scalarC, payload),
                  FUN_004d0333 (free), SR_MEM_free
-  <- depended on by: FUN_004acbe0 (graphics-device init -- stores result at
-                 rendererState+0x1606), InitializeLoadoutScreen (was FUN_00441aa0,
-                 asset-preload sequence -- stores result in DAT_005246d0, and separately
-                 contains an RGB-palette-to-native-pixel-format packing loop over 0x300
-                 bytes at rendererState+0x1602, confirming Block A = 256-entry RGB palette.
-                 Pass 53: this loop runs AFTER the function restores the pre-screen
-                 rendererState+0x1602 pointer -- i.e. it re-packs the ORIGINAL palette that
-                 was active before the loadout screen loaded its own fresh .ccb via
-                 SR_CCB_load(), not the new one. Palette scope = per-screen, not per-image.)
+  <- depended on by: InitializeGraphicsDevice (was FUN_004acbe0, graphics-device init --
+                 stores result at rendererState+0x1606), InitializeLoadoutScreen (was
+                 FUN_00441aa0, asset-preload sequence -- stores result in DAT_005246d0).
+                 CORRECTED in Pass 61: +0x1602 (read by the RGB-to-native-pixel-format
+                 packing loop, "Block A") is NOT this function's result -- it's populated
+                 by a separate SR_TGA_allocate_palette() call in the same branch (see
+                 below). The .ccb file's own real content (Block A/B as originally
+                 described) is unconfirmed; only the RGB-palette attribution was wrong.
+                 Pass 53's per-screen-not-per-image finding is unaffected: it's still true
+                 that InitializeLoadoutScreen restores the pre-screen +0x1602 pointer
+                 before returning, and Palette scope = per-screen, not per-image.
+```
+
+## The REAL master-palette source: standard 8-bit color-mapped .tga files, not .ccb (2026-09-09, Pass 61)
+
+```
+SR_TGA_allocate_palette (0x4cacb0, was FUN_004cacb0) / SR_TGA_get_palette (0x4ca9b0, was
+  FUN_004ca9b0) -- self-named via their own ReportAssertionFailureEx strings
+  -> loads a named .tga file whole (SR_FileAlloc), asserts bpp==8, reads its STANDARD
+     256-entry embedded BGR color map (TGA spec: imageType 1 or 9, colorMapType != 0,
+     color map starts at offset 18+idLength) into a 768-byte RGB buffer
+  <- depended on by:
+       InitializeGraphicsDevice: SR_TGA_allocate_palette("softpal.tga"/"palette.tga") ->
+         rendererState+0x1602 (the REAL master RGB palette, read by the packing loop
+         previously mis-attributed to SR_CCB_load's result -- see correction above),
+         in the SAME if/else branch as the SR_CCB_load("softpal.ccb"/"palette.ccb") call
+       InitializeLoadoutScreen: SR_TGA_allocate_palette("palette3.tga") alongside
+         SR_CCB_load("palette3.ccb")
+       a large HUD-init function (source-tagged hud.cpp): SR_TGA_allocate_palette
+         ("oldpalette.tga") for a HUD-local gradient-icon palette copy
+
+Resolves 2 of Pass 53's 3 unexplained "extracted" palette dumps:
+  extracted/PALETTE_N  <- palette.tga's color map (byte-exact match, confirmed)
+  out_softpal/SOFTPAL_N <- softpal.tga's color map (byte-exact match, confirmed)
+  out_palettes/POWER_N  <- still unresolved; not any color-mapped .tga in RESOURCE/
+    (powerball.TGA, the name's obvious candidate, is 24bpp truecolor -- no color map)
 ```
 
 ## Palette-to-image mapping: there mostly isn't one (2026-09-09, Pass 53)
