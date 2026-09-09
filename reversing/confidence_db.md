@@ -1723,3 +1723,16 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - `perMissionSpecialFlag` and the two reserved blocks -- not identified.
 - Whether the 9-tier rank table maps to real named ranks anywhere -- blocked on runtime-only localized strings.
 - `DAT_0050099f`/`DAT_005009d7`/`DAT_005009bb` (small per-mission tables feeding the advance logic) not mapped.
+
+## Pass 64 -- `profile.bin`'s remaining fields resolved (2026-09-09)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `reserved1[6]`/`reserved2[6]` (`PlayerProfile+0x30`/`+0x48`) = hub-room hotspot/prop enabled-flags | 4 (role) / 2 (individual mapping) | Read by `RenderBriefingHubFrame` (0x436b20, was `FUN_00436b20`) as two parallel 6-entry boolean arrays gating interactive hub-room hotspots; switches between early/late-campaign table sets via `DAT_00562dc8 < 0x13`. |
+| `perMissionSpecialFlag` and the 3 small per-outcome tables (`DAT_0050099f`/`DAT_005009d7`/`DAT_005009bb`) = debrief-narrative paragraph gates | 3 | Read by `BuildMissionDebriefText` (0x424cf0, was `FUN_00424cf0`). One gate is ANDed with `perMissionRankSnapshot==4`, independently supporting Pass 63's "rank" interpretation of that array. |
+
+### Open follow-ups
+
+- Map the 12 hub-room flag bit-positions to named VR ship-interior room-graph objects.
+- Debrief narrative text content itself -- runtime-only, not recoverable statically.
+- `DAT_0052a460` (a plausible "first-time debrief" flag) not traced further.

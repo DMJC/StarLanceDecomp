@@ -1623,3 +1623,22 @@ RefreshActiveCallsignFromProfile (0x475390, was FUN_00475390) -- re-reads profil
   ONLY the callsign field into the active-session DAT_00562dcc global; does not unpack any
   other PlayerProfile field into separate globals
 ```
+
+## `profile.bin`'s remaining fields resolved (2026-09-09, Pass 64)
+
+```
+RenderBriefingHubFrame (0x436b20, was FUN_00436b20) -- briefing-hub room per-frame
+  Bink-decode-and-render callback (sibling to FUN_0043c1c0)
+  -> reads DAT_00562dfc/DAT_00562e14 (PlayerProfile's reserved1/reserved2 mirrors) as two
+     parallel 6-entry boolean arrays -> gates which hub-room hotspots/props render+respond
+     this frame; switches lookup-table sets on DAT_00562dc8 < 0x13 (early vs late campaign,
+     matches the Pass ~33 "two parallel ship-layout graphs" finding)
+
+BuildMissionDebriefText (0x424cf0, was FUN_00424cf0) -- post-mission debrief text builder
+  -> reads DAT_0050099f / DAT_005009d7 / DAT_005009bb (indexed by the Pass-25 mission-
+     outcome-branch value) as boolean gates for optional extra debrief paragraphs
+  -> one gate additionally requires (&DAT_00562e2c)[missionIndex]==4, i.e.
+     PlayerProfile.perMissionRankSnapshot==4 -- independent confirmation of Pass 63's
+     "rank" interpretation for that field
+  <- depended on by: FUN_00425240 (sibling, not separately decompiled this pass)
+```

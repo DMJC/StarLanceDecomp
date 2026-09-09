@@ -8084,3 +8084,67 @@ being unpacked into a separate parsed representation.
   per-mission-indexed flag/lookup tables read in
   `AdvanceCampaignMissionAndSaveProfile`) -- not mapped beyond their
   role in the mission-advance/rank logic already described.
+
+## Pass 64 -- `profile.bin`'s remaining fields resolved: hub-room unlock flags and debrief-text gates (2026-09-09)
+
+Direct follow-up on Pass 63's open items. Traced the consumers of the
+two "reserved" 6-dword blocks and the three small per-mission-outcome
+tables (`DAT_0050099f`/`DAT_005009d7`/`DAT_005009bb`) referenced from
+`AdvanceCampaignMissionAndSaveProfile`.
+
+### `reserved1`/`reserved2` (`PlayerProfile+0x30`/`+0x48`) = hub-room prop/hotspot "enabled" flags
+
+`RenderBriefingHubFrame` (`0x436b20`, was `FUN_00436b20` -- the
+briefing-hub room's per-frame Bink-decode-and-render callback,
+sibling to the already-documented `FUN_0043c1c0`) reads
+`DAT_00562dfc`/`DAT_00562e14` (the live-session mirrors of these two
+fields) as **two parallel 6-entry boolean arrays**, gating which of
+several named interactive hub-room hotspots currently render/respond
+this frame -- each nonzero entry unlocks one specific
+`VFX_shape_draw` call at a specific screen position with a specific
+language-string label. The function switches between **two entirely
+different lookup-table sets** depending on `DAT_00562dc8 < 0x13`
+(mission index 19) -- consistent with the "two parallel ship-layout
+graphs, early vs. late campaign" structural finding from several
+passes ago (Pass ~33). **Confidence 4**: these fields are genuinely
+"which hub-room props/hotspots are currently active," persisted
+per-pilot so the hub room's interactive state survives a save/reload;
+confidence 2 on which SPECIFIC named hub-room objects each of the 12
+flags corresponds to (not individually identified this pass).
+
+### `perMissionSpecialFlag` and the three small tables = mission-debrief narrative gates
+
+`BuildMissionDebriefText` (`0x424cf0`, was `FUN_00424cf0` -- the
+post-mission debriefing text-panel builder, string-concatenating
+multiple localized fragments into a scrollable report) reads
+`DAT_0050099f`/`DAT_005009d7`/`DAT_005009bb` -- three small
+byte tables, each indexed by a per-mission outcome-branch value
+(`(&DAT_004e4954)[missionChoiceIndex*4]`, the SAME outcome-branch
+mechanism documented back in Pass 25) -- as **boolean gates deciding
+whether to append an extra optional paragraph** of debrief narrative
+text. One of these gates (`DAT_005009bb[outcomeIndex] != 0`) is
+additionally ANDed with `(&DAT_00562e2c)[missionIndex] == 4` --
+**directly using `perMissionRankSnapshot`'s stored value to decide
+whether a commendation/rank-flavored debrief paragraph gets shown**,
+which is strong independent confirmation that Pass 63's "rank" label
+for that array is on the right track (a rank-tier value of exactly 4
+unlocks specific narrative text, consistent with "reached a specific
+performance tier this mission"). **Confidence 3** overall for this
+mechanism; the exact narrative content itself is runtime-only
+localized text and wasn't recovered.
+
+### Updated `PlayerProfile` field notes (supersedes Pass 63's confidence-1 "unidentified" labels)
+
+- `reserved1[6]`/`reserved2[6]` -> **hub-room hotspot/prop enabled-flags** (confidence 4 on role, 2 on individual mapping).
+- `perMissionSpecialFlag` -> one of three debrief-narrative gate flags, this specific one indexed by `DAT_0050099f`/`DAT_005009d7` rather than a single field (confidence 2).
+
+### Open follow-ups
+
+- Map each of the 12 `reserved1`/`reserved2` bit-positions to a named
+  hub-room object (the VR ship interior room graph, documented many
+  passes ago, is the natural cross-reference target).
+- The exact narrative content gated by these debrief flags -- runtime-
+  only localized strings, not recoverable statically.
+- `DAT_0052a460` (read in `BuildMissionDebriefText`'s outcome-index -1
+  branch) -- a plausible "is this a fresh/first-time debrief" flag,
+  not traced further.
