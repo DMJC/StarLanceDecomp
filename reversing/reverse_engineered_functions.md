@@ -8148,3 +8148,105 @@ localized text and wasn't recovered.
 - `DAT_0052a460` (read in `BuildMissionDebriefText`'s outcome-index -1
   branch) -- a plausible "is this a fresh/first-time debrief" flag,
   not traced further.
+
+## Pass 65 -- CONFIRMED: the mission-19 threshold is the ANS Reliant -> ANS Yamato transfer (2026-09-10)
+
+User-supplied narrative context: the player starts the campaign aboard
+the **ANS Reliant**, which is destroyed partway through, transferring
+the player to the **ANS Yamato** for the rest of the game. This
+directly and precisely confirms/grounds a structural finding several
+passes had been circling without a narrative anchor: the recurring
+`DAT_00562dc8 < 0x13` (mission index 19) branch found independently in
+`RenderBriefingHubFrame` (Pass 64), `AdvanceCampaignMissionAndSaveProfile`
+(Pass 63), and a much earlier "two parallel ship-layout graphs" note
+(circa Pass 33), all switching between an early-campaign and
+late-campaign table/asset set.
+
+### Direct string confirmation
+
+`search_strings` for `reliant`/`yamato` turns up exactly the asset
+pair this context predicts:
+
+- `reliant.shp` / `yamato.shp` -- the two carriers' own 3D models (the
+  tagged-chunk format decoded in Pass 55/56).
+- `reliant_hang.shp` -- the Reliant's hangar bay model.
+- `reliant_destback.shp` / `"Yamato DestBack.shp"` -- **destroyed
+  backdrop variants for BOTH ships** (`DestBack` = "destruction
+  background"), consistent with a scripted destruction sequence
+  needing its own wreckage/damage backdrop asset.
+- `"reliant_induction resource: error loading %s."` -- an "induction"
+  (onboarding/orientation) sequence specific to the Reliant, plausibly
+  the game's opening tutorial-adjacent sequence.
+- `new_reliant_transfer.bik` -- a cutscene literally named for the
+  transfer event itself.
+
+### The exact trigger, read directly from `WinMain`'s cutscene-selection logic
+
+```c
+// WinMain, simplified from the real disassembly (address 0x4a9fd5 area)
+if (DAT_00562dc8 < 0x13) {                  // still aboard the Reliant (missions < 19)
+    if (DAT_0052a470 != 0) {                // "haven't shown the transfer cutscene yet" (defaults to 1)
+        moviePath = "new_reliant_transfer.bik";
+    } else {
+        moviePath = "new_a_y_trans.bik";    // already shown once -- generic transfer-themed filler
+    }
+} else {                                    // aboard the Yamato (missions >= 19)
+    moviePath = "new_a_y_trans.bik";
+}
+PlayMovie(moviePath);   // FUN_004abb80
+```
+
+**Confidence 5** -- directly read, not inferred: the campaign's
+ship-transfer story beat is hard-coded to fire exactly once, keyed on
+crossing the mission-19 boundary, gated by `DAT_0052a470` (a session
+flag defaulted to 1 by `LoadPlayerProfile`, i.e. "not yet shown" by
+default) so it plays the dedicated transfer cutscene only the first
+time and falls back to a generic filler clip afterward (e.g. on
+replaying an earlier mission in that range).
+
+### The same threshold picks ship-specific asset variants elsewhere too
+
+A second, independent site in `WinMain` (`~0x4aa53f`) makes the exact
+same `DAT_00562dc8 < 0x13` comparison to choose between
+`"new_rel_exec.bik"` (Reliant variant) and `"new_y_exec.bik"` (Yamato
+variant) for what's evidently a recurring scene (an "exec[utive
+officer]" meeting/briefing clip, given the naming) that exists in two
+ship-specific versions. **This is now the third independent site**
+(alongside `RenderBriefingHubFrame`'s hub-room hotspot tables and this
+cutscene-selection logic) using the identical mission-19 cutoff to
+switch which ship's assets are active -- strong, repeated confirmation
+that mission 19 is precisely where the game's internal model of
+"which carrier you're aboard" flips.
+
+### Updated confidence: earlier findings this grounds
+
+- The "two parallel ship-layout graphs, early vs. late campaign"
+  structural note (circa Pass 33) is now **confirmed as literally the
+  Reliant's interior vs. the Yamato's interior**, not just two
+  arbitrary layout variants -- confidence raised from "plausible
+  given campaign progression" to 5.
+- `RenderBriefingHubFrame`'s (Pass 64) early/late hub-room hotspot
+  table switch is the same event: the hub room's *set of interactive
+  props* changes because **it's a physically different room on a
+  different ship** after the transfer, not a cosmetic/difficulty-based
+  variant.
+- `AdvanceCampaignMissionAndSaveProfile`'s (Pass 63) special-case
+  mission jumps (`0xb`/`0xc`->`0xe`, `0x10`->`0x12`, `0x15`->`0x17`)
+  sit on either side of this boundary (11/12->14 and 16->18 are
+  pre-transfer, 21->23 is post-transfer) -- plausibly skipping
+  missions that don't exist in a given player's branch, now
+  understood against a concrete timeline rather than an abstract
+  mission-index sequence.
+
+### Open follow-ups
+
+- `DAT_0052a470`'s exact set-to-0 site (confirming it truly means
+  "transfer cutscene already shown," not just inferred from its
+  read-site behavior and its `LoadPlayerProfile` default of 1) -- not
+  located this pass.
+- The Reliant "induction" sequence's role (opening tutorial? crew
+  introduction?) -- only its error-string existence confirmed.
+- Whether any OTHER mission-index thresholds besides `0x13` correspond
+  to further story beats (the campaign has ~29 missions total; this
+  pass only investigated the one boundary the user's context pointed
+  at).

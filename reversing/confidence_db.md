@@ -1736,3 +1736,18 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - Map the 12 hub-room flag bit-positions to named VR ship-interior room-graph objects.
 - Debrief narrative text content itself -- runtime-only, not recoverable statically.
 - `DAT_0052a460` (a plausible "first-time debrief" flag) not traced further.
+
+## Pass 65 -- CONFIRMED: mission-19 threshold = ANS Reliant -> ANS Yamato transfer (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `DAT_00562dc8 < 0x13` (mission 19) = the Reliant->Yamato ship-transfer boundary | 5 | Directly read from `WinMain`'s cutscene-selection logic (`new_reliant_transfer.bik` vs `new_a_y_trans.bik`, gated by session flag `DAT_0052a470`); independently corroborated by a second site picking `new_rel_exec.bik`/`new_y_exec.bik` on the same comparison. |
+| `reliant.shp`/`yamato.shp`/`reliant_hang.shp`/`reliant_destback.shp`/`Yamato DestBack.shp` = the two carriers' 3D models + destruction-backdrop variants | 5 | Direct string confirmation. |
+| The "two parallel ship-layout graphs" note (circa Pass 33) = literally Reliant-interior vs. Yamato-interior | 5 (raised from "plausible") | Grounded by user-supplied narrative context + the string/threshold evidence above. |
+| `RenderBriefingHubFrame`'s (Pass 64) early/late hub-room table switch = the hub room physically changing ships | 5 (raised from 4) | Same mission-19 boundary, now understood as a real ship change, not a cosmetic variant. |
+
+### Open follow-ups
+
+- `DAT_0052a470`'s write site (confirms "transfer cutscene already shown" semantics) -- not located.
+- The Reliant "induction" sequence's role -- only its existence confirmed.
+- Other mission-index thresholds possibly corresponding to further story beats -- not surveyed beyond mission 19.

@@ -1642,3 +1642,27 @@ BuildMissionDebriefText (0x424cf0, was FUN_00424cf0) -- post-mission debrief tex
      "rank" interpretation for that field
   <- depended on by: FUN_00425240 (sibling, not separately decompiled this pass)
 ```
+
+## CONFIRMED: mission-19 threshold = ANS Reliant -> ANS Yamato transfer (2026-09-10, Pass 65)
+
+```
+WinMain (~0x4a9fd5, ~0x4aa53f) -- cutscene/asset selection, both keyed on DAT_00562dc8 < 0x13:
+  site 1: DAT_00562dc8 < 0x13 && DAT_0052a470 != 0 (default from LoadPlayerProfile)
+            -> PlayMovie("new_reliant_transfer.bik")   -- the transfer story beat, shown once
+          else -> PlayMovie("new_a_y_trans.bik")        -- generic filler (already seen / post-transfer)
+  site 2: DAT_00562dc8 < 0x13 -> "new_rel_exec.bik" (Reliant variant)
+          else                -> "new_y_exec.bik"       (Yamato variant)
+
+-> CONFIRMS (user-supplied narrative context): mission index 19 is exactly where the
+   player transfers from the ANS Reliant (destroyed) to the ANS Yamato for the rest of
+   the campaign. This is the SAME threshold already found independently in:
+     - RenderBriefingHubFrame (Pass 64): early/late hub-room hotspot table switch
+     - the "two parallel ship-layout graphs" note (circa Pass 33)
+   All three are now understood as the same underlying event, not three coincidental
+   mission-19 checks.
+
+Real asset confirmation: reliant.shp / yamato.shp (carrier 3D models), reliant_hang.shp
+  (Reliant hangar), reliant_destback.shp / "Yamato DestBack.shp" (destruction backdrops
+  for BOTH ships), "reliant_induction" (Reliant-specific onboarding sequence, role
+  unconfirmed beyond its error string).
+```
