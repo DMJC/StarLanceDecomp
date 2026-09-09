@@ -6882,3 +6882,150 @@ P-code cross-check treatment if pursued.
   both screens' descriptor structs but not cross-referenced against
   `GetLanguageString` output (blocked on the same runtime-only string
   table noted in Pass 37/48).
+
+## Pass 53 -- Palette-to-image mapping investigated (2026-09-09)
+
+Investigated how palettes are matched to images from two angles, as
+requested: (1) Lancer.exe's own code, and (2) grounding that against
+three large pre-extracted asset dumps found in `gamedata/StarLancer/`
+(`extracted/` = 2771 `PALETTE_N_32cols.pal`+`.png` pairs,
+`out_palettes/` = 2771 `POWER_N_32cols.pal`+`.png` pairs,
+`out_softpal/` = 2771 `SOFTPAL_N_32cols.pal` files) that are clearly
+output from a third-party unpacking tool (numbered generically, not
+using any real in-game resource names) rather than anything this
+project produced.
+
+### Code finding 1: NO shipped `.spr`/`.fnt` asset uses a per-shape palette override
+
+The `.spr` format (Pass 39/41) has a documented per-shape mechanism for
+exactly this purpose: each `ShapeRecord` entry in a `ShapeSet` carries
+a `paletteOffset` field pointing at an optional
+`PaletteOverrideRecord` (`{entryCount, {index,r6,g6,b6}[]}`), read by
+`VFX_shape_palette`. To find out which images actually use it,
+decompressed and parsed **all 337 `.spr` files** in `gamedata/`
+(RefPack-decoded via `reversing/tools/refpack_decompress.py`) and
+checked every shape's `paletteOffset` field directly:
+
+- Total shapes across all files: **8583**.
+- Shapes with a non-zero `paletteOffset`: **0**.
+
+**Confidence 5** (exhaustive, direct, script-verified over every
+shipped `.spr` file): despite the per-shape palette-override mechanism
+existing in the code, **no shipped 2D sprite/UI image actually uses
+it**. Every single shape draws through whatever the *currently active
+global palette* is at draw time -- there is no per-image palette
+selection to discover for this asset class, because the game doesn't
+have one in practice.
+
+### Code finding 2: palette selection happens per render CONTEXT (screen), not per image
+
+Decompiled `InitializeLoadoutScreen` (`0x441aa0`, already
+partially documented) to see how the mission-briefing/loadout screen's
+3D ship-preview rendering picks its palette. It:
+
+1. Saves the *currently active* renderer-state CCB pointer/palette
+   fields (`DAT_00523a94`/`DAT_00523d30` <- `*(param_1+0x1606)`/
+   `*(param_1+0x1602)`).
+2. Calls `SR_CCB_load()` (the Pass 30 `.ccb` loader) to load a *fresh*
+   `.ccb` resource into `DAT_005246d0` for this screen's own use.
+3. Loads all the `.SHP` ship/missile/gunship models for the loadout
+   roster via `LoadSquadronRoster` (see below).
+4. At the very end, **restores** the original saved CCB
+   pointer/palette fields back into the renderer state, then re-runs
+   the exact RGB-triple-to-native-pixel-format packing loop documented
+   in Pass 25/30 against that **restored (original, pre-screen)**
+   palette, and calls `VFX_init_global_palette`.
+
+**Confidence 4**: this shows palette assignment operates at the
+*screen/render-context* granularity, not per individual model or
+texture -- a screen can load its own `.ccb` for its 3D content, but
+the final 2D/WinVFX global-palette conversion at screen teardown
+explicitly reuses whatever palette was active *before* entering that
+screen, not the newly-loaded one. This is consistent with finding 1:
+this engine's actual palette model is "one active palette at a time,
+switched per screen," not "one palette per image."
+
+### `.SHP` format identified: ship/turret/pod 3D object files (438 in `gamedata/`), no per-file palette reference
+
+`search_strings` for `.shp`/`.SHP` in `Lancer.exe` turns up real
+fighter/gunship/turret/missile-pod model filenames (`USLF_prd.SHP`,
+`predator_gun.SHP`, `German_grendal.SHP`, `21_screamer_pod.shp`, etc.
+-- 262+ distinct string hits), all referenced from
+`InitializeLoadoutScreen`'s model-list-building loops, each passed to
+`LoadSquadronRoster` (`0x4a44d0`).
+
+**Correction/clarification**: `LoadSquadronRoster` was named from its
+`.sro` (squadron roster) usage in `InitializeMissionGameplay` (Pass
+25/34's addendum). Its full decompile this pass shows it's actually a
+**generic structured-text object-file parser** -- it parses
+wing/formation sub-records, weapon hardpoints (string-matching
+`"startup"`/`"deploy"` keywords), and geometric sub-records with
+plane-normal computation, general enough to be reused for loading a
+single `.SHP` ship/turret/pod model as a "roster of one." The name is
+narrower than the function's real scope; not renamed this pass since
+"squadron roster" is still accurate for its primary/original use.
+**No CCB, RGB, or palette-related code appears anywhere in this
+parser** -- confirms finding 2: individual `.SHP` model files don't
+carry or select their own palette; whatever `.ccb` is active for the
+current screen applies to all of them uniformly.
+
+### The three extracted dumps: not groundable against any per-image code mechanism, and likely mostly scanner noise
+
+Given findings 1 and 2, there is **no code-level per-image or
+per-shape palette selection** for either `.spr` or `.SHP` assets that
+the extracted dumps' `PALETTE_N`/`POWER_N`/`SOFTPAL_N` numbering could
+correspond to -- the game simply doesn't index palettes by individual
+image. Sampled several `N` values across all three folders directly:
+
+| N | `PALETTE_N` (extracted/) | `POWER_N` (out_palettes/) | `SOFTPAL_N` (out_softpal/) |
+|---|---|---|---|
+| 0 | `(125,190,121), (121,182,113), ...` -- varied, plausible real colors | `(0,0,0), (12,8,0), (24,12,0), ...` -- warm ramp (dark red->orange), classic engine-glow/fire shading | `(0,0,0), (8,8,8), (16,16,16), ...` -- clean grayscale ramp |
+| 1000 | `(169,169,165)` repeated | `(79,79,79)` repeated | mostly `(79,79,83)`-ish repeated |
+| 1500-2770 | flat, low-variance R=G=B runs throughout | flat R=G=B runs throughout | flat R=G=B runs throughout |
+
+Only `N=0` in each folder looks like genuinely varied, art-like color
+data. Every other sampled index degrades into long runs of
+near-constant, R=G=B (gray) triples -- **not what real sprite/texture
+palettes look like**, but exactly what a naive brute-force "scan every
+N bytes and interpret 3 bytes as RGB" heuristic produces when it walks
+across non-palette binary data (padding, alignment, unrelated
+structure fields) between genuine hits. `POWER_0`'s warm ramp and
+`SOFTPAL_0`'s neutral grayscale ramp are individually plausible as a
+real engine-glow/fire effect ramp and a real monochrome shading ramp
+respectively (the latter matching Pass 30's still-unconfirmed "Block B
+= 12-shade lighting ramp" hypothesis in `softpal.ccb`) -- but with
+2770 further indices per folder mostly degrading to gray noise, this
+project cannot responsibly assert a specific N-to-real-asset mapping
+for the bulk of this data. **Confidence 1** that `N=0` in each folder
+corresponds to something real; **confidence 0** (not asserted) for any
+specific claim about `N>0`'s meaning.
+
+### Bottom line
+
+For the question "which palette belongs with which image": in
+Lancer.exe's own logic, the honest answer is **there mostly isn't
+one** -- `.spr`/`.fnt` 2D images never carry a per-shape override in
+the shipped game (finding 1), and `.SHP` 3D models never carry or
+reference a palette at all (finding 2's parser check). The real
+mapping that exists is coarser: **one global palette is active at a
+time, chosen from the 3 real `.ccb` files (`palette.ccb`/
+`palette3.ccb`/`softpal.ccb`, Pass 30) and swapped per screen/render
+context**, not per image. The `gamedata/` extraction dumps don't
+reflect a finer-grained mapping than that -- they appear to be the
+output of a heuristic scanner that mostly produced noise beyond its
+first hit in each category.
+
+### Open follow-ups
+
+- `FUN_004a3040`/`FUN_004a3cb0` (called per-wing inside
+  `LoadSquadronRoster`, likely converting parsed `.sro`/`.shp` records
+  into renderer-ready structures) -- not decompiled this pass.
+- Whether `.tga` files (142 in `gamedata/`, not examined this pass)
+  carry embedded palettes of their own (TGA type 1 supports this
+  natively) as an independent texture-palette mechanism separate from
+  the `.ccb`/WinVFX system -- worth checking if 3D ship texture
+  palettes specifically are wanted next.
+- Identifying the actual third-party tool that produced the
+  `extracted`/`out_palettes`/`out_softpal` dumps, to understand its
+  real extraction logic -- out of scope for static analysis of
+  `Lancer.exe` itself.

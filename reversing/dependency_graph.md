@@ -1022,10 +1022,31 @@ SR_CCB_load (0x4cb9d0)
                  SR_MEM_allocate (5 allocations: struct, blockA, blockB, scalarC, payload),
                  FUN_004d0333 (free), SR_MEM_free
   <- depended on by: FUN_004acbe0 (graphics-device init -- stores result at
-                 rendererState+0x1606), FUN_00441aa0 (asset-preload sequence --
-                 stores result in DAT_005246d0, and separately contains an
-                 RGB-palette-to-native-pixel-format packing loop over 0x300 bytes
-                 at rendererState+0x1602, confirming Block A = 256-entry RGB palette)
+                 rendererState+0x1606), InitializeLoadoutScreen (was FUN_00441aa0,
+                 asset-preload sequence -- stores result in DAT_005246d0, and separately
+                 contains an RGB-palette-to-native-pixel-format packing loop over 0x300
+                 bytes at rendererState+0x1602, confirming Block A = 256-entry RGB palette.
+                 Pass 53: this loop runs AFTER the function restores the pre-screen
+                 rendererState+0x1602 pointer -- i.e. it re-packs the ORIGINAL palette that
+                 was active before the loadout screen loaded its own fresh .ccb via
+                 SR_CCB_load(), not the new one. Palette scope = per-screen, not per-image.)
+```
+
+## Palette-to-image mapping: there mostly isn't one (2026-09-09, Pass 53)
+
+```
+Palette assignment granularity in this engine: per render-context (screen), not per image.
+  -> confirmed: 8583/8583 shapes across all 337 .spr files in gamedata/ have paletteOffset=0
+                (the per-shape PaletteOverrideRecord mechanism, Pass 39/41, is unused in
+                the shipped game)
+  -> confirmed: LoadSquadronRoster (0x4a44d0) -- the generic .sro/.SHP structured-text
+                object parser (renamed from its .sro-only usage; also loads all 438 .SHP
+                ship/turret/pod models in InitializeLoadoutScreen as "roster of one") --
+                contains no CCB/RGB/palette code anywhere
+  -> gamedata/'s extracted/out_palettes/out_softpal dumps (2771 numbered entries each,
+     third-party tool output, not this project's) do not correspond to any per-image
+     mechanism found in Lancer.exe; index>0 in each mostly degrades to flat-gray noise
+     runs, consistent with a heuristic byte-scanner rather than a principled extractor
 ```
 
 ## Mission trigger-type catalog discovered (2026-09-08, thirty-first session)

@@ -1571,3 +1571,19 @@ base-pointer arithmetic, not inferred).
 - Button-label text for both screens remains blocked on the runtime-only string table (Pass 37).
 
 All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNewGameSetupScreen`'s 8-entry row (Pass 50, root-caused decompiler limitation) and this pass's one 3-entry checkbox row -- both are the same class of gap (a stack region the decompiler didn't expose as literal assignments).
+
+## Pass 53 -- Palette-to-image mapping investigated (2026-09-09)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| No shipped `.spr` shape uses a per-shape `PaletteOverrideRecord` | 5 | Exhaustive: 8583 shapes across all 337 `.spr` files in `gamedata/`, `paletteOffset` is 0 in every single one, script-verified. |
+| Palette selection is per render-context (screen), not per image | 4 | `InitializeLoadoutScreen` loads its own `.ccb` via `SR_CCB_load()` for 3D content, then restores and re-packs the PRE-EXISTING (pre-screen) palette for the final WinVFX global-palette conversion. |
+| `.SHP` (438 files, ship/turret/pod 3D object descriptions) carries no palette reference | 4 | `LoadSquadronRoster`'s full decompile (the generic parser `.SHP` files are loaded through) has no CCB/RGB/palette-related code anywhere. |
+| `LoadSquadronRoster` is a generic structured-text object parser, not `.sro`-specific | 3 | Reused verbatim for single-`.SHP` ship/missile/gun model loads in `InitializeLoadoutScreen`; name kept (still accurate for primary use) but scope corrected. |
+| `gamedata/`'s `extracted`/`out_palettes`/`out_softpal` dumps correspond to a real per-image code mechanism | 0 | No such mechanism exists (see above). Sampled data across all 3 folders shows only index 0 looks like genuine varied palette data; N>0 mostly degrades into flat gray R=G=B noise runs -- consistent with a heuristic byte-scanner producing false positives, not a principled per-asset extraction. |
+
+### Open follow-ups
+
+- `.tga` files (142, not examined) may carry their own embedded palettes independent of the `.ccb`/WinVFX system -- a plausible next target if 3D ship texture palettes specifically are wanted.
+- `FUN_004a3040`/`FUN_004a3cb0` (per-wing post-processing inside `LoadSquadronRoster`) not decompiled.
+- The third-party tool that produced the `gamedata/` extraction dumps is unidentified; its real logic is out of scope for static analysis of `Lancer.exe`.
