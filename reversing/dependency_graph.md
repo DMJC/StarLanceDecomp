@@ -1595,3 +1595,31 @@ LoadPlayerProfile (0x4751b0)
      profile.bin -- this is the actual new-pilot-creation path, not a separate step
   <- depended on by: RunNewGameSetupScreen case 3 (after RunDifficultySelectDialog confirms)
 ```
+
+## `profile.bin`'s field layout decoded and verified against a real save (2026-09-09, Pass 63)
+
+```
+PlayerProfile struct (208 bytes, base DAT_00562cf8) -- session-global mirror, written by
+  AdvanceCampaignMissionAndSaveProfile (0x475a90, was FUN_00475a90), defaulted by
+  LoadPlayerProfile (0x4751b0) when profile.bin doesn't exist yet:
+    +0x00 currentMissionIndex        <- DAT_00562dc8
+    +0x04 callsign[32]               <- DAT_00562dcc (variable-length copy, NOT null-padded --
+                                          real sample file has a genuine uninitialized leftover
+                                          byte right after a short name)
+    +0x24 highestRankTierReached     <- DAT_00562dec (high-water mark into a 9-entry short
+                                          threshold table, DAT_005009f4)
+    +0x28 perMissionSpecialFlag      <- DAT_00562df0 (per-mission lookup, DAT_005009d7-indexed)
+    +0x2c cumulativeScore            <- DAT_00562df4 (compared against DAT_005009f4's thresholds)
+    +0x30 reserved1[6 dwords]        <- DAT_00562dfc (unidentified)
+    +0x48 reserved2[6 dwords]        <- DAT_00562e14 (unidentified)
+    +0x60 perMissionRankSnapshot[28] <- DAT_00562e2c (int16, 0xFFFF sentinel = unplayed)
+    +0x98 perMissionScoreSnapshot[28]<- DAT_00562e64 (int16, 0 = untouched)
+
+  <- verified against gamedata/StarLancer/profile.bin (real player save, callsign "DMJC"):
+     currentMissionIndex=3, highestRankTierReached=0, cumulativeScore=30,
+     perMissionRankSnapshot=[4,4,-1,...], perMissionScoreSnapshot=[0,9,21,0,...]
+
+RefreshActiveCallsignFromProfile (0x475390, was FUN_00475390) -- re-reads profile.bin, copies
+  ONLY the callsign field into the active-session DAT_00562dcc global; does not unpack any
+  other PlayerProfile field into separate globals
+```

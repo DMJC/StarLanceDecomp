@@ -7964,3 +7964,123 @@ tracing rather than coordinate recovery.
   e.g. whether it selects a different voice-line set or portrait art
   set wholesale (plausible given the prefix convention, not traced
   further).
+
+## Pass 63 -- `profile.bin`'s field layout decoded, verified against a real save (2026-09-09)
+
+Direct follow-up on Pass 62's open item. Found a real sample
+`profile.bin` shipped in `gamedata/StarLancer/` (208 bytes, the
+player's own real save -- name `"DMJC"`) and used it as ground truth
+against `LoadPlayerProfile`'s fresh-default writes and, more
+importantly, `AdvanceCampaignMissionAndSaveProfile` (`0x475a90`, was
+`FUN_00475a90`) -- the function that actually WRITES this struct
+during play, called at end-of-mission. That second function's own
+field-by-field copy from the live "session" globals into the save
+struct is what makes the layout legible -- each save-struct field is
+a direct mirror of a named session global, copied in one final block
+at the end of that function.
+
+### `PlayerProfile` struct (208 = `0xd0` bytes, base `DAT_00562cf8`)
+
+```c
+struct PlayerProfile {                     // written by
+    uint32_t currentMissionIndex;           // = DAT_00562dc8 (mission index, post-advance)
+    char     callsign[32];                  // = DAT_00562dcc mirror; NOT null-padded past the
+                                             //   terminator -- short names leave uninitialized
+                                             //   bytes behind them (see below)
+    uint32_t highestRankTierReached;         // = DAT_00562dec mirror (a "high water mark" index
+                                             //   into a threshold table, see below)
+    uint32_t perMissionSpecialFlag;          // = DAT_00562df0 mirror (per-mission lookup value,
+                                             //   role not fully confirmed)
+    uint32_t cumulativeScore;                // = DAT_00562df4 mirror (compared against a rank-
+                                             //   threshold table to compute highestRankTierReached)
+    uint32_t reserved1[6];                   // = DAT_00562dfc mirror, unidentified
+    uint32_t reserved2[6];                   // = DAT_00562e14 mirror, unidentified
+    int16_t  perMissionRankSnapshot[28];      // = DAT_00562e2c mirror, sentinel 0xFFFF = "not
+                                             //   yet played"; real save has missions 0/1 = 4
+    int16_t  perMissionScoreSnapshot[28];     // = DAT_00562e64 mirror, 0 = untouched; real save
+                                             //   has [0]=0,[1]=9,[2]=21 (increasing -- consistent
+                                             //   with a growing score/kill count over missions)
+};
+```
+
+**Confidence 5** on the overall field boundaries and sizes (directly
+read from both the writer's copy loops and the fresh-default writer's
+same offsets, and cross-checked byte-for-byte against the real 208-byte
+sample file); **confidence 3** on `highestRankTierReached`/
+`cumulativeScore`'s semantic labels (well-supported by the
+threshold-table comparison pattern below, not independently confirmed
+against a HUD/UI display of "rank"); **confidence 1** on
+`perMissionSpecialFlag` and the two `reserved` blocks.
+
+### The rank-progression mechanic, read directly from `AdvanceCampaignMissionAndSaveProfile`
+
+```c
+// simplified from the real decompile
+iVar9 = <index of the first entry in threshold table &DAT_005009f4 that
+         exceeds DAT_00562df4 (cumulativeScore)>;   // a ~9-entry short table
+if (DAT_00562dec < iVar9) {          // new high-water mark?
+    DAT_00562dec = iVar9;            // highestRankTierReached = iVar9
+    (&DAT_00562ed4)[DAT_00562dc8] = iVar9;
+}
+```
+
+This is a genuine **score-to-rank-tier lookup**: the player's
+cumulative score is compared against an ascending threshold table
+(`DAT_005009f4`, spanning `0x500a06-0x5009f4 = 0x12` bytes = 9
+`int16_t` thresholds -- a 9-tier rank ladder), and the highest tier
+ever reached is tracked as a persistent high-water mark, plus recorded
+per-mission. **Confidence 3** that this is specifically a military
+*rank* progression (StarLancer's real UI/lore terminology for these
+tiers wasn't independently confirmed -- `GetLanguageString` calls
+nearby resolve to runtime-only localized text) rather than some other
+score-tier concept, but the mechanical shape (threshold table +
+high-water mark) is directly read, not guessed.
+
+### The real sample file, decoded field-by-field
+
+| Field | Value in `gamedata/StarLancer/profile.bin` |
+|---|---|
+| `currentMissionIndex` | 3 |
+| `callsign` | `"DMJC"` (4 chars; bytes 5-35 of the 32-byte field are uninitialized leftover data, NOT null-padding -- see below) |
+| `highestRankTierReached` | 0 |
+| `perMissionSpecialFlag` | 0 |
+| `cumulativeScore` | 30 |
+| `perMissionRankSnapshot` | `[4, 4, -1, -1, ..., -1]` (missions 0/1 recorded at tier 4; rest unplayed) |
+| `perMissionScoreSnapshot` | `[0, 9, 21, 0, 0, ..., 0]` |
+
+### A real, confirmed uninitialized-memory quirk
+
+`LoadPlayerProfile`'s fresh-profile path copies the default callsign
+with an EXACT `strlen+1`-byte copy (not a fixed 32-byte fill), so any
+bytes in the 32-byte `callsign` field past the terminator are simply
+whatever was already in that memory -- never cleared. The real sample
+file proves this isn't just a theoretical reading: byte 5 (right
+after `"DMJC\0"`) is `0x1b` (27), a stray non-zero leftover, with the
+rest of the field genuinely zero (from a separate, later zeroing loop
+that happens to cover the REST of the buffer, but not the one byte
+immediately after a short name -- the exact boundary depends on the
+zeroing loop's stride vs. the name's length). **Confidence 5** -- this
+is directly observable in the shipped file, not inferred.
+
+### `RefreshActiveCallsignFromProfile` (`0x475390`, was `FUN_00475390`)
+
+Smaller than expected: re-reads `profile.bin` from disk, then copies
+ONLY the `callsign` field into the active-session global
+`DAT_00562dcc` (used throughout the codebase for save-path
+construction, HUD display, etc.). It does not "apply" any of the
+other fields to separate named globals -- the rest of
+`PlayerProfile`'s fields are read directly out of the
+`DAT_00562cf8`-based struct by whatever code needs them, rather than
+being unpacked into a separate parsed representation.
+
+### Open follow-ups
+
+- `perMissionSpecialFlag`/the two 6-dword `reserved` blocks -- not
+  identified.
+- Whether `highestRankTierReached`'s 9-tier table maps to real named
+  military ranks anywhere in the localized string data (blocked on
+  runtime-only language strings, same limitation as Pass 37/48).
+- `DAT_0050099f`/`DAT_005009d7`/`DAT_005009bb` (the three small
+  per-mission-indexed flag/lookup tables read in
+  `AdvanceCampaignMissionAndSaveProfile`) -- not mapped beyond their
+  role in the mission-advance/rank logic already described.

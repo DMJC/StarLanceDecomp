@@ -1706,3 +1706,20 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - `profile.bin`'s remaining fields (stats, unlocks, per-wingman roster status) not mapped.
 - Case 5 ("Reset")'s exact semantic meaning -- mechanism read, not confirmed.
 - Whether gender selection affects anything beyond the `mp`/`fp` asset prefix and kills-screen display field.
+
+## Pass 63 -- `profile.bin`'s field layout decoded and verified against a real save (2026-09-09)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `PlayerProfile` struct (208 bytes, base `DAT_00562cf8`): mission index, callsign, rank/score fields, 2 reserved blocks, 2x 28-entry per-mission arrays | 5 (boundaries/sizes) | Directly read from `AdvanceCampaignMissionAndSaveProfile`'s field-by-field save copy, cross-checked byte-for-byte against a real 208-byte sample file (`gamedata/StarLancer/profile.bin`, callsign "DMJC"). |
+| `highestRankTierReached`/`cumulativeScore` semantic labels | 3 | Well-supported by a real 9-tier threshold-table lookup mechanic, directly read; "rank" terminology itself not independently confirmed (localized strings are runtime-only). |
+| `perMissionSpecialFlag`, 2x 6-dword reserved blocks | 1 | Structurally located only. |
+| Real sample profile.bin's `callsign` field has genuine uninitialized-memory leftover bytes past the name terminator | 5 | Directly observed in the shipped file (`0x1b` stray byte after `"DMJC\0"`), confirms `LoadPlayerProfile`'s variable-length (not fixed-fill) name copy. |
+| `AdvanceCampaignMissionAndSaveProfile` (0x475a90, was `FUN_00475a90`) -- end-of-mission profile save + mission-index advance, with special-case mission jumps (0xb/0xc->0xe, 0x10->0x12, 0x15->0x17, 0x1c->0x1d) | 4 | Directly read; the 0x1c->0x1d jump matches the already-documented mission-29 campaign-epilogue special case. |
+| `RefreshActiveCallsignFromProfile` (0x475390, was `FUN_00475390`) -- only refreshes the active callsign global, doesn't unpack other fields | 5 | Directly read; short function. |
+
+### Open follow-ups
+
+- `perMissionSpecialFlag` and the two reserved blocks -- not identified.
+- Whether the 9-tier rank table maps to real named ranks anywhere -- blocked on runtime-only localized strings.
+- `DAT_0050099f`/`DAT_005009d7`/`DAT_005009bb` (small per-mission tables feeding the advance logic) not mapped.
