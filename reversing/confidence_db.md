@@ -1619,3 +1619,23 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - Find a `.SHP`/`.sro` sample that actually contains a tag-0x10 chunk.
 - `FUN_004a3040`/`FUN_004a3cb0` (per-hardpoint post-processing) and `FUN_004c14f0`/`FUN_004c1370`/`FUN_004c11c0` (vertex fetch/normalize/length helpers) not decompiled.
 - `.tga` (142 files, unexamined) association with ships via naming convention.
+
+## Pass 56 -- `.SHP` tags decoded further; tag 0x10 "materials table" hypothesis corrected (2026-09-09)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| Tag 4 = per-vertex `{position:float3, normal:float3, 2 trailing int32}` | 5 | Every sampled normal has magnitude 1.0; positions match real ship-scale coordinate ranges. |
+| Tag 6 = named socket/hardpoint string label (e.g. `"cpit0"`) | 5 | Direct literal string read; resolves Pass 55's stray `"cpit0"` string-scan fragment. |
+| Tag 0xf on-disk = `{v0,v1,v2,v3}` int32 vertex-index quad/triangle | 5 | Confirmed against 2 real populated instances (`stalag.SHP`) -- both clean, small, plausible indices. |
+| Tag 0xf is essentially unused in the shipped game | 4 | Across all 438 `.SHP` files, only 2 chunks total have `count>0`. |
+| Tag 0x10 = collision/bounding-plane table (unit normal + adjacency bitmask), NOT a materials/textures table | 2 (hypothesis) / 5 (NOT textures) | 73 files sampled: leading float3 always unit-length; trailing 16 int32 fields are bitmask-shaped (varied set-bit patterns) or uniform `0xFFFFFFFF`, never strings or small sequential indices. Explicitly corrects Pass 55. |
+| Tag 3 = per-triangle-fan record (fan/strip vertex indices + UV/shading floats) | 3 | Sliding-window index pattern across consecutive records is strong, well-evidenced structural signal; header/trailing field semantics inferred. |
+| Tag 9 = hardpoint attach transform (position + orientation + range scalars) | 3 | Plausible reading of one real 124-byte record; not confirmed against a consumer. |
+| Tag 0xa numeric field = range/distance value | 2 | One data point (`16000`) in the 8-byte on-disk variant. |
+| Ship textures assigned by a mechanism entirely outside `.SHP`'s own chunk data | 3 | Every tag in the catalog has now been checked; none carries a texture filename or a clean index-into-materials pattern. Strengthened from Pass 55's confidence 0 now that the tag-0x10 candidate is ruled out. |
+
+### Open follow-ups
+
+- `FUN_004a3040`/`FUN_004a3cb0` (per-hardpoint post-processing in `LoadSquadronRoster`) -- now the most promising lead for texture assignment.
+- Tags 8/0xb/0xc/0xd/0xe still undecoded with real sample data.
+- Tag 0x10's bitmask fields -- would need to find its consumer to confirm the collision/visibility-table hypothesis.

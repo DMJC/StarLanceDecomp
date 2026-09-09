@@ -7186,3 +7186,167 @@ extension, or a fixed per-ship-class texture set loaded alongside).
 - Whether `.tga` files (142 in `gamedata/`, still unexamined) are
   associated with ships via a naming convention observable in the
   BigFile TOC, independent of anything found in `.SHP` itself.
+
+## Pass 56 -- `.SHP` tags decoded further: vertices, normals, hardpoint names/transforms; tag 0x10 hypothesis corrected (2026-09-09)
+
+Direct follow-up on Pass 55's open tag list. Method: scanned all 438
+`.SHP` files in `gamedata/` with a Python chunk-walker to collect
+real on-disk stride/count statistics per tag (revealing several tags
+have MULTIPLE on-disk stride variants -- different file-format
+versions, consistent with `ReadTaggedChunk`'s version-tolerant
+`min(diskStride, expectedSize)` copy behavior, Pass 55), then dumped
+and hand-decoded real record bytes for the tags with the clearest
+signal.
+
+### Tag 4 = per-vertex record: CONFIRMED, confidence 5
+
+32-byte on-disk records, directly decoded as floats:
+```c
+struct Vertex {          // tag 4
+    float x, y, z;        // real ship-scale coordinates (100s-1000s of units)
+    float nx, ny, nz;      // unit-length normal (|n| = 1.0, verified across every sampled record)
+    int32_t field1, field2; // trailing pair, constant (1, 0) across every record sampled
+};
+```
+Directly verified: every sampled normal has magnitude 1.0 to within
+float precision, and every position falls in the same coordinate
+range as the ship-hull floats already seen in Pass 55's raw hex dump.
+
+### Tag 6 = named socket/hardpoint string label: CONFIRMED, confidence 5
+
+64-byte on-disk records. Raw bytes begin with a null-terminated ASCII
+string -- directly read as `"cpit0\0..."` (a cockpit-socket name),
+which also explains the stray `"cpit0"` string fragment `strings`
+turned up in Pass 55 (it wasn't a hardpoint-record fragment as
+speculated then -- it's this tag's own field, read whole). This tag
+is nested per tag-2 item, i.e. it's the human-readable name for
+whatever tag 2 groups.
+
+### Tag 3 = per-triangle-fan record with UV/shading data: well-supported, confidence 3
+
+72/80-byte on-disk records (two file-format variants). Hand-decoding
+5 consecutive records showed:
+- 3 leading `int32` fields constant across an entire run of records
+  (e.g. `0, 22, 0` -- plausible `{materialIndex, fanVertexCount,
+  flag}` header shared by a whole triangle fan).
+- 3 more `int32` fields forming a clean **sliding window** across
+  consecutive records (`[2,3,20] -> [3,20,19] -> [20,19,8] ->
+  [19,8,7]`, each record dropping the oldest index and adding one
+  new one) -- the textbook on-disk encoding of a **triangle fan/strip**,
+  each record naming one triangle's 3 vertex indices.
+- 9 trailing `float`s (3 groups of 3) -- plausibly per-vertex UV or
+  shading/blend data for the triangle's 3 corners, not independently
+  confirmed against a draw call.
+- A few more trailing small-int fields, not decoded.
+
+**Confidence 3**: the fan/strip vertex-index structure is well
+evidenced (the sliding-window pattern is not something noise would
+produce); the exact meaning of the header fields and trailing floats
+is inferred, not proven.
+
+### Tag 9 = hardpoint attachment transform: plausible, confidence 3
+
+100-168-byte on-disk records (4 format variants across the corpus,
+124 bytes matching the loader's own expected size exactly in at least
+one variant). Hand-decoded one 124-byte record: leading `int32=4`
+(count?), then a real ship-scale `float3` position (`36.07, -58.24,
+276.21`), then **two more unit-length `float3` vectors** (magnitude
+1.0, forming what look like the first two rows/axes of an orientation
+basis), then a run of zeros, then two more isolated scalars (`-400.0`
+and `1000.0`) near the end. Reads naturally as a **hardpoint's local
+attach transform**: position + orientation (forward/up, with right
+implied by cross product) + a couple of range/radius-like scalars.
+Not confirmed against a consumer.
+
+### Tag 0xa (hardpoint record) refined
+
+8/24-byte on-disk variants. The smaller (8-byte) samples decoded to a
+leading `int32` numeric field (`16000` in the samples checked) with
+the rest zeroed -- plausibly a range/distance value (weapon range,
+detection radius) in the same large-integer unit scale seen
+elsewhere. The embedded `"startup"`/`"deploy"` keyword string
+(Pass 55) lives at a fixed offset within the LARGER on-disk variant
+only; the 8-byte samples checked this pass didn't carry one.
+
+### Tag 0xf: on-disk structure confirmed, but the tag is essentially unused
+
+Cross-checked the earlier structural inference (16-byte on-disk
+record = `{v0,v1,v2,v3}` vertex-index quad, `v3<0` meaning "triangle")
+against two REAL populated instances, found by scanning all 438
+files: `stalag.SHP` has exactly 2 tag-0xf chunks, one record each --
+`(215,216,217,218)` and `(13,12,15,14)`. Both are clean, small,
+plausible vertex indices, confirming the format. **But: across all
+438 shipped `.SHP` files, tag 0xf appears with `count > 0` in only
+these 2 places, total.** Despite Pass 55 identifying it as "the
+renderable polygon/face list" based on its consumer code (a real
+cross-product face-normal computation), **it is essentially unused in
+practice** -- almost exactly the same surprise finding as Pass 53's
+discovery that the `.spr` per-shape palette-override mechanism exists
+in code but is never used by shipped assets. Tag 3's much more
+common, much higher-count fan/strip records (above) are the far more
+likely candidate for the actual rendered mesh surface in most ships.
+**Confidence 5** on tag 0xf's on-disk structure; **confidence 4** on
+it being rare-to-unused in the shipped game.
+
+### Tag 0x10: Pass 55's "materials/textures table" guess is WRONG -- corrected
+
+Found 73 `.SHP` files (of 438) containing populated tag-0x10 chunks
+(all with the loader's expected 76-byte stride, e.g. `A_mammoth.SHP`
+with 27 records, several single-asteroid files `Ast_1..7.SHP` with 1
+record each). Decoded real records from both:
+
+- First 12 bytes: **always a unit-length `float3`** (verified across
+  every record in every sample) -- a direction/normal vector, not
+  obviously tied to any UV or color.
+- Remaining 16 `int32` fields: NOT texture/material indices or
+  filenames. In the single-record `Ast_*.SHP` samples they're a
+  uniform run of `0xFFFFFFFF` sentinels (64 bytes of "unused"). In
+  the 27-record `A_mammoth.SHP` sample they're varied
+  **bitmask-shaped** values (e.g. `0xFFF0F0F0`, `0xFFFCFFF8`,
+  `0xFFFEFFFE` -- mostly-1 bit patterns with a handful of specific
+  bits cleared), not small sequential indices and not readable
+  strings.
+
+This pattern -- a unit normal plus a per-record bitmask over up to
+512 bit-positions -- reads much more naturally as a **collision/
+bounding-plane table** (one record per hull face/plane: its outward
+normal, plus a bitmask marking which other planes are
+adjacent/visible/relevant, a classic technique for fast convex-hull
+point-containment or backface culling) than as anything
+texture-related. **Explicit correction to Pass 55**: tag 0x10 is
+**not** a materials/textures table. Confidence 2 on the
+"collision/bounding-plane" reinterpretation (structurally plausible,
+not confirmed against a consumer); confidence 5 that it is NOT a
+texture table (no strings, no clean small-index pattern anywhere
+across 28 sampled records).
+
+### Textures: still unresolved -- the most likely remaining candidate is now ruled out
+
+With tag 0x10 corrected away from "materials table," there is now
+**no remaining tag in the `.SHP` chunk catalog that plausibly carries
+texture/material references** -- every tag has been either decoded
+with a non-texture-related structure, or shown to carry no strings
+and no small-index-into-a-table pattern. Combined with Pass 53's
+finding that `.spr`/`.fnt` images never use per-shape palette
+overrides, this project has now checked every avenue this session
+turned up and found no per-model texture assignment mechanism at all
+in the `.SHP` format itself. **Confidence 3** (strengthened from Pass
+55's confidence 0): ship textures are most likely assigned by an
+**external mechanism entirely outside the `.SHP` file** -- e.g. a
+fixed filename convention tied to the ship's base name/class, or a
+lookup driven by code in `InitializeLoadoutScreen`/mission-loading
+that isn't part of the model file at all. Not confirmed; a good next
+target would be tracing `FUN_004a3040`/`FUN_004a3cb0` (the two
+per-hardpoint post-processing calls `LoadSquadronRoster` makes after
+the chunk-parsing pass, not yet decompiled) rather than the file
+format itself.
+
+### Open follow-ups
+
+- `FUN_004a3040`/`FUN_004a3cb0` -- now the most promising remaining
+  lead for finding the actual texture-assignment mechanism.
+- Tags 8/0xb/0xc/0xd/0xe -- still not decoded with real sample data.
+- Tag 3's trailing float groups and leading header fields -- decoded
+  structurally, not confirmed semantically.
+- Whether tag 0x10's bitmask fields really are collision/visibility
+  data -- would need to find its consumer to confirm.

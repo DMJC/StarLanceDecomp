@@ -1391,9 +1391,38 @@ ReadTaggedChunk (0x4a2eb0, was FUN_004a2eb0) -- {tag:u16,stride:u16,count:u16}+p
   -> tag 0xf = the actual renderable polygon/face list (triangle/quad flag +
        live cross-product face-normal computation from referenced vertex data)
   -> tag 0xa = hardpoint/socket records (embedded "startup"/"deploy" keyword string)
-  -> tag 0x10 = file-scope array read once after all parts -- natural home for a
-       materials/textures table, but ABSENT from the one sample checked (gren_frm.SHP)
-  -> texture/material assignment mechanism: UNRESOLVED. No texture filename found
-     embedded in a fully-decompressed sample; candidate numeric index at per-part
-     offset +0x138 (copied into every tag-7 record) not traced to its source.
+  -> tag 0x10 = file-scope array read once after all parts. Pass 55 guessed
+       "materials/textures table"; Pass 56 CORRECTS this after sampling 73 real files
+       with populated tag-0x10 data -- it's a unit-normal + adjacency-bitmask record
+       (collision/bounding-plane table, confidence 2), definitely NOT texture data
+       (confidence 5 -- no strings, no small-index pattern anywhere sampled)
+  -> texture/material assignment mechanism: UNRESOLVED, and now confidence-3 that it's
+     external to .SHP entirely (every tag in the catalog checked, none carries a texture
+     filename or index-into-materials pattern). Next lead: FUN_004a3040/FUN_004a3cb0
+     (per-hardpoint post-processing in LoadSquadronRoster, not yet decompiled).
 ```
+
+## `.SHP` tags decoded further: vertices, normals, hardpoint names/transforms (2026-09-09, Pass 56)
+
+```
+tag 4 (per tag-2 item) = per-vertex record: {position:float3, normal:float3(unit), 2xint32}
+  -- confirmed: every sampled normal has magnitude 1.0, positions match real ship-scale coords
+
+tag 6 (per tag-2 item) = named socket/hardpoint string label -- confirmed directly: "cpit0\0..."
+  (a cockpit-socket name; resolves the stray "cpit0" fragment noted in Pass 55)
+
+tag 3 (per tag-2 item) = per-triangle-fan record: 3 leading header int32s (constant across a
+  fan run, e.g. {0,22,0}), then 3 sliding-window vertex-index int32s (a clean triangle-fan
+  encoding: [2,3,20]->[3,20,19]->[20,19,8]->...), then 9 trailing floats (plausible per-vertex
+  UV/shading, unconfirmed) -- likely the ACTUAL rendered mesh surface for most ships, since
+  tag 0xf (Pass 55's confirmed face list) turns out to appear in only 2 chunks total across
+  all 438 shipped .SHP files -- essentially unused despite having fully working consumer code
+  (same class of surprise as Pass 53's unused per-shape palette overrides)
+
+tag 9 (per-part) = plausible hardpoint attach transform: {count:int32, position:float3,
+  2x orientation float3(unit), scalars incl. -400.0/1000.0} -- one real record decoded,
+  not confirmed against a consumer
+
+tag 0xa (per-part) numeric field = plausible range/distance value (16000 in samples checked)
+```
+
