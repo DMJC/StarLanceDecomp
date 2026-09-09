@@ -4723,8 +4723,12 @@ per METHODOLOGY's live-debugging guidance).
   type 4 wasn't traced to see what name it resolves).
 - The mission-select cheat code's exact key sequence (needs
   `FUN_004bd570` internals or live debugging).
-- `DAT_0051dab4`'s two-mode Bink playback selection
-  (`*(DAT_00588730+0x162e) != 0x3e0`) -- not investigated.
+- ~~`DAT_0051dab4`'s two-mode Bink playback selection
+  (`*(DAT_00588730+0x162e) != 0x3e0`) -- not investigated.~~ **Resolved
+  in Pass 58**: it's a Bink `_BinkCopyToBuffer` RGB555-vs-RGB565
+  output-format flag, not palette-related. See Pass 58 below for the
+  full writeup (also answers "do `.bik` files contain/set a palette?" --
+  no).
 
 ## Pass 34 -- `CheckKeyEdgeState` decoded; the "CTRL+POTATO" cheat code confirmed (2026-09-08)
 
@@ -7466,3 +7470,54 @@ the "comm chatter" interpretation from earlier passes. **Confidence
   `ApplyShieldDamage`/`ApplyComponentDamage` at runtime and watch
   whether damage against a Spectral-Shielded target's dominant threat
   type actually changes.
+
+## Pass 58 -- Do `.bik` files contain/set a palette? No -- confirmed directly (2026-09-09)
+
+Direct question. Answered definitively from two independent angles:
+
+**1. The import table.** `Lancer.exe` imports exactly 12 Bink SDK
+functions: `_BinkOpen@8`, `_BinkOpenMiles@4`, `_BinkClose@4`,
+`_BinkWait@4`, `_BinkDoFrame@4`, `_BinkNextFrame@4`,
+`_BinkCopyToBuffer@28`, `_BinkGoto@12`, `_BinkPause@8`,
+`_BinkSetFrameRate@8`, `_BinkSetSoundSystem@8`, `_BinkSetVolume@8`.
+**There is no `BinkGetPalette`/`BinkSetPalette`-shaped import anywhere
+in the binary** -- confirmed via a full import-table listing, not a
+targeted string search that could miss an unusual name.
+
+**2. `DAT_0051dab4`, the previously-unresolved "two-mode Bink playback
+selection" flag** (open follow-up since the VR-loop passes), is now
+decoded. It's the 7th argument to every `_BinkCopyToBuffer_28` call
+site (the SDK's real `flags` parameter). Traced all 4 write sites
+(`FUN_00438d50`, `RunShipInteriorVRLoop` x2, `FUN_0043efc0`) via
+`get_assembly_context` -- every one computes it identically:
+
+```asm
+CMP dword ptr [rendererState+0x162e], 0x3e0   ; compare against 0x03E0
+SETNZ AL
+ADD  EAX, 3                                    ; -> 3 if equal, 4 if not
+MOV  [DAT_0051dab4], EAX
+```
+
+`0x03E0` is the classic RGB555 **green-channel bitmask** (5-5-5 16-bit
+color; RGB565's green mask would be `0x07E0`). `rendererState+0x162e`
+sits directly among the already-documented pixel-format bit-shift
+constants (`+0x1626`/`+0x162a`/`+0x1632`/`+0x1636`/`+0x163e`/`+0x1642`,
+Pass 25/30) used everywhere else in this codebase to pack RGB triples
+into the display's native format. **`DAT_0051dab4` is a 16-bit
+RGB555-vs-RGB565 output-surface-format selector for Bink's own RGB
+blit target -- not a palette mode.** (The one other bit ever OR'd into
+it, `0x80000000` for reverse-playback transitions, is a separate
+flip/direction flag, also not palette-related.)
+
+### Conclusion
+
+**No.** `.bik` files do not contain or set a palette in this game.
+Bink's internal codec is YUV-based and `_BinkCopyToBuffer` blits
+decoded frames directly as RGB555/RGB565 pixels into the game's own
+framebuffer -- entirely independent of the `.ccb`-driven 8-bit master
+palette system (Pass 30/54) that `.spr`/`.fnt` 2D assets and the menu
+system use. Video playback and paletted 2D rendering are two
+completely separate color pipelines in this engine; nothing connects
+them. **Confidence 5** -- based on the full import table (an absence
+that's easy to verify exhaustively) plus direct decoding of the one
+flag that could plausibly have been palette-related.

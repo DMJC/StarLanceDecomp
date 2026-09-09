@@ -1464,3 +1464,23 @@ QueueCommChatterEvent (0x415270, was FUN_00415270)
   <- depended on by: ApplyShieldDamage, ApplyComponentDamage (fired on friendly-fire and
      wingman-component-hit events)
 ```
+
+## Do `.bik` files contain/set a palette? No (2026-09-09, Pass 58)
+
+```
+Lancer.exe's Bink imports (12 total, full import table checked): _BinkOpen@8,
+  _BinkOpenMiles@4, _BinkClose@4, _BinkWait@4, _BinkDoFrame@4, _BinkNextFrame@4,
+  _BinkCopyToBuffer@28, _BinkGoto@12, _BinkPause@8, _BinkSetFrameRate@8,
+  _BinkSetSoundSystem@8, _BinkSetVolume@8 -- NO BinkGetPalette/BinkSetPalette import
+
+DAT_0051dab4 (_BinkCopyToBuffer's flags arg, 4 write sites: FUN_00438d50,
+  RunShipInteriorVRLoop x2, FUN_0043efc0) = (rendererState+0x162e != 0x03E0) ? 4 : 3
+  -> 0x03E0 = RGB555 green-channel bitmask; +0x162e is among the already-documented
+     pixel-format bit-shift constants (Pass 25/30) -- this is an RGB555-vs-RGB565
+     output-format selector, NOT a palette mode. (0x80000000, the only other bit ever
+     OR'd in, is a separate reverse-playback flag.)
+
+Conclusion: Bink video is a completely separate RGB color pipeline from the game's
+  .ccb-driven 8-bit master-palette system (Pass 30/54) used by .spr/.fnt/menus --
+  the two never intersect.
+```

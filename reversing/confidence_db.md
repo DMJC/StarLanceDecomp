@@ -1655,3 +1655,10 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - `FUN_0048c580`/`FUN_004bb980`/`FUN_004bb920` not decompiled.
 - `object+0x678`'s UI/HUD consumer not traced.
 - Spectral Shields enforcement: a live-debugging pass is the recommended next step per METHODOLOGY, since static search is now exhausted.
+
+## Pass 58 -- Do `.bik` files contain/set a palette? No (2026-09-09)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `.bik` videos do not contain or set a palette | 5 | Full import table has no `BinkGetPalette`/`BinkSetPalette`-shaped entry (12 real Bink imports catalogued, none palette-related). `_BinkCopyToBuffer`'s only variable flags argument (`DAT_0051dab4`) decoded as an RGB555-vs-RGB565 output-surface-format selector, not a palette mode. |
+| `DAT_0051dab4` = 16-bit RGB555/RGB565 selector for Bink's blit target | 5 | All 4 write sites compute it identically: `(rendererState+0x162e != 0x03E0) ? 4 : 3` -- `0x03E0` is RGB555's green-channel bitmask, and `+0x162e` sits directly among the already-documented pixel-format bit-shift constants (Pass 25/30). |
