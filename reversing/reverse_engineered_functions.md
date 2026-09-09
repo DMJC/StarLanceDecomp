@@ -6323,8 +6323,10 @@ two mode-specific windows turned out to be adjacent slices of one
 
 Two tables via `HitTestRectArray`: an 8-entry main button row
 (`&stack0xffffff5c`, matching the 8 switch cases already documented in
-Pass 46 -- difficulty A/B, load-existing-pilot, confirm-new-pilot,
-exit, reset, options-dialog, toggle-name-list) whose raw coordinates
+Pass 46 -- **pilot gender male/female** (corrected in Pass 62; was
+mislabeled "difficulty A/B" here), load-existing-pilot,
+confirm-new-pilot, exit, reset, options-dialog, toggle-name-list) whose
+raw coordinates
 weren't cleanly extractable from the decompile's stack-offset notation
 this pass, and a **10-entry name/callsign-picker list**
 (`&local_64`, only shown when `DAT_005202b8` is toggled on), read
@@ -7846,3 +7848,119 @@ file examined this pass**; its provenance is still an open question.
 - Pass 30's "Block B" (`.ccb`'s own real content, `renderState+0x1606`)
   -- still not independently pinned down now that it's confirmed NOT
   to be the RGB palette.
+
+## Pass 62 -- The campaign pilot setup flow decoded, correcting a mislabel from Pass 46 (2026-09-09)
+
+Direct request: reverse engineer the campaign pilot (new-game/career)
+setup flow. Full re-decompile of `RunNewGameSetupScreen` (`0x430490`)
+and its two direct callees turned up a real correction to Pass 46's
+button-case labels, plus the actual pilot-profile creation mechanics.
+
+### Correction: cases 0/1 are pilot GENDER, not "difficulty A/B"
+
+Pass 46 labeled `RunNewGameSetupScreen`'s hotspot cases 0 and 1
+"difficulty A/B" from context alone. Tracing what they actually write
+(`g_wPilotGenderIsFemale`/`g_dwNewPilotGenderIsFemaleUI`, renamed this
+pass from `DAT_00562f16`/`DAT_0051da54`) and where those fields get
+read shows otherwise:
+
+- `FUN_004536d0` (a format-string picker) chooses between two literal
+  templates depending on `g_wPilotGenderIsFemale`: **`"mp%s"`** (male
+  pilot) when 0, **`"fp%s"`** (female pilot) otherwise -- read directly
+  from memory, not inferred.
+- `FUN_00441100` (sets up the in-game pilot-record/kills display,
+  loading `inter\itac\kills.spr`) derives a display field directly
+  from the same flag.
+- `g_dwNewPilotGenderIsFemaleUI` additionally gates which portrait
+  shape gets drawn on the setup screen itself (a visible male/female
+  preview toggle).
+
+**Confidence 5** -- cases 0/1 are the **pilot gender selector**
+(Male/Female), not a difficulty setting. This is an explicit
+correction to Pass 46's writeup, not a silent edit.
+
+### The real difficulty selector: `RunDifficultySelectDialog` (`0x430300`, was `FUN_00430300`)
+
+Reached via `RunNewGameSetupScreen` case 3 ("confirm new pilot" --
+see below). A small 4-hotspot modal:
+
+- case 0: confirm (returns 1 -- proceed with pilot creation at the
+  currently-selected difficulty)
+- case 1 / Escape: cancel (returns 0, back to the setup screen)
+- case 2/3: cycle `g_wCampaignDifficulty` (renamed from
+  `DAT_00562f14`) backward/forward through exactly 3 values, wrapping
+  0-2
+
+`g_wCampaignDifficulty` is read directly by `ScaleDamageForDifficulty`
+(documented many passes ago as implementing the exact Easy/Normal/Hard
+damage curve) -- **confirming this dialog is the real, only, 3-tier
+campaign difficulty picker**, cleanly separate from the gender toggle
+it's easy to conflate it with on the same parent screen.
+
+### `RunNewGameSetupScreen`'s full, corrected button map
+
+| Case | Action |
+|---|---|
+| 0 | Set pilot gender = Male |
+| 1 | Set pilot gender = Female |
+| 2 | Load Existing Pilot -> exits to screen `0xd` (`RunSaveGameBrowserScreen`) |
+| 3 | Confirm New Pilot -> opens `RunDifficultySelectDialog`; on confirm, calls `LoadPlayerProfile` and returns 1 (proceed into the game) |
+| 4 | Exit to main menu |
+| 5 | Reset (re-arms the cursor-blink/redraw flag; likely "clear typed callsign", not independently confirmed) |
+| 6 | Options dialog |
+| 7 | Toggle the recent-name list panel (`DAT_005202b8`, confirmed in Pass 48) |
+
+### `LoadPlayerProfile` (`0x4751b0`): loads OR silently creates a new pilot's `profile.bin`
+
+The function that actually commits a new pilot into existence.
+Zeroes a large in-memory profile structure (mission/campaign-state
+fields, a small AI-wingman/roster-status sub-array with `0xffff`
+sentinel entries) then tries to open `"profile.bin"` for read
+(`FUN_004d02ef`, an `fopen`-style wrapper) in the CURRENT directory --
+which, following this codebase's established convention (`saves\
+<callsign>\...` seen throughout the save-browser work), is set to a
+per-callsign subdirectory before this call.
+
+- **If `profile.bin` exists**: reads it in directly (`FUN_004d0003`,
+  an `fread`-style call, `0xd0`=208 bytes) and returns -- an existing
+  pilot's campaign progress is restored as-is.
+- **If it does NOT exist**: this is the actual **new-pilot-creation
+  path**. Sets sensible brand-new-career defaults --
+  `DAT_00562dc8=1` (start at mission 1), all stat/score fields zeroed,
+  the pilot's displayed name defaulted to a localized string
+  (`GetLanguageString(0xbf)`, plausibly "Rookie" or similar) -- then
+  immediately **writes a fresh `profile.bin`** (`FUN_004d02ef` opened
+  for write, `FUN_004d0003` writing the same 208 bytes back out). A
+  brand-new callsign therefore gets its `profile.bin` created the
+  FIRST time `LoadPlayerProfile` runs for it, not via any separate
+  explicit "create pilot" step.
+
+**Confidence 4** on the overall load-or-create mechanism (directly
+read); confidence 2 on the exact meaning of most individual
+zeroed/defaulted fields within the 208-byte structure (only the
+mission-index and name fields were identified with confidence).
+
+### The callsign/name entry itself
+
+Already characterized structurally in Pass 49: typing a callsign on
+this screen checks/updates a 10-slot "recent pilot names" array
+(`DAT_005d5e8c`, 50-byte stride, via `FUN_00430b80`) that backs the
+scrollable name-list panel (toggled by case 7 above, coordinates
+documented in Pass 48). The 8-entry main-button-row coordinates
+(including this gender toggle and the confirm button) remain
+unresolved per Pass 50's decompiler-limitation finding -- unaffected
+by this pass's semantic corrections, which came from data-flow
+tracing rather than coordinate recovery.
+
+### Open follow-ups
+
+- `profile.bin`'s remaining ~190 bytes of fields -- only the mission
+  index and name were identified; the rest (stats, unlocks, per-wingman
+  roster status) not mapped field-by-field.
+- Case 5's exact behavior ("Reset") -- mechanism read, semantic
+  meaning ("clear callsign"?) not independently confirmed.
+- Whether choosing gender actually changes anything beyond the
+  `"mp"`/`"fp"` asset-name prefix and the kills-screen display field --
+  e.g. whether it selects a different voice-line set or portrait art
+  set wholesale (plausible given the prefix convention, not traced
+  further).

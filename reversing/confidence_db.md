@@ -89,7 +89,7 @@ UI-widget-position tables) — documented at the structural/purpose level
 | 7 | `RunMissionBriefingScreen` (0x437010) | 3 | Documented in the previous session — mission briefing movie/speech, hands off to the ship-interior VR loop. |
 | 8 | `RunNetworkDisconnectScreen` (0x43ca30) | 3 | Trivial: `Sleep(1000)` then a network-cleanup call (`FUN_004abde0`), returns to screen 3 (Options). A "disconnecting..." pause screen. |
 | 10/11 | `RunSaveLoadScreen` (0x43ca50) | 2 | Shared Save/Load Game screen, mode selected by `DAT_0051d54c` (1=save, 0=load — same flag pattern as the 17/18 pair). Builds a save-slot grid from a large hardcoded UI-layout table; load path waits on network/deathmatch state (`DAT_005dccfc`/`DAT_00582e8c`) before proceeding, save path formats a save name via a resource string. |
-| 12 | `RunNewGameSetupScreen` (0x430490) | 2 | Campaign setup: difficulty toggle, an inline pilot-name text editor (indexes a per-character-class string table at `DAT_005d5e8c`), routes to the save browser (screen 13) or starts the campaign (`FUN_00430300`, returns 1 to signal "profile loaded, begin game"). |
+| 12 | `RunNewGameSetupScreen` (0x430490) | 5 (corrected in Pass 62) | Campaign setup: **pilot gender toggle** (was mislabeled "difficulty toggle" here -- the real 3-tier difficulty picker is a separate modal, `RunDifficultySelectDialog`/was `FUN_00430300`), an inline pilot-name text editor (indexes a per-character-class string table at `DAT_005d5e8c`), routes to the save browser (screen 13) or starts the campaign (`RunDifficultySelectDialog` -> `LoadPlayerProfile`, returns 1 to signal "profile loaded, begin game"). |
 | 13 | `RunSaveGameBrowserScreen` (0x431730) | 3 | The actual save-file scanner/browser: builds `saves\<pilotname>GAME_%02d.IFF` paths, reads each slot's `SAVE`/`MISN` IFF chunks (FourCC `0x45564153`="SAVE", `0x5353494d`="MISS") for a thumbnail and timestamp (`GetFileTime`→`GetDateFormatA`, formatted as `"<hour>:<minute> <date>"`), lists up to 10 slots with scroll support. Shared/called directly by `RunSaveLoadScreen` mid-flow as well as being screen 13 itself. |
 | 14 | `RunMultiplayerSetupScreen` (0x432fc0) | 3 | Multiplayer connection-type menu. Confirmed via a literal `ShellExecuteA(..., "http://www.zone.com/starlancer", ...)` call — Star Lancer used the **MSN Gaming Zone** for online matchmaking, a real, historically-accurate detail. Offers Direct-connect / Zone.com (launches the web browser) / Host / Join / other connection types, plus a scrollable found-session list connecting via `FUN_004bc720`. |
 | 15 | `RunVideoOptionsScreen` (0x42e9b0) | 3 | Video/display options. Confirmed via `[Device]` `gamma`/`Transitions` ini keys. Directly manipulates the SAME device/mode table (`DAT_00595fe8`/`DAT_00595fec`/`DAT_00595ff0`) populated by the `dmodes.bin` loader documented in an earlier session — cross-confirms that table's role as the enumerated display-mode list. Also cycles texture/geometry detail levels, lightmap toggle, and 3D provider (all `starlancer.ini` `[Device]` settings read at bootstrap). |
@@ -1691,3 +1691,18 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 
 - `RunMultiplayerDebriefScreen`'s relationship to the main mission-completion flow -- not traced.
 - Whether `WinMain`'s 3 call sites for `RunMultiplayerDebriefScreen` have their own surrounding `.bik` transitions.
+
+## Pass 62 -- Campaign pilot setup decoded; corrects Pass 46's "difficulty A/B" mislabel (2026-09-09)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `RunNewGameSetupScreen` cases 0/1 = pilot gender (male/female), NOT difficulty | 5 | Corrects Pass 46. Directly confirmed: `g_wPilotGenderIsFemale` (was `DAT_00562f16`) selects `"mp%s"`/`"fp%s"` format strings and gates the in-game pilot-record screen setup and the setup screen's own portrait preview. |
+| `RunDifficultySelectDialog` (0x430300, was `FUN_00430300`) = the real 3-tier Easy/Normal/Hard picker | 5 | `g_wCampaignDifficulty` (was `DAT_00562f14`), cycled 0-2 by this dialog, read directly by `ScaleDamageForDifficulty`. |
+| `LoadPlayerProfile` loads an existing `profile.bin` or silently creates a new one with defaults (mission 1, zeroed stats) | 4 | Directly read: tries `fopen`-style read first, falls to write-fresh-defaults on failure. |
+| `profile.bin`'s field layout beyond mission-index/name | 1 | Only 2 of ~208 bytes' worth of fields identified. |
+
+### Open follow-ups
+
+- `profile.bin`'s remaining fields (stats, unlocks, per-wingman roster status) not mapped.
+- Case 5 ("Reset")'s exact semantic meaning -- mechanism read, not confirmed.
+- Whether gender selection affects anything beyond the `mp`/`fp` asset prefix and kills-screen display field.

@@ -1567,3 +1567,31 @@ NOT referenced anywhere in Lancer.exe (checked exhaustively): FADIGOPT.BIK, IGOP
   (only the .tga backdrop variant exists), MUL2OPT.BIK, MULFA2OPT.BIK, MULTI2MM.BIK,
   OLDOPFAD2MM.BIK, SIN2OPT.BIK, SINFA2OP.BIK -- unused/leftover assets
 ```
+
+## Campaign pilot setup decoded; corrects a mislabel (2026-09-09, Pass 62)
+
+```
+RunNewGameSetupScreen (0x430490)
+  case 0/1 -> g_wPilotGenderIsFemale / g_dwNewPilotGenderIsFemaleUI (was DAT_00562f16/
+    DAT_0051da54) -- CORRECTED from Pass 46's "difficulty A/B": this is pilot gender
+    (0=male picks "mp%s" format/assets, nonzero=female picks "fp%s", confirmed via
+    FUN_004536d0 and FUN_00441100's pilot-record-screen setup)
+  case 2 -> exit to RunSaveGameBrowserScreen (screen 0xd) -- Load Existing Pilot
+  case 3 -> RunDifficultySelectDialog (was FUN_00430300) -> on confirm, LoadPlayerProfile
+  case 4 -> exit to main menu
+  case 5 -> "Reset" (mechanism only: re-arms cursor-blink flag)
+  case 6 -> options dialog
+  case 7 -> toggle recent-name list panel (DAT_005202b8, Pass 48)
+
+RunDifficultySelectDialog (0x430300, was FUN_00430300) -- the REAL 3-tier difficulty picker
+  -> g_wCampaignDifficulty (was DAT_00562f14), cycled 0(Easy)/1(Normal)/2(Hard)
+  <- depended on by: ScaleDamageForDifficulty (reads g_wCampaignDifficulty directly)
+
+LoadPlayerProfile (0x4751b0)
+  -> depends on: FUN_004d02ef (fopen-style), FUN_004d0003 (fread/fwrite-style, 0xd0=208
+     bytes), GetLanguageString (default pilot name, string 0xbf)
+  -> tries to read "profile.bin" from the current (per-callsign) directory; on failure,
+     zeroes/defaults the profile (mission index = 1, stats zeroed) and WRITES a fresh
+     profile.bin -- this is the actual new-pilot-creation path, not a separate step
+  <- depended on by: RunNewGameSetupScreen case 3 (after RunDifficultySelectDialog confirms)
+```
