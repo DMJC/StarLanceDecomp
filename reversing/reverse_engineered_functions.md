@@ -7350,3 +7350,119 @@ format itself.
   structurally, not confirmed semantically.
 - Whether tag 0x10's bitmask fields really are collision/visibility
   data -- would need to find its consumer to confirm.
+
+## Pass 57 -- Combat engine: Spectral Shields enforcement site exhaustively searched (not found); 3 damage-pipeline helpers decoded, one mislabeled function corrected (2026-09-09)
+
+Direct follow-up on the two oldest open items in the combat-engine
+thread: the still-missing `object+0x670`/ship-flags-`0x8000000`
+Spectral Shields enforcement READ site (flagged since the
+twenty-fifth/twenty-sixth passes), and the three damage-pipeline
+helper functions `ApplyShieldDamage`/`ApplyComponentDamage` call but
+never opened (`FUN_00474c80`, `FUN_00474e00`, `FUN_00415270`).
+
+### Spectral Shields damage-blocking: exhaustively searched, genuinely not found
+
+Ran `search_byte_patterns` for the exact 4-byte displacement encoding
+`70 06 00 00` (offset `0x670`) across the **entire binary**: exactly 2
+hits, both already known WRITE sites (`SetSpectralShieldsActive`'s
+local computation, `ProcessNetworkMessage`'s network-receive write).
+Zero additional hits anywhere. Separately searched for the flag
+constant `0x8000000` (bytes `00 00 00 08`) restricted to the
+0x400000-0x4b0000 code range (where the combat/weapon/damage
+functions live): the only two code-range hits are inside
+`SetSpectralShieldsActive` itself (setting/clearing the bit) and
+`ProcessNetworkMessage`'s corresponding network write -- nowhere else.
+
+Directly re-decompiled the three most plausible enforcement sites --
+`ApplyShieldDamage`, `ApplyComponentDamage`, and `ProcessProjectileImpact`
+-- and confirmed by inspection that **none of them reference
+`object+0x670` or ship-flags bit `0x8000000` anywhere in their
+bodies.** `ApplyShieldDamage`/`ApplyComponentDamage` both check only
+the pre-existing invulnerability bit `0x200000` (a different bit,
+already documented).
+
+**Confidence 5, a real negative finding, not just "not found yet":**
+Spectral Shields' selected "biggest non-superweapon threat" value
+(`object+0x670`) and its active-state flag (`0x8000000`) are computed,
+stored, and network-synchronized, but **nothing in this executable
+ever reads either of them back to actually block, reduce, or redirect
+damage.** Given how thoroughly this was searched (full-binary
+displacement scan, restricted flag-constant scan, plus direct
+inspection of every plausible consumer function), the honest
+conclusion is that either (a) Spectral Shields' "block the biggest
+threat" behavior isn't implemented as a discrete damage-blocking check
+at all -- perhaps the ability's real mechanical effect is something
+else this project hasn't yet identified (e.g. a temporary shield-value
+boost, an AI-targeting avoidance effect, or purely cosmetic/UI), or
+(b) the check exists but is built from instructions this pattern-based
+search can't catch (e.g. a bit-test instruction with a computed bit
+index rather than a literal 32-bit immediate). This closes out the
+"what's still open" item from the twenty-fifth session with a
+definitive, well-evidenced answer rather than leaving it as a vague
+"not found yet."
+
+### Correction: `FUN_00474c80` is NOT a scoring/kill-credit function -- it's the friendly-fire warning voice-line escalation tracker
+
+Earlier passes (documented at `ApplyShieldDamage`'s writeup) guessed
+this was "scoring/kill-credit" based only on its call-site guard
+condition. Decompiling it directly shows otherwise: it accumulates
+damage dealt (`_DAT_00562cec += damage`) and, once a threshold (800.0
+total) and a per-tick cooldown are both satisfied, escalates a warning
+STAGE counter and plays one of three voice lines chosen by that stage
+-- string table entries literally named `"ff_001.ut"`, `"ff_005.ut"`,
+`"ff_009.ut"` (`"ff"` = **friendly fire**). Combined with its actual
+call-site guard (`attacker == local player AND target's team flag ==
+0`, i.e. hitting a friendly), this is unambiguously a **"stop shooting
+your own team" escalating voice-warning system**, not a scoring
+mechanism. Renamed `FUN_00474c80` -> `TrackFriendlyFireWarning`.
+**Confidence 5** -- directly read, string-table-confirmed. This is an
+explicit correction per METHODOLOGY, not a silent edit; the earlier
+"scoring/kill-credit" guess in `ApplyShieldDamage`'s writeup above is
+now known wrong.
+
+### `SetComponentDestroyedNotification` (`0x474e00`, was `FUN_00474e00`) -- decoded
+
+```c
+void __fastcall SetComponentDestroyedNotification(int isNetworkHostEvent);
+```
+
+Small: sets a new local-player-ship field, `object+0x678`, to `1`
+(a "just lost a subsystem" notification flag, plausible HUD-warning
+trigger for the not-yet-traced consumer), or to `2` plus a network
+broadcast (`FUN_004bb920`) when `isNetworkHostEvent==1` in a hosted
+multiplayer session. **Confidence 4** on the mechanism, confidence 2
+on `object+0x678`'s downstream consumer (not traced).
+
+### `QueueCommChatterEvent` (`0x415270`, was `FUN_00415270`) -- decoded
+
+```c
+void __fastcall QueueCommChatterEvent(short eventType, short context);
+```
+
+Allocates a slot via `FUN_00402860` (plausibly a sibling to the
+already-documented AI-event-queue allocator, `QueueAiEvent`/`0x402660`
+-- not confirmed to be the exact same queue), writes the two
+`short` arguments into it, then calls `FUN_0048c580` (immediate
+processing?) and `FUN_004bb980` (network broadcast, matching the
+`Send*`-pattern naming convention of many already-documented
+functions). Matches its call sites' context (always fired alongside
+friendly-fire and component-destruction events) well enough to keep
+the "comm chatter" interpretation from earlier passes. **Confidence
+2** -- the queue mechanism is directly read, but the exact meaning of
+`eventType`/`context` and the target queue's relationship to
+`QueueAiEvent` are not confirmed.
+
+### Open follow-ups
+
+- `FUN_00402860` (the event-slot allocator `QueueCommChatterEvent`
+  uses) -- not decompiled; would settle whether this is the same
+  queue as `QueueAiEvent` or a separate one.
+- `FUN_0048c580`/`FUN_004bb980`/`FUN_004bb920` -- not decompiled.
+- `object+0x678`'s actual UI/HUD consumer -- not traced.
+- Given Spectral Shields' damage-blocking enforcement genuinely
+  isn't findable via static search, a live-debugging pass (per
+  METHODOLOGY's guidance for exactly this situation) is the natural
+  next step if this mechanic becomes a priority again -- e.g. hook
+  `ApplyShieldDamage`/`ApplyComponentDamage` at runtime and watch
+  whether damage against a Spectral-Shielded target's dominant threat
+  type actually changes.

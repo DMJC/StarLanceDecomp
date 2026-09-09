@@ -1639,3 +1639,19 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - `FUN_004a3040`/`FUN_004a3cb0` (per-hardpoint post-processing in `LoadSquadronRoster`) -- now the most promising lead for texture assignment.
 - Tags 8/0xb/0xc/0xd/0xe still undecoded with real sample data.
 - Tag 0x10's bitmask fields -- would need to find its consumer to confirm the collision/visibility-table hypothesis.
+
+## Pass 57 -- Combat engine: Spectral Shields enforcement exhaustively searched (not found); 3 helpers decoded, one correction (2026-09-09)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| Spectral Shields' `object+0x670`/flag `0x8000000` -- never read anywhere for damage-blocking | 5 (negative finding) | Full-binary displacement scan (2 hits, both known writes) + restricted flag-constant scan + direct inspection of `ApplyShieldDamage`/`ApplyComponentDamage`/`ProcessProjectileImpact` -- no read found anywhere. |
+| `TrackFriendlyFireWarning` (0x474c80, was `FUN_00474c80`) -- friendly-fire voice-warning escalation, NOT scoring | 5 | Corrects a prior guess. String-table-confirmed (`"ff_001/005/009.ut"`), call-site-confirmed (attacker==local player, target's team flag==0). |
+| `SetComponentDestroyedNotification` (0x474e00) | 4 | Sets `object+0x678` notification flag; consumer not traced. |
+| `QueueCommChatterEvent` (0x415270) | 2 | Queues a 2-field event + triggers processing/network broadcast; exact field semantics and queue identity vs. `QueueAiEvent` unconfirmed. |
+
+### Open follow-ups
+
+- `FUN_00402860` (event-slot allocator) -- settle whether it's the same queue as `QueueAiEvent`.
+- `FUN_0048c580`/`FUN_004bb980`/`FUN_004bb920` not decompiled.
+- `object+0x678`'s UI/HUD consumer not traced.
+- Spectral Shields enforcement: a live-debugging pass is the recommended next step per METHODOLOGY, since static search is now exhausted.

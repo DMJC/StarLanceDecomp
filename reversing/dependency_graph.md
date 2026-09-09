@@ -1426,3 +1426,41 @@ tag 9 (per-part) = plausible hardpoint attach transform: {count:int32, position:
 tag 0xa (per-part) numeric field = plausible range/distance value (16000 in samples checked)
 ```
 
+
+## Spectral Shields enforcement: exhaustively searched, not found anywhere (2026-09-09, Pass 57)
+
+```
+object+0x670 / ship-flags bit 0x8000000 -- WRITTEN in exactly 2 places (both already
+  known: SetSpectralShieldsActive's local computation, ProcessNetworkMessage's network
+  write) and READ NOWHERE ELSE in the entire binary. Confirmed via:
+    - full-binary search_byte_patterns for the 0x670 displacement encoding (2 hits total)
+    - flag-constant 0x8000000 search restricted to the combat code range (2 hits, both
+      inside the same 2 functions above)
+    - direct inspection of ApplyShieldDamage / ApplyComponentDamage / ProcessProjectileImpact
+      (none reference either the field or the flag)
+  -> Confidence 5 negative finding: nothing in Lancer.exe reads this value/flag back to
+     actually block, reduce, or redirect damage. Recommended next step per METHODOLOGY:
+     live-debugging, not further static search.
+```
+
+## Combat-damage helper functions decoded (2026-09-09, Pass 57)
+
+```
+TrackFriendlyFireWarning (0x474c80, was FUN_00474c80) -- CORRECTS a prior "scoring/
+  kill-credit" guess. Real behavior: accumulates damage dealt to a friendly target,
+  escalates a 3-stage voice-warning ("ff_001/005/009.ut" -- "friendly fire") once a
+  damage threshold + cooldown are met. Called from ApplyShieldDamage/ApplyComponentDamage
+  when attacker==local player and target's team flag==0 (friendly).
+  <- depended on by: ApplyShieldDamage, ApplyComponentDamage
+
+SetComponentDestroyedNotification (0x474e00, was FUN_00474e00)
+  -> sets local-player-ship+0x678 = 1 (or 2 + network broadcast via FUN_004bb920 when
+     hosting) -- a "you lost a subsystem" notification flag; UI/HUD consumer not traced
+  <- depended on by: ApplyComponentDamage
+
+QueueCommChatterEvent (0x415270, was FUN_00415270)
+  -> depends on: FUN_00402860 (event-slot allocator, not decompiled -- may or may not be
+     the same queue as QueueAiEvent/0x402660), FUN_0048c580, FUN_004bb980 (network broadcast)
+  <- depended on by: ApplyShieldDamage, ApplyComponentDamage (fired on friendly-fire and
+     wingman-component-hit events)
+```
