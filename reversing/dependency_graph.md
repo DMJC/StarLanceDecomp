@@ -2055,8 +2055,60 @@ Shared per-frame primitives used by every category and the main tab bar:
     animation updater for a small widget struct (float @+0x14, counter @+0x18,
     redraw callback @+0x20); widget identity not resolved
 
-  <- open: sub-tab hotspot table's exact entry count/semantics
-  <- open: ItacCapShipsRenderPreview's 19-case switch (identical cases)
-  <- open: UpdateHoverAnimationWidget's widget struct
-  <- open: DAT_00588730+0x1ac's render-mode values
+  <- open: rel_cap2itac.bik/itac2pod_hud.bik/itac2dor.bik not connected to a gameplay trigger
+```
+
+## All 4 remaining open items resolved (2026-09-10, Pass 75)
+
+```
+Sub-tab table (0x4e96c4-0x4e96d3, 16 bytes) -- exactly 2 sub-tabs, 4 parallel
+  2-entry short arrays:
+    0x4e96c8: [0, 1]      hotspot-click-index -> sub-tab ID (identity)
+    0x4e96c4: [25, 24]    icon sprite index per sub-tab
+    0x4e96cc: [551, 478]  draw X per sub-tab
+    0x4e96d0: [59, 59]    draw Y per sub-tab (same row)
+  <- open: click-rect array for these 2 buttons not located (0x4e96b0-c3 doesn't
+     cleanly parse as one); semantic meaning of the 2 tabs not determined
+
+ItacCapShipsRenderPreview's switch -- CONFIRMED REAL via disassemble_function
+  (not a decompilation artifact as Pass 74 left open):
+  56-byte lookup table @ 0x423c74: (classID-1) -> group value, pattern
+    "groupN, groupN, 19(default)" repeating for N=0..18 (~19 groups of 3 classes)
+  -> selected group*3 (0,3,...,54) used ONLY for a first color/tint-setting draw
+     call; the actual icon draw right after uses the RAW class ID directly
+  -> genuine per-ship-class tint/highlight-group system, semantics of the
+     groups (faction? hull tier?) not determined
+
+UpdateHoverAnimationWidget's widget -- generic (also called from 0x42a4f2,
+  outside ITAC). Each ITAC call site passes a hardcoded literal address in
+  ECX -- one static widget instance per category, not a shared/parameterized
+  one. Debrief's instance (0x51d2e8) initialized in FUN_00424730 (called from
+  ItacEnterDebriefCategory):
+    +0x00 = sprite-surface handle (DAT_0052305c, one of RunItacScreen's setup
+            buffers)
+    +0x14 = float wiggle offset (already known)
+    +0x18 = direction counter (already known)
+    +0x20 = redraw callback = &LAB_00425220 (not decompiled)
+  Used alongside a category-specific 2nd hotspot table with LITERAL args
+  visible in disassembly (Debrief: ECX=0x4e4928, EDX=2 -- the prev/next-
+  mission page-turn buttons) -- likely animates hover feedback for these
+  small nav buttons, distinct from the main list-scroll hotspots.
+
+DAT_00588730+0x1ac -- RESOLVED: not a scalar render-mode flag, but the FIRST
+  FIELD of a bulk-copied 1299-dword (0x513, 5196-byte) video-mode descriptor
+  record. InitializeGraphicsDevice:
+    puVar6 = DAT_00588730 + 0x1ac
+    puVar5 = (&DAT_00595da0) + param_4 * 0x513   [device/mode table from
+                                                    EnumDisplayCardsFromDriver]
+    for i in 0x513: *puVar6++ = *puVar5++         [the SAME 1299-dword copy
+                                                     Pass 70 found, unplaced]
+  *(int*)(DAT_00588730+0x1ac) read back afterward: values 0/1/2 each call
+  LoadRendererBackendDriver (0x4cc470, was FUN_004cc470, self-identified via
+  its own "SR_driver_init" GetProcAddress string -- LoadLibraryA + call that
+  export) to load a renderer backend DLL; any other value skips the load
+  (true hardware acceleration, no driver DLL needed).
+  -> the 47 program-wide "+0x1ac" search_instructions hits were a RED HERRING:
+     almost all belong to unrelated structs at the same coincidental offset,
+     same lesson as Pass 70's "+0x50" investigation.
+  <- open: per-mode-value driver DLL name (implicit register arg, not traced)
 ```

@@ -1889,8 +1889,21 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 
 ### Open follow-ups
 
-- `DAT_00588730+0x1ac`'s render-mode values not independently mapped.
-- The sub-tab hotspot table's exact entry count/semantics.
-- `ItacCapShipsRenderPreview`'s 19-case switch (all cases decompile identically -- not confirmed as real behavior vs. decompilation artifact).
-- `UpdateHoverAnimationWidget`'s widget struct not identified.
 - `rel_cap2itac.bik`/`itac2pod_hud.bik`/`itac2dor.bik` fully placed structurally but not connected to a specific gameplay trigger (e.g. what puts the player at 0x506f50).
+
+## Pass 75 -- All 4 remaining open items resolved (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| Sub-tab table fully resolved: exactly 2 sub-tabs | 5 | 4 parallel 2-entry `short` arrays at `0x4e96c4`/`c8`/`cc`/`d0`: icon index (25/24), hotspot->subtab-ID mapping (0/1, identity), draw X (551/478), draw Y (59/59). Semantic meaning of the 2 tabs (confidence 1) and their click-rects (not located) remain open. |
+| `ItacCapShipsRenderPreview`'s 19-case switch -- **CONFIRMED real**, not a decompilation artifact | 5 | Verified via `disassemble_function`: a genuine jump table plus a 56-byte class-ID-to-tint-group lookup at `0x423c74` (pattern `groupN,groupN,default` repeating for 19 groups). Selects a color/tint group before drawing the raw class icon. |
+| `UpdateHoverAnimationWidget`'s widget struct -- partially identified | 4 | Confirmed generic (also used at `0x42a4f2` outside ITAC). Each ITAC call site passes a hardcoded literal address, one static instance per category (e.g. `0x51d2e8` for Debrief). Traced Debrief's instance init (`FUN_00424730`): `+0x00` = a `RunItacScreen` setup sprite-surface handle, `+0x20` = redraw callback `&LAB_00425220` (not decompiled). Used alongside a category-specific secondary hotspot table (e.g. Debrief's prev/next-mission buttons at `0x4e4928`, count 2) -- likely animates hover feedback for small nav buttons. |
+| `DAT_00588730+0x1ac` -- resolved: first field of a bulk-copied 1299-dword video-mode record, not a scalar flag | 5 | `InitializeGraphicsDevice` copies `(&DAT_00595da0)[param_4]` (from `EnumDisplayCardsFromDriver`'s mode table) into `+0x1ac` onward -- the same 1299-dword copy Pass 70 found but couldn't place. Its first field (0/1/2) selects a renderer-backend-driver-DLL load via `LoadRendererBackendDriver` (0x4cc470, was `FUN_004cc470`, self-identified via its `"SR_driver_init"` string); other values skip that load (true hardware acceleration). The 47 program-wide `+0x1ac` hits from `search_instructions` were a red herring -- almost all belong to unrelated structs at the same coincidental offset, same lesson as Pass 70's `+0x50`. |
+
+### Open follow-ups
+
+- The sub-tab buttons' click-rect array (distinct from the confirmed data table) not located.
+- What the 2 sub-tabs and ~19 Capital Ship tint groups represent semantically.
+- `LAB_00425220` (hover-widget redraw callback) not decompiled.
+- The per-mode-value driver DLL name passed to `LoadRendererBackendDriver` not traced (implicit register argument).
+- `rel_cap2itac.bik`/`itac2pod_hud.bik`/`itac2dor.bik` fully placed structurally but not connected to a specific gameplay trigger.

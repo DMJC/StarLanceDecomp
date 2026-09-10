@@ -9252,3 +9252,103 @@ Confidence 5, all directly read:
   decompilation artifact.
 - `UpdateHoverAnimationWidget`'s widget struct not identified.
 - `DAT_00588730+0x1ac`'s render-mode values not independently mapped.
+
+## Pass 75 -- All 4 remaining open items resolved (2026-09-10)
+
+User request: "Work on remaining open items" -- the sub-tab table,
+the Capital Ships switch, `UpdateHoverAnimationWidget`'s struct, and
+`+0x1ac`.
+
+### The sub-tab table -- fully resolved, exactly 2 entries
+
+Confidence 5, directly read via `read_memory` at `0x4e96c4`-`0x4e96d3`
+(16 bytes). It's 4 parallel 2-entry `short` arrays, not one bigger
+table:
+
+| Base | Entry 0 | Entry 1 | Meaning |
+|---|---:|---:|---|
+| `0x4e96c8` | 0 | 1 | hotspot-click-index -> sub-tab ID (identity mapping) |
+| `0x4e96c4` | 25 | 24 | icon sprite index per sub-tab |
+| `0x4e96cc` | 551 | 478 | draw X per sub-tab |
+| `0x4e96d0` | 59 | 59 | draw Y per sub-tab (same row, side-by-side buttons) |
+
+So Fighters/Capital Ships/Squadrons/Personnel's second hotspot row is
+just **two** buttons, side by side at y=59, using icon sprites 24/25.
+No label strings were found nearby, so what the two sub-tabs actually
+mean (e.g. two roster halves, "active"/"reserve", alive/destroyed) is
+NOT determined -- confidence 1 for any such interpretation. The 16
+bytes immediately preceding this table (`0x4e96b0`-`0x4e96c3`) don't
+cleanly parse as the corresponding hotspot hit-rects (one candidate
+reading gives a zero-height rect), so the actual click-rect array for
+these 2 buttons is still unidentified.
+
+### `ItacCapShipsRenderPreview`'s switch -- CONFIRMED real, not a decompilation artifact
+
+Confidence 5. Disassembled directly (`disassemble_function`, not just
+`decompile_function`) to check. The 19 "identical" cases are real:
+each sets `EDX` to a distinct multiple of 3 (0, 3, 6, ..., 54) via a
+jump table, and that value is used in the FIRST of two back-to-back
+draw calls (a color/tint-group selector) before the actual ship icon
+is drawn using the RAW, unmodified class ID for the second call. A
+56-byte lookup table at `0x423c74` maps `(class ID - 1)` to either one
+of 19 group values (repeating `groupN, groupN, 19` for N=0..18) --
+every 3rd class ID in sequence falls through to a default tint
+instead of a group-specific one. This is a genuine per-ship-class
+tint/highlight-group system with ~19 groups of ~3 classes each; what
+the groups represent (faction? hull tier?) is not determined.
+
+### `UpdateHoverAnimationWidget`'s widget struct -- partially identified
+
+Confidence 4. Confirmed generic (also called from `0x42a4f2`, outside
+ITAC entirely) via `get_xrefs_to`; every ITAC call site passes a
+**hardcoded literal address** in `ECX` (fastcall), one distinct global
+per category (e.g. `0x51d2e8` for Debrief) -- so each category that
+has "wiggling" hover buttons owns its own static instance of this
+struct, rather than there being one shared widget. Traced Debrief's
+instance (`FUN_00424730`, called from `ItacEnterDebriefCategory`) to
+see it initialized: field `+0x00` gets one of `RunItacScreen`'s
+setup-allocated sprite-surface handles (`DAT_0052305c`), and field
+`+0x20` (the redraw callback `UpdateHoverAnimationWidget` invokes
+when the wiggle state changes) gets set to `&LAB_00425220`. Combined
+with the already-known `+0x14` (float wiggle offset) / `+0x18`
+(direction counter) fields, the struct is now: sprite handle, some
+data/font pointer, an ID/rect-ish block, wiggle float, direction
+counter, ..., redraw-callback pointer. It's used alongside a *second*,
+category-specific hotspot table read with explicit literal arguments
+(e.g. Debrief's prev/next-mission buttons at `0x4e4928`, count 2) --
+strongly suggesting this animates hover feedback for small prev/next
+style navigation buttons distinct from the main scrollable list. The
+callback target `LAB_00425220` itself was not decompiled.
+
+### `DAT_00588730+0x1ac` -- resolved: not a scalar, the first field of a bulk-copied video-mode record
+
+Confidence 5, resolved by decompiling `InitializeGraphicsDevice` in
+full (the 47 program-wide `+0x1ac` hits from `search_instructions`
+were a red herring -- almost all belong to unrelated structs at that
+same byte offset by coincidence, matching the earlier `+0x50` lesson
+from Pass 70). `InitializeGraphicsDevice` bulk-copies a 1299-dword
+(0x513, 5196-byte) display-mode descriptor record from
+`(&DAT_00595da0)[param_4]` (the device/mode enumeration table built by
+`EnumDisplayCardsFromDriver` in `WinMain`) into `DAT_00588730+0x1ac`
+onward -- this IS the same 1299-dword copy Pass 70 already found and
+couldn't place. `+0x1ac`'s value is simply that record's *first*
+field, read back afterward to select which renderer backend variant
+to initialize: values 0, 1, and 2 each call `LoadRendererBackendDriver`
+(0x4cc470, was `FUN_004cc470`, self-identified via its own
+`"SR_driver_init"` `GetProcAddress` lookup string -- loads a driver
+DLL by name and calls its `SR_driver_init` export), while any other
+value skips that call and uses the window handle directly (implying
+true hardware acceleration needs no extra driver-DLL load). The exact
+DLL name passed per mode value wasn't traced (implicit register
+argument, same limitation seen with `DynamicList_GetByIndex` and
+others).
+
+### Open follow-ups
+
+- The sub-tab buttons' click-rect array (distinct from the confirmed
+  icon/x/y data table) not located.
+- What the 2 sub-tabs and ~19 Capital Ship tint groups actually
+  represent, semantically.
+- `LAB_00425220` (the hover-widget redraw callback) not decompiled.
+- The per-mode-value driver DLL name passed to
+  `LoadRendererBackendDriver` not traced.
