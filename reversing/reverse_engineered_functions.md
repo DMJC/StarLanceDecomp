@@ -9010,7 +9010,129 @@ registration list for hotspot tooltip text.
   undecompiled `FUN_004404a0`) still not resolved.
 - `DAT_00588730+0x1ac`'s render-mode values (0/2 vs. others) not
   independently mapped.
-- `DAT_00523088`'s set-site (what marks eye-recognition as already
-  done) still not traced.
-- ITAC's room-graph exits (the `rel_itac2X.bik`/`itac2X.bik` clips)
-  still not mapped to specific hotspots/destinations.
+
+## Pass 73 -- `FUN_004404a0`, `g_dwItacSkipEyeRecognition`'s set-site, and ITAC's room-graph exits (2026-09-10)
+
+User request: "Work on FUN_004404a0, DAT_00523088's set-site, and
+mapping ITAC's room-graph exits to specific hotspots" -- the three
+remaining Pass 71/72 open items.
+
+### CORRECTION: `FUN_004404a0` is NOT a category-table dispatcher
+
+Pass 71/72 speculated table fields 3/4 might be called from
+`FUN_004404a0`. **Reading it disproved this.** Renamed
+`UpdateMouseCursorState` (0x4404a0). Confidence 5, directly read: a
+completely generic mouse-input helper -- applies the relative mouse
+delta (`DAT_00523198`/`DAT_0052319c`) to the cursor position,
+re-centers the OS cursor when a delta was applied, clamps position to
+screen bounds, and derives click/button edge-detection flags
+(`DAT_00520138`, `DAT_0051dab0`, `DAT_00520820`, `_DAT_00520824`) from
+packed input state `DAT_005231a4`. Confirmed generic (not
+ITAC-specific) via `get_xrefs_to`: called from `RunItacScreen`,
+`RunMissionSelectMapScreen`, and two other input-pump helpers
+(`FUN_00440010`, `FUN_00440170`).
+
+### Table fields 3/4 ARE now resolved, just not by that function
+
+Field 3 is each category's **per-frame update** callback (called
+directly from `RunItacScreen`'s main loop, not from
+`UpdateMouseCursorState`). Two were decompiled to confirm:
+- `ItacDebriefPerFrameUpdate` (0x4247c0, was `FUN_004247c0`,
+  Debrief's field 3) -- handles list scroll/selection for the debrief
+  text, AND (see below) is where `g_dwItacSkipEyeRecognition` gets
+  consumed.
+- `ItacVideoReportsPerFrameUpdate` (0x450630, was `FUN_00450630`,
+  Video Reports' field 3) -- handles list scroll/selection, and on any
+  click calls `ItacSelectVideoReportRecord`.
+- Field 4 (at least for Video Reports) is a click-confirm helper:
+  `ItacSelectVideoReportRecord` (0x450cc0, was `FUN_00450cc0`) waits
+  for mouse-button release then does
+  `DAT_005251dc = DynamicList_GetByIndex(...)` -- fetching the
+  currently-selected record node and stashing it as the pending
+  resource to play.
+
+### CORRECTION: `DAT_005251dc` is "play the selected record," not a room-exit mechanism
+
+Pass 71 assumed `DAT_005251dc` (checked in `RunItacScreen`'s main
+loop, `if (DAT_005251dc != 0) { ... }`) was ITAC's room-transition-out
+trigger, because its handling reuses the same
+chdir/CD-check/background-hide/bink-play plumbing as a real room
+transition. **This pass traced its only non-`RunItacScreen` write site**
+(`ItacSelectVideoReportRecord`, called from `ItacVideoReportsPerFrameUpdate`)
+and found it's actually set when the player clicks/confirms a
+**Video Reports list entry** -- i.e. it's ITAC's "play the selected
+video-report clip" mechanism, which happens to reuse the room-transition
+machinery because playing a full-screen bink clip needs the same
+background-hide/CD-check/chdir dance a real room change does. Explicitly
+correcting this because it changes the answer to "does ITAC have
+internal room-exit hotspots": it doesn't -- see below.
+
+### `g_dwItacSkipEyeRecognition`'s set-site (renamed from `DAT_00523088`)
+
+Confidence 5, both write sites traced. Set to 1 in `WinMain`, on the
+post-mission path immediately before the debrief-triggered
+`RunItacScreen()` call (right after `AdvanceCampaignMissionAndSaveProfile`,
+when the mission isn't the special end-of-campaign case): `DAT_0051d4e0
+= LoadNamedResource(...); ...; DAT_00523088 = 1; ...; RunItacScreen();`.
+Cleared back to 0 inside `ItacDebriefPerFrameUpdate`, on the very first
+per-frame tick after the Debrief tab is showing (`if (DAT_0052032c !=
+0) { if (DAT_00523088 != 0) { DAT_00523088 = 0; } ... }`). So it's a
+**one-shot "just arrived here from the post-mission debrief flow"
+flag**: WinMain sets it for that one specific entry so the player lands
+straight on Debrief without redoing the eye-recognition login; it's
+consumed on the first render tick and cleared, so any *later*
+re-entry into ITAC during the same play session (via the normal VR
+room graph) requires the eye-recognition sequence again.
+
+### ITAC's room-graph exits mapped to hotspots (`VRRoomNode` graph, `RunShipInteriorVRLoop`)
+
+Confidence 4-5 (structure/mechanism confidence 5; specific node
+addresses confidence 5 where read directly, confidence 3 for
+inferred-but-unconfirmed edges). The pre-existing `VRRoomNode` struct
+(44 bytes: `nHotspotX/Y/W/H`, `pMoviePath`, `pMoviePathAlt`, `nUnk10`,
+`nNumTargets`, `pTarget0`-`pTarget4`, `nRoomType`, `nSoundFlag`) is
+the general ship-interior VR room graph read by `RunShipInteriorVRLoop`
+(0x439fb0). **ITAC has no internal room-exit hotspot table of its
+own** -- `RunShipInteriorVRLoop` dispatches purely on the *current*
+node's `nRoomType`, and `nRoomType == 2` means "launch `RunItacScreen`"
+instead of showing a normal still-image hotspot screen. Traced the
+Reliant side fully:
+- The ITAC room node itself: `VRRoomNode` at **0x506c50** -- hotspot
+  rect (x=150, y=100, w=150, h=300), entered via clip
+  `bunk2itac_no_eye_recog.bik`, `nRoomType == 2`, exactly 1 outgoing
+  target: **0x506c80** (see below). Matches `nNumTargets == 1` --
+  ITAC genuinely has only one way out on the Reliant.
+- The fixed post-ITAC room: `VRRoomNode` at **0x506c80** (the
+  bunkroom), movie `rel_itac2bunk.bik`, alt `rel_doorloop.bik`.
+  `RunShipInteriorVRLoop`'s `nRoomType == 2` branch hardcodes the jump
+  to this node directly after `RunItacScreen()` returns, rather than
+  reading it back out of the ITAC node's own `pTarget0` (though they
+  are in fact the same address).
+- A "corridor junction" waypoint just outside ITAC's door: `VRRoomNode`
+  at **0x506b30** (movie `rel_t2itac.bik`), whose 3 hotspots fan out
+  to ITAC itself (0x506c50), back down the corridor (0x506e60, movie
+  `rel_itac2t.bik`), or back to the pod bay (0x506cb0, movie
+  `rel_itac2pod.bik`) -- this explains 3 of the 4 confirmed Reliant
+  `X2itac`/`itac2X` clip names found in Pass 71's string search.
+- The Yamato side's fixed post-ITAC room was also confirmed: `VRRoomNode`
+  at **0x50aec8**, movie `itac2rot.bik`, alt `itac_dl.bik` -- lands in
+  the "rot" (rotation) room, NOT bunk/pod. This confirms the Reliant
+  and Yamato VR room graphs are laid out differently, matching the
+  asymmetric bik-name sets already noted in Pass 71.
+
+### Open follow-ups
+
+- Yamato's exact ITAC room node (the `nRoomType == 2` counterpart to
+  Reliant's 0x506c50) was NOT located -- traced 3 hops from the
+  post-ITAC node (0x50aec8 -> 0x50ae98 -> 0x50ae68 -> 0x50ace8, none
+  are it) without finding it. `get_xrefs_to` on the `pod2itac.bik`/
+  `lock2itac.bik` string addresses returned no references (Ghidra
+  hasn't indexed these as data references), so locating it needs
+  either a wider manual struct-array scan or a Ghidra data-region
+  re-analysis.
+- `rel_cap2itac.bik` (capital-ship-transfer entry) and
+  `itac2pod_hud.bik`/`itac2dor.bik`/`itac2itac.bik` not traced to
+  specific nodes.
+- Fields 3/4 of the other 7 categories' table entries not
+  individually decompiled (only Debrief's and Video Reports' field 3,
+  and Video Reports' field 4, were read this pass).

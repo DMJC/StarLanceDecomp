@@ -1913,8 +1913,76 @@ RegisterItacTooltip (0x440bd0, was FUN_00440bd0)
   -> appends param to &DAT_00520368[DAT_005231b4++], bounded at 30 slots
      (asserts "Too many tooltips" past slot 29)
 
-  <- open: table fields 3/4 (called from undecompiled FUN_004404a0)
   <- open: DAT_00588730+0x1ac's render-mode values not independently mapped
-  <- open: DAT_00523088's set-site
-  <- open: ITAC's room-graph exits (rel_itac2X.bik/itac2X.bik clips) not mapped to hotspots
+```
+
+## FUN_004404a0, g_dwItacSkipEyeRecognition's set-site, and ITAC's room-graph exits (2026-09-10, Pass 73)
+
+```
+UpdateMouseCursorState (0x4404a0, was FUN_004404a0) -- CORRECTION: generic mouse-input
+  helper, NOT a category-table dispatcher (Pass 71/72 speculated wrongly).
+  <- called by: RunItacScreen, RunMissionSelectMapScreen, FUN_00440010, FUN_00440170
+  -> applies mouse delta -> re-centers OS cursor -> clamps to screen bounds -> derives
+     click/button edge-detection flags (DAT_00520138/DAT_0051dab0/DAT_00520820/_DAT_00520824)
+     from packed input state DAT_005231a4
+
+Category table field 3 = per-frame update (called directly from RunItacScreen's main
+  loop, NOT from UpdateMouseCursorState):
+  ItacDebriefPerFrameUpdate (0x4247c0, was FUN_004247c0) -- Debrief's field 3
+    -> if (DAT_0052032c) { if (g_dwItacSkipEyeRecognition != 0) g_dwItacSkipEyeRecognition = 0;
+       FUN_00424be0(); ... }  [THE set-site's consumer]
+  ItacVideoReportsPerFrameUpdate (0x450630, was FUN_00450630) -- Video Reports' field 3
+    -> on click: ItacSelectVideoReportRecord (field 4)
+
+  ItacSelectVideoReportRecord (0x450cc0, was FUN_00450cc0) -- field 4 (Video Reports)
+    -> waits for button release -> DAT_005251dc = DynamicList_GetByIndex(selected index)
+
+  CORRECTION: DAT_005251dc is ITAC's "play the selected Video Report record" trigger,
+    not a room-exit mechanism (Pass 71 assumed the latter from its plumbing alone).
+    It reuses the room-transition bink-playing machinery (background-hide/CD-check/
+    chdir) because playing a clip needs the same sequence a real room change does.
+
+g_dwItacSkipEyeRecognition (0x523088, was DAT_00523088) -- both write sites traced:
+  SET (=1): WinMain, immediately before the post-mission-debrief RunItacScreen() call
+    (right after AdvanceCampaignMissionAndSaveProfile, non-end-of-campaign path)
+  CLEAR (=0): ItacDebriefPerFrameUpdate, on the first per-frame tick after landing on
+    the Debrief tab
+  -> one-shot "skip eye-recognition for this specific post-mission entry" flag; any
+     LATER re-entry via the normal VR room graph requires eye-recognition again
+
+ITAC's room-graph exits (VRRoomNode graph, RunShipInteriorVRLoop @ 0x439fb0):
+  ITAC has NO internal room-exit hotspot table -- RunShipInteriorVRLoop dispatches on
+  the CURRENT node's nRoomType; nRoomType==2 launches RunItacScreen() directly instead
+  of a normal still-image hotspot screen.
+
+  VRRoomNode struct (44 bytes, pre-existing type): nHotspotX/Y/W/H (4x i16), pMoviePath,
+    pMoviePathAlt (char* x2), nUnk10 (i16), nNumTargets (i16), pTarget0-4 (void* x5),
+    nRoomType (i16), nSoundFlag (i16)
+
+  Reliant graph (confirmed via read_memory):
+    0x506c50 = ITAC room itself: hotspot(150,100,150,300), enter clip
+      "bunk2itac_no_eye_recog.bik", nRoomType=2, nNumTargets=1 -> pTarget0=0x506c80
+    0x506c80 = fixed post-ITAC room (bunkroom): enter clip "rel_itac2bunk.bik",
+      alt "rel_doorloop.bik", nRoomType=0
+      [RunShipInteriorVRLoop hardcodes the jump to 0x506c80 after RunItacScreen()
+       returns, rather than reading pTarget0 back out -- same destination either way]
+    0x506b30 = corridor-junction waypoint just outside ITAC's door: enter clip
+      "rel_t2itac.bik", nRoomType=0, 3 targets:
+        -> 0x506c50 (into ITAC, "bunk2itac_no_eye_recog.bik")
+        -> 0x506e60 (back down corridor, "rel_itac2t.bik")
+        -> 0x506cb0 (back to pod bay, "rel_itac2pod.bik")
+
+  Yamato graph (partially confirmed):
+    0x50aec8 = fixed post-ITAC room: enter clip "itac2rot.bik", alt "itac_dl.bik"
+      -> lands in the "rot" (rotation) room, NOT bunk/pod -- confirms Reliant and
+         Yamato VR room graphs are laid out differently
+    Yamato's exact ITAC room node (nRoomType==2, counterpart to Reliant's 0x506c50):
+      NOT located -- traced 0x50aec8 -> 0x50ae98 -> 0x50ae68 -> 0x50ace8 (none are it);
+      get_xrefs_to on pod2itac.bik/lock2itac.bik string addresses returned no
+      references (unindexed by Ghidra)
+
+  <- open: rel_cap2itac.bik, itac2pod_hud.bik, itac2dor.bik, itac2itac.bik not traced
+  <- open: Yamato's exact ITAC room node
+  <- open: fields 3/4 of the other 7 categories not individually decompiled
+  <- open: DAT_00588730+0x1ac's render-mode values not independently mapped
 ```

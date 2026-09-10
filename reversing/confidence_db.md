@@ -1855,7 +1855,25 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 
 ### Open follow-ups
 
-- Table fields 3/4 of the category callback table (called from undecompiled `FUN_004404a0`).
 - `DAT_00588730+0x1ac`'s render-mode values not independently mapped.
-- `DAT_00523088`'s set-site still not traced.
-- ITAC's room-graph exits (`rel_itac2X.bik`/`itac2X.bik` clips) still not mapped to hotspots/destinations.
+
+## Pass 73 -- `UpdateMouseCursorState`, `g_dwItacSkipEyeRecognition`'s set-site, and ITAC's room-graph exits (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| **CORRECTION**: `UpdateMouseCursorState` (0x4404a0, was `FUN_004404a0`) is a generic mouse-input helper, NOT a category-table dispatcher | 5 | Pass 71/72 speculated it called table fields 3/4; disproved by reading it. Confirmed generic via `get_xrefs_to`: also called from `RunMissionSelectMapScreen`. |
+| Table field 3 = per-category per-frame update; field 4 (at least for Video Reports) = click-confirm handler | 5 | `ItacDebriefPerFrameUpdate` (0x4247c0) and `ItacVideoReportsPerFrameUpdate` (0x450630) decompiled directly; `ItacSelectVideoReportRecord` (0x450cc0, field 4) fetches the selected `DynamicList` node on click-release. |
+| **CORRECTION**: `DAT_005251dc` is ITAC's "play the selected Video Report record" trigger, not a room-exit mechanism | 5 | Traced its only non-`RunItacScreen` write site to `ItacSelectVideoReportRecord`. It reuses the room-transition bink-playing plumbing because playing a clip needs the same background-hide/CD-check/chdir sequence a real room change does -- but it is NOT a room exit. Corrects the Pass 71 framing. |
+| `g_dwItacSkipEyeRecognition` (0x523088, was `DAT_00523088`) -- both write sites traced | 5 | Set to 1 in `WinMain` immediately before the post-mission-debrief `RunItacScreen()` call; cleared to 0 by `ItacDebriefPerFrameUpdate` on the first per-frame tick after landing on Debrief. One-shot "skip eye-recognition for this specific post-mission entry" flag. |
+| ITAC has no internal room-exit hotspot table -- exits are driven entirely by `RunShipInteriorVRLoop`'s `VRRoomNode.nRoomType == 2` dispatch | 5 | Directly read in `RunShipInteriorVRLoop` (0x439fb0). |
+| Reliant's ITAC `VRRoomNode` (0x506c50) and its single exit target, the bunkroom (0x506c80) | 5 | Hotspot rect (150,100,150,300); entry clip `bunk2itac_no_eye_recog.bik`; exit clip `rel_itac2bunk.bik`. `nNumTargets == 1` confirms exactly one way out. |
+| Reliant's pre-ITAC corridor-junction waypoint (0x506b30) and its 3 fan-out targets | 4 | Explains 3 of the 4 confirmed Reliant `X2itac`/`itac2X` clip names from Pass 71's string search (`rel_t2itac.bik`, `rel_itac2t.bik`, `rel_itac2pod.bik`). |
+| Yamato's fixed post-ITAC room (0x50aec8, movie `itac2rot.bik`) confirmed different from Reliant's (bunk vs. "rot") | 5 | Confirms the two ships' VR room graphs are laid out differently, matching the asymmetric bik-name sets already noted in Pass 71. |
+| Yamato's exact ITAC room node (`nRoomType==2` counterpart to 0x506c50) | 0 (not located) | Traced 3 hops from the post-ITAC node without finding it; `get_xrefs_to` on the `pod2itac.bik`/`lock2itac.bik` string addresses returned no data references. |
+
+### Open follow-ups
+
+- `DAT_00588730+0x1ac`'s render-mode values not independently mapped.
+- Yamato's exact ITAC room node not located.
+- `rel_cap2itac.bik`, `itac2pod_hud.bik`, `itac2dor.bik`, `itac2itac.bik` not traced to specific nodes.
+- Fields 3/4 of the other 7 categories not individually decompiled.
