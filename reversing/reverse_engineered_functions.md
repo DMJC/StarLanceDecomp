@@ -10593,3 +10593,133 @@ kind of mission-boundary checkpoint, not a mid-combat one either.
   field-by-field.
 - Whether multiplayer "join in progress" (a conceptually different
   kind of mid-mission entry) exists -- not investigated this pass.
+
+## Pass 91 -- All 3 Pass 90 open items resolved: restart-dialog semantics, savegame chunk contents, and a genuine multiplayer join-in-progress protocol (2026-09-10)
+
+Direct follow-up closing all 3 of Pass 90's open items.
+
+### 1. Slot-100 checkpoint semantics: it's the "Restart Mission?" dialog's save state, with a second consistency-reload flavor
+
+Confidence 5. `RunRestartMissionDialog` (`0x43eb80`, was `FUN_0043eb80`)
+is the confirmation dialog itself -- self-identified via its own
+`interface_restart.spr` asset. A 3-option hotspot menu: option 0/1
+both call `LoadSessionCheckpoint` (`0x475d30`, was `FUN_00475d30`,
+slot 100), option 2 cancels. This is the **primary, player-facing
+trigger** for the slot-100 checkpoint: choosing "Restart" reloads the
+campaign-bookkeeping snapshot taken right before the current mission
+attempt began.
+
+`SaveSessionCheckpoint` (`0x475d20`, was `FUN_00475d20`) fires from
+4 `WinMain` sites, all immediately before the code jumps back to
+`WinMain`'s per-attempt loop entry (`LAB_004aa1ba`) -- i.e. **every
+time a fresh mission attempt is about to begin**, slot 100 gets
+autosaved. This is the checkpoint `RunRestartMissionDialog` later
+restores.
+
+A **second flavor** of the same save/load pair exists, gated on
+`DAT_00520840` (confirmed written from `ItacDebriefPerFrameUpdate`'s
+"Continue" hotspot -- only active while viewing your most-recently-
+completed mission's debrief page -- and from `RunMultiplayerDebriefScreen`'s
+own Ready/Continue button and a `DAT_005dcc04==2` network signal):
+`SaveSessionCheckpoint` always runs, then if `DAT_00520840==1`
+(player just confirmed "Continue" from a debrief screen),
+`LoadSessionCheckpoint` immediately reloads the same data right back.
+Given the checkpoint only contains campaign-metadata (see below, not
+live combat state), this reads as a **save-then-reload-for-consistency**
+step bracketing the debrief-to-next-mission transition, distinct in
+purpose from the explicit Restart flow even though it reuses the exact
+same save/load functions and file. A third site (`0x4aa480`, gated on
+`DAT_005d60b9`, immediately after `RunMissionGameplay()` returns) is a
+safety-net reload for the same in-flight "player requested restart"
+signal `RunMissionGameplay` itself sets.
+
+### 2. `VERS`/`VARS`/`PILO`/`ALPH` chunk contents
+
+Confidence 4-5 per chunk, traced via each source pointer's own
+readers/writers:
+
+- **`VERS`** (`DAT_00562dc8`, 380 bytes) -- the live-session mirror of
+  campaign progress, positioned exactly `0xd0` (208, `PlayerProfile`'s
+  own size, Pass 63) bytes after the on-disk mirror base
+  `DAT_00562cf8`. Confirms the game keeps two parallel copies of this
+  struct in memory: a "live" one (`DAT_00562dc8`+) that gameplay code
+  reads/writes continuously, and a "to-be-saved" one
+  (`DAT_00562cf8`+) that `AdvanceCampaignMissionAndSaveProfile`
+  populates from the live copy right before writing `profile.bin`.
+  The extra 172 bytes beyond `profile.bin`'s 208 aren't individually
+  mapped this pass.
+- **`VARS`** (`DAT_00562f44`, 4 bytes) -- **not a mirrored live
+  variable at all**: `WriteSaveGameFile` (`0x475650`, was
+  `FUN_00475650`) writes the literal constant `1` here unconditionally
+  on every save. No other reader exists. Plausibly a save-format
+  presence/version marker rather than real game data.
+- **`PILO`** (`DAT_00562f78`, 120 bytes = 30 dwords) -- a straight
+  copy of 30 consecutive session globals starting at `DAT_0052a430`,
+  confirmed to include `DAT_0052a470` (the Reliant->Yamato
+  transfer-cutscene-shown flag, Pass 65) and `DAT_0052a428`/
+  `DAT_0052a45c` (used in `AdvanceCampaignMissionAndSaveProfile`'s
+  rank-tracking, Pass 63). A bundle of one-shot narrative/session
+  flags, not per-pilot roster data despite the name.
+- **`ALPH`** (`DAT_005047d0`, 4 bytes) -- this is genuinely exciting:
+  it's the FIRST 4-byte record of a much larger **65-record pilot/
+  wingman-name-pool table** (`0x5047d0`-`0x5048d6`, self-identified
+  via `UpdatePilotRosterAvailability`'s (`0x49cd70`, was
+  `FUN_0049cd70`) own `"Uh Oh: update_pilots has run out"` assertion
+  string). Each 4-byte record = `{int16 nameValue, byte status
+  (2=available, 1=assigned), 1 byte pad}`. `FUN_0049cd20` (Pass 89)
+  resets all 65 records to "available" on new-pilot creation;
+  `UpdatePilotRosterAvailability` assigns available slots to up to 9
+  active wingman positions (`DAT_0058a95a`+), selecting which
+  *subrange* of the 65-entry pool is unlocked based on
+  `DAT_00562dc8` (4 campaign-progress brackets, missions 1-5/6-13/
+  14-22/23-28 each mapping to a different `{base, count}` window) --
+  i.e. new wingmen become available to recruit as the campaign
+  progresses. The savegame's `ALPH` chunk only captures the pool's
+  very first record, not the whole table -- a narrow, likely
+  vestigial save field rather than a full roster-state dump.
+
+### 3. Multiplayer DOES support joining an in-progress mission -- a real, distinct capability from anything found in Pass 90
+
+Confidence 5. Located `DPIMESSAGE_SENDMISSSPEC` (message ID 8) and
+`DPIMESSAGE_SENDWORLDSTATE` (message ID 11) in `ProcessNetworkMessage`
+(`0x4b6f80`)'s dispatch jump table (`0x4b9514`), using the exact
+byte-pattern-search methodology Pass 24 established for `SETSHADOW`.
+
+- **`SENDMISSSPEC` (case 8)** reads 3 values off the network message
+  and directly sets `DAT_00562dc8 = DAT_00524a58` -- **a joining
+  client's campaign/mission index is set straight from the network**,
+  telling it which mission the session is currently running before it
+  loads anything locally.
+- **`SENDWORLDSTATE` (case 11)** is a large handler that allocates
+  several buffers (source-tagged `DPReceivePackets.cpp`) totaling
+  roughly 8.8 KB and deserializes a substantial per-object world-state
+  snapshot into them via dozens of `ReadMessageBits` calls, then sets
+  `DAT_005d6090 = 1`. This is the exact flag `WinMain`'s
+  `"Waiting for world state"` debug-logged loop
+  (`while (DAT_005d6090 == 0) {...}`, already present in earlier
+  session context around `InitializeMissionGameplay`) blocks on before
+  proceeding into gameplay.
+
+**This is architecturally a genuine mid-mission entry point for
+multiplayer clients** -- fundamentally different from anything found
+in Pass 90's single-player investigation, since it reconstructs actual
+live per-object world state received over the network (not just
+campaign metadata) before the joining client starts rendering/
+simulating the mission. A joining player doesn't watch a mission from
+its start; they receive a snapshot of its CURRENT state and begin from
+there. This resolves Pass 90's open question with a clear "yes, but
+only in multiplayer, via network sync rather than any local save
+mechanism."
+
+### Open follow-ups
+
+- `SENDEXTRAMISSSPEC` (the third message in this family, not
+  identified/traced this pass).
+- `SENDWORLDSTATE`'s ~8.8 KB buffer layout -- allocated and populated
+  but not decoded field-by-field.
+- `VERS`'s extra 172 bytes beyond `profile.bin`'s 208 -- not
+  individually mapped.
+- The exact semantics of `DAT_005d60b9`/`DAT_00587cdc` (the other
+  flags gating `WinMain`'s various `SaveSessionCheckpoint`/
+  `LoadSessionCheckpoint` call sites) -- read enough to place them
+  structurally, not fully characterized.

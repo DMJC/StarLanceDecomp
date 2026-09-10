@@ -2124,3 +2124,19 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - The slot-100 auto-save/restore pair's exact trigger timing.
 - `VERS`/`VARS`/`PILO`/`ALPH` field-by-field contents not decoded.
 - Multiplayer "join in progress" not investigated.
+
+## Pass 91 -- All 3 Pass 90 open items resolved (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `RunRestartMissionDialog` (0x43eb80) is slot-100's primary trigger | 5 | Self-identified via `interface_restart.spr`. Both its "confirm" options call `LoadSessionCheckpoint`; `SaveSessionCheckpoint` fires from 4 `WinMain` sites right before re-entering the per-attempt loop. |
+| A second save/reload flavor exists, gated on `DAT_00520840` (debrief "Continue") | 4 | Save-then-reload-for-consistency bracketing the debrief-to-next-mission transition, not a player-visible "restart." A third site (`DAT_005d60b9`-gated) is a post-`RunMissionGameplay` safety-net reload. |
+| `VERS`/`VARS`/`PILO`/`ALPH` chunk contents decoded | 4-5 | `VERS`=live campaign-progress mirror (208 bytes ahead of the on-disk copy, Pass 63); `VARS`=hardcoded constant 1, not real data; `PILO`=30 one-shot narrative/session flags (includes the Pass 65 transfer-cutscene flag); `ALPH`=first record of a 65-slot pilot/wingman-name-pool table (`UpdatePilotRosterAvailability`, self-named via its own assertion string), only partially captured by the save. |
+| Multiplayer DOES support joining an in-progress mission | 5 | `DPIMESSAGE_SENDMISSSPEC` (msg 8) sets the joining client's mission index directly from the network; `DPIMESSAGE_SENDWORLDSTATE` (msg 11) deserializes an ~8.8KB per-object world-state snapshot and unblocks `WinMain`'s pre-existing "Waiting for world state" loop. Genuinely reconstructs live state, unlike anything in Pass 90's single-player findings. |
+
+### Open follow-ups
+
+- `SENDEXTRAMISSSPEC` not identified/traced.
+- `SENDWORLDSTATE`'s ~8.8KB buffer layout not decoded field-by-field.
+- `VERS`'s extra 172 bytes beyond `profile.bin`'s 208 not individually mapped.
+- `DAT_005d60b9`/`DAT_00587cdc`'s full semantics not fully characterized.

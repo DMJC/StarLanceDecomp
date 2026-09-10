@@ -2780,3 +2780,69 @@ ANSWER: NO true mid-mission resume/checkpointing exists.
   <- open: VERS/VARS/PILO/ALPH field-by-field contents
   <- open: multiplayer "join in progress" not investigated
 ```
+
+## All 3 Pass 90 open items resolved (2026-09-10, Pass 91)
+
+```
+1. Slot-100 checkpoint semantics:
+   RunRestartMissionDialog (0x43eb80, was FUN_0043eb80) -- self-ID'd via
+     interface_restart.spr. 3-option hotspot menu:
+       option0/1 -> LoadSessionCheckpoint (slot 100)
+       option2   -> cancel
+   SaveSessionCheckpoint (0x475d20) fires from 4 WinMain sites, all right
+     before re-entering the per-attempt loop (LAB_004aa1ba) -- i.e. every
+     fresh mission attempt autosaves slot 100 first.
+
+   2nd flavor, gated on DAT_00520840 (written from ItacDebriefPerFrame
+     Update's "Continue" hotspot + RunMultiplayerDebriefScreen's Ready
+     button + a DAT_005dcc04==2 network signal):
+       SaveSessionCheckpoint (unconditional) -> if DAT_00520840==1 ->
+       LoadSessionCheckpoint (immediate reload)
+     -> save-then-reload-for-consistency around the debrief->next-mission
+        transition, not a player-visible restart
+   3rd site (0x4aa480, gated on DAT_005d60b9, right after RunMissionGameplay
+     returns) -- safety-net reload for the same in-flight restart signal
+
+2. VERS/VARS/PILO/ALPH chunk contents:
+   VERS (DAT_00562dc8, 380B) = live campaign-progress mirror, positioned
+     exactly 0xd0 (208, PlayerProfile's own size) bytes after the on-disk
+     mirror base DAT_00562cf8 -- two parallel copies confirmed (live +
+     to-be-saved)
+   VARS (DAT_00562f44, 4B) = hardcoded constant 1, written unconditionally
+     by WriteSaveGameFile itself -- NOT a mirrored live variable
+   PILO (DAT_00562f78, 120B=30 dwords) = straight copy of DAT_0052a430+,
+     includes DAT_0052a470 (Reliant->Yamato transfer-shown flag, Pass 65)
+     and DAT_0052a428/DAT_0052a45c (rank-tracking, Pass 63) -- one-shot
+     narrative/session flags, not per-pilot data
+   ALPH (DAT_005047d0, 4B) = first record of a 65-slot pilot/wingman-
+     name-pool table (0x5047d0-0x5048d6), self-ID'd via
+     UpdatePilotRosterAvailability's (0x49cd70, was FUN_0049cd70)
+     "Uh Oh: update_pilots has run out" assertion string:
+       each record = {int16 nameValue, byte status(2=avail,1=assigned), pad}
+       FUN_0049cd20 (Pass 89) resets all 65 to available on new-pilot
+       UpdatePilotRosterAvailability assigns pool slots to up to 9 active
+         wingman positions (DAT_0058a95a+), unlocking different subranges
+         of the pool based on DAT_00562dc8 (4 campaign brackets:
+         missions 1-5/6-13/14-22/23-28)
+     -> the ALPH chunk only saves the pool's first record, not the table
+
+3. Multiplayer join-in-progress -- CONFIRMED via ProcessNetworkMessage
+   (0x4b6f80)'s dispatch jump table (0x4b9514), same byte-pattern-search
+   method as Pass 24's SETSHADOW work:
+     DPIMESSAGE_SENDMISSSPEC (msg 8): reads 3 values, sets
+       DAT_00562dc8 = DAT_00524a58 directly from the network -- tells a
+       joining client which mission is running before it loads anything
+     DPIMESSAGE_SENDWORLDSTATE (msg 11): allocates ~8.8KB of buffers
+       (source-tagged DPReceivePackets.cpp), deserializes a per-object
+       world-state snapshot via dozens of ReadMessageBits calls, sets
+       DAT_005d6090=1 -- the exact flag WinMain's "Waiting for world
+       state" loop blocks on
+   -> genuinely reconstructs LIVE per-object state over the network,
+      architecturally distinct from anything in Pass 90's single-player
+      findings (no local save mechanism does this)
+
+  <- open: SENDEXTRAMISSSPEC not traced
+  <- open: SENDWORLDSTATE's ~8.8KB buffer layout not decoded
+  <- open: VERS's extra 172 bytes beyond profile.bin's 208
+  <- open: DAT_005d60b9/DAT_00587cdc full semantics
+```
