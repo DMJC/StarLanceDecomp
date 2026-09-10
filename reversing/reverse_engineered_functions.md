@@ -10812,3 +10812,92 @@ somewhere in bytes `0x00`-`0x08`) wasn't reverse-engineered this pass.
 - Whether `ScanForTargetCandidate`'s `selector==0`/`2` paths
   (direct-target and navigation-graph-target) read from any other
   `.dte` table not yet connected.
+
+## Pass 93 -- More trigger-array fields, and the "directory tag = element count" pattern confirmed on 2 more tables (2026-09-10)
+
+Direct follow-up: "keep mapping the trigger records." Found a richer
+second consumer, `FUN_0045ae40`, plus 3 supporting functions
+(`FUN_00453530`, `FUN_0045b4e0`, `FUN_004515e0`) that between them
+reveal the trigger array's own bounds/count field and a whole
+previously-unknown **per-object trigger-index table** sitting one
+level above it.
+
+### `g_pMissionTriggerArray`'s element count is `.dte` entry 5's own directory tag
+
+Confidence 5. `FUN_004515e0` is a trivial bounds check:
+`return (DAT_005294e0 <= p) && (p < DAT_00529506*0x30 + DAT_005294e0);`
+-- `DAT_00529506` is exactly the global `LoadMissionFile` writes entry
+5's header-tag byte into. **This is the same "directory tag =
+element count" pattern Pass 87 found for the object-spawn table**,
+now confirmed on a second table. Renamed the trigger array itself
+`g_pMissionTriggerArray` (was `DAT_005294e0`) with this documented in
+its plate comment.
+
+### A new table found: `g_pObjectTriggerIndexTable` (`.dte` entry 7) -- one slice-descriptor per trigger-owning source
+
+Confidence 5 on the mechanism, read directly from `FUN_00453530`
+(reverse lookup: given a trigger-record pointer, find which source
+"owns" it) and cross-checked against `MatchTriggerAgainstWaitingScripts`/
+`FUN_0045b4e0`/`MissionScript_SetAnyTriggerState`, which all index it
+the same way:
+
+```c
+struct ObjectTriggerIndexEntry {   // g_pObjectTriggerIndexTable[N], stride 8 bytes
+    // +0x00: unmapped (2 bytes)
+    byte     triggerCount;          // +0x01 -- how many of this source's triggers exist
+    int16_t  triggerStartIndex;     // +0x02 -- first trigger's index into g_pMissionTriggerArray
+    // +0x04-0x07: unmapped (4 bytes)
+};
+```
+
+Its own element count is `DAT_00525fac` -- entry 7's directory tag,
+**a third confirmation of the same "tag = count" pattern**. This
+table lets game code go from "an object/trigger-source index" straight
+to "the contiguous slice of `g_pMissionTriggerArray` that source
+owns" (`triggerArray + triggerStartIndex*0x30`, `triggerCount`
+entries), rather than scanning the whole trigger array linearly --
+this IS the indexing structure every trigger-firing code path
+(`MatchTriggerAgainstWaitingScripts`, `FUN_0045b4e0`,
+`MissionScript_SetAnyTriggerState`) actually uses, all keyed by an
+object index (`param_1 & 0xffff`).
+
+### A plausible link back to `SpawnObjectRecord`
+
+Confidence 3. `FUN_0045ae40` -- a "find all trigger records of a given
+type, optionally across all objects" utility -- contains this line
+when expanding a search across every object:
+`puVar1[1] = DAT_005267c0 + (*(ushort*)(DAT_0052951c + objIdx*0x4c)) * 8;`
+i.e. it reads a 16-bit value from **offset `+0x00`** of the
+`SpawnObjectRecord` (Pass 86) at `objIdx` and uses it directly as an
+index into `g_pObjectTriggerIndexTable`. This suggests
+`SpawnObjectRecord.objectID`'s low 16 bits double as (or coincide
+with) that object's `g_pObjectTriggerIndexTable` index -- plausible
+but not confirmed independently of this one call site, since observed
+`objectID` values (0-178ish, Pass 86) are small enough that this
+wouldn't distinguish "is the same field" from "is a numerically
+coincident different field."
+
+### `DAT_0052952c`: a static, non-`.dte` per-trigger-TYPE metadata table
+
+Confidence 3. Referenced in `MatchTriggerAgainstWaitingScripts`/
+`FUN_0045b4e0` as `DAT_0052952c + triggerTypeCode*0x1c` (28-byte
+stride, indexed by the SAME trigger-type code documented in Pass 31's
+catalog) -- **not** one of `LoadMissionFile`'s 27 directory outputs,
+so this is built-in engine data describing the ~32 trigger TYPES
+themselves (argument shapes, etc.), not per-mission instance data.
+Partially read: `+0x0c` (byte, `0xff`=invalid) gates whether a type is
+usable at all; `+0x0d` (byte) is compared against a trigger instance's
+`mode` field (`+0x01`); `+0x08` (pointer) leads to a 12-byte-stride
+array of argument-type descriptors consumed by `FUN_0045d810`. Not
+mapped further this pass.
+
+### Open follow-ups
+
+- `ObjectTriggerIndexEntry`'s unmapped bytes (`+0x00`, `+0x04`-`0x07`).
+- Confirming (or ruling out) `SpawnObjectRecord+0x00`'s dual role as
+  a trigger-index, against a case where the two values visibly differ.
+- `DAT_0052952c`'s remaining fields and its own element count/bounds
+  (32ish trigger types assumed from Pass 31, not independently
+  verified as this table's actual capacity).
+- `MissionTriggerInstance`'s still-unmapped ~24 bytes (open since
+  Pass 92).

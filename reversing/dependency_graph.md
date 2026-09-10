@@ -2882,3 +2882,43 @@ MissionTriggerInstance (DAT_005294e0[N], stride 0x30=48 bytes), mapped via
   <- open: group record's member-storage layout beyond the +9 count byte
   <- open: selector 0/2's data sources not connected to any .dte table
 ```
+
+## More trigger-array fields; "tag=count" confirmed on 2 more tables (2026-09-10, Pass 93)
+
+```
+g_pMissionTriggerArray (DAT_005294e0, .dte entry 5) element count:
+  FUN_004515e0 bounds check: DAT_005294e0 <= p < DAT_00529506*0x30 + DAT_005294e0
+  -> DAT_00529506 = entry5's own directory tag = element count
+     (2nd confirmation of Pass 87's "tag = count" pattern)
+
+NEW TABLE: g_pObjectTriggerIndexTable (DAT_005267c0, .dte entry 7)
+  -- one 8-byte slice-descriptor per trigger-owning object/source:
+    +0x00: unmapped (2 bytes)
+    +0x01: triggerCount (byte)
+    +0x02: triggerStartIndex (i16) -- into g_pMissionTriggerArray
+    +0x04-0x07: unmapped
+  own element count = DAT_00525fac (entry 7's directory tag)
+     -> 3rd confirmation of "tag = count"
+  read the same way by: MatchTriggerAgainstWaitingScripts, FUN_0045b4e0,
+    MissionScript_SetAnyTriggerState, all indexed by (objectIndex & 0xffff)
+  -> lets game code jump straight from "object index" to "that object's
+     contiguous slice of the trigger array" instead of scanning linearly
+
+Plausible link (confidence 3, FUN_0045ae40):
+  SpawnObjectRecord (DAT_0052951c, Pass 86) +0x00's low 16 bits used
+  directly as an index into g_pObjectTriggerIndexTable for a given object
+  -> not confirmed independently of this one call site
+
+DAT_0052952c -- static per-trigger-TYPE metadata (28-byte stride,
+  indexed by Pass 31's trigger-type code), NOT a .dte directory output --
+  built-in engine data:
+    +0x0c: validity byte (0xff=invalid)
+    +0x0d: compared against a trigger instance's mode field (+0x01)
+    +0x08: pointer to a 12-byte-stride argument-type-descriptor array
+           (consumed by FUN_0045d810)
+
+  <- open: ObjectTriggerIndexEntry's unmapped bytes
+  <- open: SpawnObjectRecord+0x00 dual-role not independently confirmed
+  <- open: DAT_0052952c's remaining fields/bounds
+  <- open: MissionTriggerInstance's ~24 still-unmapped bytes (Pass 92)
+```

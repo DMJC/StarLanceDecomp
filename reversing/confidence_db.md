@@ -2153,3 +2153,19 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - `MissionTriggerInstance`'s remaining ~24 unmapped bytes.
 - `g_pMissionShipGroupTable`'s record layout beyond the member-count byte -- member storage not located.
 - `ScanForTargetCandidate`'s other 2 selector modes' data sources not connected to any `.dte` table.
+
+## Pass 93 -- More trigger-array fields; "tag = count" pattern confirmed twice more (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `g_pMissionTriggerArray`'s element count = `.dte` entry 5's own directory tag (`DAT_00529506`) | 5 | `FUN_004515e0`'s bounds check uses it directly. 2nd confirmation of Pass 87's "tag = count" pattern. |
+| New table: `g_pObjectTriggerIndexTable` (`.dte` entry 7, was `DAT_005267c0`) -- one 8-byte slice-descriptor per trigger-owning source | 5 | `+0x01`=triggerCount, `+0x02`=triggerStartIndex into `g_pMissionTriggerArray`. Own count = `DAT_00525fac` (entry 7's tag) -- 3rd confirmation of the "tag = count" pattern. All trigger-firing code paths index it by object index. |
+| Plausible link: `SpawnObjectRecord+0x00`'s low 16 bits double as the object's `g_pObjectTriggerIndexTable` index | 3 | Seen in `FUN_0045ae40`; not independently confirmed against a case where the values differ. |
+| `DAT_0052952c`: static, non-`.dte` per-trigger-TYPE metadata table (28-byte stride) | 3 | Not one of `LoadMissionFile`'s 27 outputs -- built-in engine data, not mission-specific. Partially read: validity flag, a mode-comparison byte, an argument-descriptor array pointer. |
+
+### Open follow-ups
+
+- `ObjectTriggerIndexEntry`'s unmapped bytes.
+- Confirming `SpawnObjectRecord+0x00`'s dual role independently.
+- `DAT_0052952c`'s remaining fields/bounds.
+- `MissionTriggerInstance`'s still-unmapped ~24 bytes (Pass 92).
