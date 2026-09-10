@@ -8721,3 +8721,191 @@ project hasn't located, rather than a one-off oddity specific to
   the same way -- if they show findable write sites while `+0x40`/
   `+0x50` don't, that would narrow down what's special about this
   particular pair.
+
+## Pass 71 -- The ITAC interface decoded (2026-09-10)
+
+User request: "Decode the entire ITAC interface." ITAC is a shipboard
+VR terminal, source-tagged `C:\lancer\game\itac.cpp` (confirmed via
+the real string at `0x4e98dc`). It's an in-universe personnel/records
+kiosk gated by a biometric "eye recognition" login sequence, with its
+own localization DLL (`ITACLANG.DLL`), its own sound-index file
+(`itacsnd.fat`), and its own fonts (`itacbig.fnt`/`itacsml.fnt`).
+
+### Main entry point: `RunItacScreen` (0x43efc0, was `FUN_0043efc0`)
+
+Called from both `WinMain` and `RunShipInteriorVRLoop`. Full
+architecture, confidence 5 (directly read in full):
+
+1. **Setup.** Allocates 5 buffers tagged `itac.cpp` (four ~0x62e08-byte
+   scratch/render surfaces plus one screen-sized buffer at
+   `DAT_00520314`, which is the direct memcpy blit target used
+   throughout ITAC -- see "Rendering pipeline" below), loads
+   `itacsnd.fat`/`itacbig.fnt`/`itacsml.fnt`, and zeroes the 9-category
+   hotspot-highlight state.
+2. **Eye-recognition gate**, gated by `DAT_00523088` (skip-intro flag;
+   confidence 3 for the name/semantics, structurally confirmed it's
+   "has this login already happened" but the exact set-site wasn't
+   traced this pass). When `DAT_00523088 == 0`:
+   - `DAT_00562dc8 < 0x13` (aboard ANS Reliant, missions 1-18): chdir
+     to a Reliant-specific resource directory and call
+     `PlayBinkMovieFromArchiveByName` (see below) to play the
+     Reliant eye-recognition clip.
+   - Otherwise (aboard ANS Yamato, missions 19+): call
+     `PlayBinkMovieFromHandle` directly, no directory swap.
+   - **This is a 5th independent confirmed site of the ANS Reliant ->
+     ANS Yamato mission-19 threshold**, after `RenderBriefingHubFrame`,
+     `WinMain`'s cutscene selection, `RunMissionBriefingScreen`'s
+     `briefdoor` texture pick, and `RunCdPlayerPropScreen`'s room
+     background pick.
+   - The starting category also depends on this flag: skipping the
+     gate (`DAT_00523088 != 0`) starts on category 0 (Debrief);
+     playing it (`DAT_00523088 == 0`) starts on category 1 (News
+     Reports).
+3. **Main loop**: polls input, and on a confirmed hover-to-active
+   change (`DAT_00520138` click flag set, hovered hotspot !=
+   `_DAT_00523084` active category) runs the category-switch sequence
+   below. On exit (category 8, or the window-close flag
+   `DAT_00520840`), frees all 5 buffers and the sound/font resources
+   and returns.
+4. **Room-transition-out mechanism** (`DAT_005251dc`, set elsewhere --
+   not traced this pass, presumably a room-exit hotspot handler):
+   when non-null, hides the background image, ensures the correct CD
+   is mounted, chdirs to a resource directory, does
+   `strchr(DAT_005251dc+0x18, '\\')` (trims a path down to its
+   filename), calls `FUN_004abb80()` (not decompiled -- likely the
+   actual room-transition bink loader), chdirs back, and installs a
+   renderer callback (`DAT_00588730+0x88 = &LAB_004403f0`) before
+   clearing the flag. Structural shape confirmed (confidence 4); the
+   internals of `FUN_004abb80`/`LAB_004403f0`/`FUN_0043eaf0` are NOT
+   decompiled and their exact behavior is open.
+
+### `PlayBinkMovieFromArchiveByName`/`PlayBinkMovieFromHandle` (0x4ab9d0/0x4ab6e0) are generic, not ITAC-specific
+
+Renamed from `FUN_004ab9d0`/`FUN_004ab6e0`. Confidence 5. Both are
+generic Bink-movie-player helpers used throughout the game (already
+seen playing menu/cutscene clips elsewhere), reused by ITAC's eye-recog
+gate and exit sequence with different filename arguments -- they are
+NOT ITAC-specific functions themselves:
+- `PlayBinkMovieFromArchiveByName` looks the movie up by name inside a
+  packed resource archive via `FindBinkMovieInArchive`, then opens the
+  resulting archive data pointer with a fixed 0x800000-byte buffer.
+- `PlayBinkMovieFromHandle` opens its argument directly as a bink
+  handle/pointer with a 0x1000-byte buffer -- used when the caller
+  already has a direct handle rather than an archive-relative name.
+
+### The 9-category catalog
+
+Confirmed via three parallel 9-entry tables (all confidence 5, directly
+read via `read_memory` and cross-checked against decompiled code):
+`0x4e9288` (5 callback pointers/category), `0x4e9340` (hotspot rects:
+9 equal 58x51 buttons in a row at y=422, x=12,81,151,220,290,359,429,
+499,570), and `0x4e9418` (3 string pointers/category: enter-line,
+exit-line, trans-line bink/tga-token names).
+
+| Cat | Name | Resource | Enter callback | bik enter / exit / trans-token |
+|---:|---|---|---|---|
+| 0 | Debrief | (mission debrief text via `BuildMissionDebriefText`) | `ItacEnterDebriefCategory` (0x4246c0) | itacdeb.bik / itacdebf.bik / itactrans_00030 |
+| 1 | News Reports | `inter\itac\newsrep.spr` | `ItacEnterNewsReportsCategory` (0x44dd90) | itacnew.bik / itacnewf.bik / itactrans_00051 |
+| 2 | Video Reports | `inter\itac\vidrep.spr` | `ItacEnterVideoReportsCategory` (0x450540) | itacmov.bik / itacmovf.bik / itactrans_00072 |
+| 3 | Fighters | `inter\itac\fighters.spr` | `ItacEnterFightersCategory` (0x425910) | itacss.bik / itacssf.bik / itactrans_00093 |
+| 4 | Capital Ships | `inter\itac\capships.spr` | `ItacEnterCapShipsCategory` (0x423870) | itaccs.bik / itaccsf.bik / itactrans_00114 |
+| 5 | Squadrons | `inter\itac\squads.spr` | `ItacEnterSquadronsCategory` (0x44faa0) | itacsq.bik / itacsqf.bik / itactrans_00135 |
+| 6 | Personnel | `inter\itac\persons.spr` | `ItacEnterPersonnelCategory` (0x44e4c0) | itacpil.bik / itacpilf.bik / itactrans_00156 |
+| 7 | Kills | `inter\itac\kills.spr` | `ItacEnterKillsCategory` (0x441100) | itackil.bik / itackilf.bik / itactrans_00177 |
+| 8 | Exit ITAC | (none -- all-zero table row) | (none) | itacexit.bik / (none) / (none) |
+
+The category 3/6 bik-name fragments ("ss" for Fighters, "pil" for
+Personnel) don't obviously match their `.spr` filenames -- reported as
+fact (confidence 5, directly read) with no confident semantic
+explanation for the fragment choice (confidence 1 for any
+interpretation, e.g. "ss" = ship-stats, "pil" = pilot roster).
+
+### CORRECTION: the bik "f" suffix means exit-line, not gender
+
+**First impression while scanning the string list was wrong and is
+being explicitly corrected here per project methodology.** By analogy
+with the already-confirmed `g_wPilotGenderIsFemale` "mp"/"fp" filename
+system from Pass 62, the initial hypothesis was that `itacdebf.bik`
+vs `itacdeb.bik` was a male/female pilot voice variant. **Reading the
+actual code disproved this before anything was written down**: the
+non-suffixed name plays when *entering* a category, and the
+`f`-suffixed name plays when *leaving* that same category (`f` =
+"farewell"/exit, not "female"). This is now directly confirmed for
+all 9 categories via the `0x4e9418` string table above (confidence 5).
+
+### Category-switch sequence (in `RunItacScreen`'s main loop)
+
+Confidence 5, directly read:
+1. Play a click sound.
+2. If a category was already active: format its exit-line bik path,
+   set `DAT_00520324 = 2` (transition-mode) and `DAT_0052082c = 1.0`
+   (fade direction/speed, unconfirmed), pump playback via
+   `FUN_00440010()`, then call the OLD category's exit callback
+   (table field 1) if non-null.
+3. Set the new active category (`_DAT_00523084`).
+4. If the new category isn't Exit (8) and has an enter callback (table
+   field 0), call it -- these are the `ItacEnter*Category` functions
+   documented above; they reset per-category state, set up hotspot
+   sub-rects, and call `LoadNamedResource` on that category's `.spr`.
+5. Format and pump the new enter-line bik, then the trans-line token
+   if present.
+6. If the new category IS Exit (8): special-cased -- plays
+   `PlayBinkMovieFromHandle` only if `DAT_00562dc8 > 0x12` (aboard
+   Yamato), waits for it to finish, then jumps straight to teardown
+   (skips step 7).
+7. Otherwise: calls `ItacShowCategoryTransitionAndEnter` (below) for
+   the new category.
+
+### `ItacShowCategoryTransitionAndEnter` (0x43fca0, was `FUN_0043fca0`)
+
+Confidence 5, directly read. Takes a category index. Formats
+`inter\itac\itactrans_NNNNN.tga` using that category's trans-line
+string (resolving the `itactrans_NNNNN` tokens from the table above
+into real TGA filenames), loads it via `SR_FileAlloc`, decodes via
+`SR_TGA_rle_uncompress`, then **directly `memcpy`s the decoded pixels
+into `*DAT_00520314`** -- the screen-sized buffer `RunItacScreen`
+allocated at setup. This is a *different*, fully-working blit path
+from the still-unresolved `rendererState+0x50` vtable call investigated
+in Pass 70: ITAC bypasses that renderer callback entirely and writes
+straight into its own screen buffer. After the blit, it clears
+`DAT_0052083c` and calls the category's table field 2 callback if
+non-null.
+
+### Table field 2 ("content setup") callbacks
+
+Confidence 5 for the shared/no-op case, confidence 4 for the
+per-category ones (read but not further exercised):
+- **Shared stub** `FUN_0044de90`: sets `DAT_0052032c = 1` (redraw-needed
+  flag) and calls `FUN_00440b10`, a generic 4-entry list-selection
+  reset helper (`0x520334`..`0x52036c`, 14 bytes/entry) -- used as-is
+  by News Reports, Video Reports, Fighters, and Capital Ships (the
+  plain list-browser categories).
+- **Debrief** (`0x4247a0`) additionally calls `FUN_00424be0`, which (for
+  mission > 1) calls `BuildMissionDebriefText` and lays out two text
+  regions, the second one only when its `char` parameter is non-zero
+  (open: exact meaning of that parameter not traced).
+- **Squadrons** (`0x44fb60`) additionally clears `DAT_00523058` before
+  the shared reset.
+- **Personnel** (`0x44e520`) sets up its own hotspot sub-rect and
+  callback (`FUN_0044ed00`, not decompiled) before the shared reset.
+- **Kills** (`0x4411c0`) is qualitatively different from every other
+  category: it renders a live 3D scene via the renderer's `+0x78`/
+  `+0x7c` callback pair (begin/end frame) into an offscreen buffer,
+  then `memcpy`s that rendered frame into `*DAT_00520314` the same way
+  `ItacShowCategoryTransitionAndEnter` does -- consistent with a
+  rotating 3D kill-marker/trophy display rather than a flat list.
+
+### Open follow-ups
+
+- Table fields 3 and 4 (per-category, called from the not-yet-decompiled
+  `FUN_004404a0` in the main loop) are unresolved -- likely per-frame
+  update and per-item/record-selection handling for the record browser.
+- `FUN_004abb80`/`LAB_004403f0`/`FUN_0043eaf0` (room-transition-out
+  internals) not decompiled.
+- `DAT_00523088`'s exact set-site (what marks eye-recognition as
+  already done) not traced.
+- The remaining itac.cpp-tagged functions `FUN_004406a0`,
+  `FUN_00440770`, `FUN_00440bd0` not decompiled.
+- The room-graph connections out of ITAC (the many `rel_itac2X.bik`/
+  `itac2X.bik` room-transition clips referenced in the string list)
+  not mapped to specific hotspots/destinations.

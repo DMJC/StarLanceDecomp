@@ -1823,3 +1823,24 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 
 - Live-debugging (hardware write-breakpoint) is the recommended next step; static search is exhausted for this specific field.
 - Check the remaining renderer callback slots (`+0x78`/`+0x7c`/`+0x80`/`+0x88`/`+0x8c`/`+0x90`) the same way to see if they show findable write sites while `+0x40`/`+0x50` don't.
+
+## Pass 71 -- The ITAC interface decoded (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `RunItacScreen` (0x43efc0, was `FUN_0043efc0`) -- main ITAC screen loop | 5 | Directly read in full: setup, 9-category state machine, eye-recog gate, room-transition-out mechanism. |
+| `DAT_00523088`'s eye-recognition gate is a 5th confirmed Reliant/Yamato mission-19 threshold site | 5 | `DAT_00562dc8 < 0x13` picks `PlayBinkMovieFromArchiveByName` (Reliant); otherwise `PlayBinkMovieFromHandle` (Yamato). Joins `RenderBriefingHubFrame`, `WinMain`'s cutscene selection, `RunMissionBriefingScreen`'s `briefdoor`, `RunCdPlayerPropScreen`'s room background. |
+| `PlayBinkMovieFromArchiveByName`/`PlayBinkMovieFromHandle` (0x4ab9d0/0x4ab6e0, was `FUN_004ab9d0`/`FUN_004ab6e0`) -- generic Bink player utilities, NOT ITAC-specific | 5 | Reused by ITAC's eye-recog gate and exit sequence with different arguments; one looks a clip up by name in a packed archive, the other opens a direct handle. |
+| The 9-category catalog (Debrief/News/Video Reports/Fighters/CapShips/Squadrons/Personnel/Kills/Exit) | 5 | All 9 `ItacEnter*Category` enter callbacks identified and renamed by decompiling their `LoadNamedResource` calls; cross-checked against three parallel 9-entry tables (`0x4e9288` callbacks, `0x4e9340` hotspot rects, `0x4e9418` bik/tga string names), all read directly. |
+| **CORRECTION**: bik `f`-suffix means exit-line, not gender | 5 | First-impression hypothesis (by analogy with the confirmed `g_wPilotGenderIsFemale` "mp"/"fp" system, Pass 62) was that `itacdebf.bik` was a female voice variant. Reading the actual code disproved this before it was written anywhere: non-suffixed = enter-category line, `f`-suffixed = exit-category line. Confirmed for all 9 categories via the `0x4e9418` string table. |
+| `ItacShowCategoryTransitionAndEnter` (0x43fca0, was `FUN_0043fca0`) | 5 | Loads `inter\itac\itactrans_NNNNN.tga`, decodes via `SR_TGA_rle_uncompress`, `memcpy`s directly into `*DAT_00520314` -- a working blit path that bypasses the still-unresolved `rendererState+0x50` vtable call from Pass 70 entirely. |
+| Table field 2 ("content setup") callbacks: shared no-op stub vs. per-category ones | 4 | Shared stub (`0x44de90`) resets a 4-entry list-selection state, used by the 4 plain list-browser categories. Debrief/Squadrons/Personnel have their own. Kills' (`0x4411c0`) renders a live 3D scene via the renderer's `+0x78`/`+0x7c` frame callbacks -- qualitatively different from the list categories. |
+| Category 3/6 bik-name fragments ("ss"=Fighters, "pil"=Personnel) don't match their `.spr` names | 1 | Fact of the mapping is confidence 5 (directly read); any semantic explanation for the fragment choice is confidence 1 speculation, kept explicitly separate per methodology. |
+
+### Open follow-ups
+
+- Table fields 3/4 (called from undecompiled `FUN_004404a0`) -- likely per-frame update / record-selection.
+- `FUN_004abb80`/`LAB_004403f0`/`FUN_0043eaf0` (room-transition-out internals) not decompiled.
+- `DAT_00523088`'s set-site not traced.
+- `FUN_004406a0`, `FUN_00440770`, `FUN_00440bd0` (remaining itac.cpp-tagged functions) not decompiled.
+- ITAC's room-graph exits (the `rel_itac2X.bik`/`itac2X.bik` clips) not mapped to hotspots/destinations.
