@@ -1718,3 +1718,11 @@ RunMissionBriefingScreen (0x437129) -- "briefdoor" texture, TWO variants selecte
   DAT_00562dc8 > 0x12 -- the same ANS Reliant/ANS Yamato mission-19 transfer threshold
   confirmed in Pass 65 (now a third independent site using it)
 ```
+
+CORRECTION (user-supplied): each screen's .tga is its real persistent background (loaded
+once at screen entry, before the per-frame render callback installs -- confirmed against
+RunOptionsMenuScreen's real disassembly), not a poster-frame placeholder. The matching
+.bik is the click-triggered transition animation the DEPARTING screen plays on its way to
+that background -- which button triggers which video was already mapped per-screen in
+Pass 60; this pass's .tga mapping is the destination-background half of the same
+(video, destination) pair for each menu click.

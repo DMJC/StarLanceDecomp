@@ -1776,8 +1776,10 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 | `LoadGenericSplashBackdrop`/`LoadStartupSplashBackdrop`/`ShowMissionLoadingScreen` (0x4ab3f0/0x4ab4b0/0x4ad0a0, were `FUN_004ab3f0`/`FUN_004ab4b0`/`FUN_004ad0a0`) | 4 | Directly read; the startup one's resolution-tiered `sl_splash*` selection sits behind a jump table Ghidra couldn't recover, so the exact resolution-to-file mapping is not confirmed. |
 | Requested `igoptfade.tga` doesn't exist under that spelling -- real file is `igoptfad.tga` | 5 | Confirmed absent via string search; mapped under its real name instead. |
 
+| Each menu screen's `.tga` is its real, persistent background (not a poster-frame placeholder); the matching `.bik` is the click-triggered transition animation FROM the departing screen TO that background | 5 | User-supplied correction, directly verified against `RunOptionsMenuScreen`'s real disassembly: `main2opt.tga` loads once at screen entry, before the per-frame render callback is installed -- the shape of a persistent backdrop, not a transient placeholder. Ties directly into Pass 60's per-button `.bik` trigger table -- each menu click's transition target is a `(video, destination background)` pair. |
+
 ### Open follow-ups
 
 - The `sl_splash*.tga` jump table's resolution-to-file mapping -- not recovered.
 - `FUN_0043eaf0` (shared `briefdoor` loader) not decompiled.
-- Exact display timing of the "arriving screen's .tga vs departing screen's .bik" pattern -- not traced at instruction level.
+- Whether every `.bik`/`.tga` pair follows the same click-triggered-transition shape confirmed for `main2opt` -- only that one pair was checked at the disassembly level.

@@ -8399,6 +8399,43 @@ mapped below under its real name.
 | `ingameop.tga` | `RunInGameOptionsScreen` (5 sites: `0x439610`, `0x4396d5`, `0x43972b`, `0x439761`, `0x4397b2`) | This screen's own primary backdrop -- loaded far more times than any other single screen in this list, consistent with it being the base background redrawn behind every one of `RunInGameOptionsScreen`'s own sub-transitions. |
 | `briefdoor` (no literal `.tga` suffix in the string itself -- likely appended by the loader) | `RunMissionBriefingScreen` (`0x437129`), with a SECOND, ship-specific variant at a sibling string address (`0x4e8a28`) | Selected by `DAT_00562dc8 > 0x12` (mission 19+) -- **the exact ANS Reliant/ANS Yamato transfer threshold confirmed in Pass 65.** The briefing-room door texture differs depending on which carrier the player is currently aboard, same as the hub-room hotspot tables and cutscene selection already documented for that boundary. |
 
+### Correction: these `.tga` files are the real, static menu BACKGROUNDS -- not poster frames
+
+User-supplied correction to this pass's original "poster frame /
+placeholder while the video loads" framing: **the `.tga` files are the
+actual persistent background image for each menu screen; the `.bik`
+videos are the transition animations that play between one screen's
+background and the next.** Verified directly against
+`RunOptionsMenuScreen`'s real disassembly around its `main2opt.tga`
+load site (`0x42a6e1`): the load (`CALL 0x004c5bd0`, a generic
+image-load helper) happens ONCE, at screen setup, immediately before
+the function installs its per-frame render callback
+(`DAT_00588730+0x88 = 0x42afb0`) and enters its main loop -- i.e.
+exactly the shape of "load the persistent backdrop, then run the
+screen," not a transient placeholder swapped out once a video starts.
+This reframes the whole table above: each screen loads its own named
+`.tga` as its resting-state background at entry, and the
+correspondingly-named `.bik` (`main2opt.bik`, `optfade.bik`,
+`sinfade.bik`, etc. -- Pass 60's catalog) is the animated wipe/fade a
+DIFFERENT (departing) screen plays on its way toward that background,
+not something the arriving screen itself is temporarily standing in
+for. **Confidence 5** on the general architecture (directly confirmed
+against real disassembly); the per-file table above remains accurate
+for WHERE each image loads, only the "poster frame" interpretive
+language should be read as superseded by this.
+
+**Further user-supplied detail**: which `.bik` plays is determined by
+*which menu option was clicked* -- consistent with, and now the
+correct interpretation of, Pass 60's own per-button transition table
+(e.g. `RunMainMenuScreen` case-by-case: clicking "Options" plays
+`main2opt.bik` toward `RunOptionsMenuScreen`'s `main2opt.tga`
+background; clicking "Multiplayer" plays `main2mul.bik`; clicking
+"New Game" plays `main2sin.bik` toward `main2sin.tga`). Pass 60
+already mapped each `.bik` to the specific hotspot/case that triggers
+it; this pass's `.tga` mapping is the missing other half of the same
+picture -- each button click's transition target is a `(video,
+destination background)` pair, not just a video.
+
 ### Open follow-ups
 
 - The `sl_splash*.tga` jump table's exact resolution-to-file mapping --
@@ -8409,8 +8446,9 @@ mapped below under its real name.
   through) -- not decompiled; would confirm whether `.tga` is really
   appended there or the string is used as-is for some other resource
   type.
-- The exact relationship between an "arriving screen loads X.tga" and
-  "departing screen plays X.bik" pattern seen for `main2opt`/
-  `main2sin` -- observed consistently but the actual display timing
-  (does the `.tga` show instantly before the video starts, or after
-  it ends?) wasn't traced at the instruction level.
+- Whether every `.bik`/`.tga` pair in Pass 60's catalog follows this
+  same "video plays on the departing screen, background loads on the
+  arriving one" shape, or whether some screens show their OWN video
+  over their OWN background mid-session -- only `main2opt.tga` was
+  checked at the disassembly level this pass; the rest are inferred
+  by analogy.
