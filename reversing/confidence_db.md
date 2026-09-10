@@ -2097,3 +2097,16 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - Whether `coal_prototypegate` is explicitly called a "space station" in dialogue/briefing text -- not statically recoverable.
 - Whether Steiner appears in `mission29`'s undecoded tables (1, 4-26) beyond the object list.
 - `tail[0]`/`[1]`'s formation-slot theory only confirmed for one squadron in one mission.
+
+## Pass 89 -- CORRECTION: mission 28 is the true final mission, not 29 (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| **CORRECTION (withdraws Pass 88's "mission 29 is final")**: mission 28's completion is special-cased in `AdvanceCampaignMissionAndSaveProfile` | 5 | `if (DAT_00562dc8 == 0x1c) { DAT_00562dc8 = 0x1d; return; }` -- skips all normal per-mission profile bookkeeping (rank snapshots, score history, profile-struct copy). Directly read, unambiguous. |
+| `mission29.dte` is bonus/replay content, not the next sequential mission | 5 | 3 independent access paths, none of them "next mission after 28": (1) the special jump above (bypasses normal advancement), (2) a hidden "Watch Ending" main-menu button (Pass 51, pre-existing finding), (3) `RunMissionSelectMapScreen`'s bonus-mission menu (same screen as `mission30`, confirmed Pass 87 as flight training). |
+| User's framing confirmed | 5 | "Level 28 is the campaign ending... Level 29 and 30 are either multiplayer or simulator missions" matches the evidence exactly. |
+
+### Open follow-ups
+
+- Whether `mission31`/`32` are further bonus scenarios on the same menu -- not checked.
+- Whether `mission29` is playable or a pure cinematic -- has gameplay-shaped object data, not independently confirmed either way.

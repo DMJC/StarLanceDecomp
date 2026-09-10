@@ -2682,3 +2682,51 @@ BONUS (ties to Pass 86's open tail[10] question): mission28's 7-ship
      (entries 1, 4-26) beyond the object list
   <- open: tail[0]/[1] formation theory confirmed for only 1 squadron
 ```
+
+## CORRECTION: mission 28 is the true final mission, not 29 (2026-09-10, Pass 89)
+
+```
+User correction: "Level 28 is the campaign ending. Klaus Steiner dies by
+  suicide to allow you to complete the mission. Level 29 and 30 are
+  either multiplayer or simulator missions." CONFIRMED via
+  AdvanceCampaignMissionAndSaveProfile (0x475a90), full re-read:
+
+    if (DAT_00562dc8 == 0x1c) {   // 0x1c = 28
+        DAT_00562dc8 = 0x1d;       // -> 29
+        return;                    // SKIPS rank-threshold update,
+    }                               // per-mission snapshot writes, the
+                                    // full profile-struct copy every
+                                    // OTHER mission's completion does
+    // normal path (every other mission): iVar4 = DAT_00562dc8 + 1; ...
+    //   full profile.bin-mirroring bookkeeping runs
+
+  -> mission 28's completion is engine-special-cased as categorically
+     different from every other mission transition = THE ending.
+
+mission29.dte's 3 access paths, NONE of them "sequential next mission":
+  1. The special jump above (bypasses normal advancement machinery)
+  2. RunMainMenuScreen's hidden index-4 "Watch Ending" hotspot (Pass 51,
+     pre-existing finding, predates this session's mission-decoding work):
+       DAT_00562dc8=0x1d; DAT_0057e044=1; InitializeMissionGameplay();
+       RunMissionGameplay(); UnloadMission();
+  3. RunMissionSelectMapScreen (pod-bay star map, Pass 7) -- offers
+     mission 29 as a selectable branch alongside 30/31/32
+
+  -> mission29.dte's "7-boss gauntlet -> GAME CLEAR" content (Pass 88)
+     is real but is BONUS/REPLAY content on the same menu as
+     mission30.dte (confirmed Pass 87: flight training) -- matches the
+     user's "simulator" framing exactly. Explains why Klaus Steiner
+     never appears in mission29's object data (Pass 88): it isn't part
+     of the main story sequence at all.
+
+CORRECTED roles:
+  mission28.dte = the TRUE final story mission (Steiner's sacrifice
+    happens here; special-cased campaign-ending transition)
+  mission29.dte = standalone bonus "final battle" replay scenario
+    (main-menu ending-watch button + star-map bonus-mission option)
+  mission30.dte = flight-training tutorial (same selection screen as 29)
+
+  <- open: whether mission31/32 (star-map's other branches) are further
+     bonus scenarios of the same kind
+  <- open: whether mission29 is playable or pure cinematic
+```

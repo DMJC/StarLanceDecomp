@@ -10439,3 +10439,79 @@ signal is in `tail[0]`/`tail[1]`, not `[8]`/`[9]`.
   (entries 1, 4-26 still undecoded).
 - `tail[0]`/`tail[1]`'s formation-slot theory -- confirmed only for
   one 7-ship squadron in one mission, not cross-checked elsewhere.
+
+## Pass 89 -- CORRECTION: mission 28, not 29, is the campaign's true final mission; 29/30 are non-sequential bonus content (2026-09-10)
+
+User-supplied correction to Pass 88: "Level 28 is the campaign ending.
+Klaus Steiner dies by suicide to allow you to complete the mission.
+Level 29 and 30 are either multiplayer or simulator missions." This is
+directly, unambiguously confirmed by re-reading
+`AdvanceCampaignMissionAndSaveProfile` in full -- **Pass 88's "mission
+29 is the final mission" conclusion is explicitly withdrawn.**
+
+### The proof: an early-return special case exactly at mission 28
+
+```c
+// AdvanceCampaignMissionAndSaveProfile, simplified from the real decompile
+if (DAT_00562dc8 == 0x1c) {        // 0x1c = 28
+    DAT_00562dc8 = 0x1d;           // jump straight to 29
+    return;                         // <-- SKIPS EVERYTHING BELOW
+}
+// ... normal per-mission bookkeeping only reached for every OTHER mission:
+// rank-threshold update, per-mission snapshot array writes, the full
+// profile-struct copy that every other mission's completion performs
+```
+
+Completing mission **28** is special-cased to bypass essentially the
+entire rest of the function -- none of the normal
+`profile.bin`-mirroring bookkeeping (rank snapshots, per-mission score
+history, the full session-to-save-struct copy documented in Pass 63)
+runs for this transition. **Confidence 5** -- directly read, completely
+unambiguous. This is the game engine treating mission 28's completion
+as categorically different from every other mission-to-mission
+transition, exactly matching "this is the ending."
+
+### `mission29` is not reached via normal sequential play at all -- three independent access paths, none of them "next mission after 28"
+
+1. **This special jump** (above) -- lands on index `0x1d`(29) but via
+   an early-return that skips normal advancement, not the ordinary
+   `iVar4 = DAT_00562dc8 + 1` path every other mission uses.
+2. **A hidden "Watch Ending" button on the main menu** (Pass 51,
+   already documented before this session's mission-decoding work
+   began): `RunMainMenuScreen`'s undocumented index-4 hotspot directly
+   sets `DAT_00562dc8 = 0x1d; DAT_0057e044 = 1;` and runs
+   `InitializeMissionGameplay`/`RunMissionGameplay`/`UnloadMission` --
+   a standalone, story-independent way to watch/replay this content
+   straight from the main menu.
+3. **`RunMissionSelectMapScreen`** (the pod-bay star-map screen,
+   documented since Pass 7): offers mission `29` as one of its
+   selectable branches alongside `30`/`31`/`32` -- the exact same menu
+   `mission30.dte` (confirmed Pass 87 as a flight-training exercise)
+   is reached from.
+
+So `mission29.dte`'s "boss gauntlet ending in `GAME CLEAR`" content
+(Pass 88) is real, but it's **bonus/replay content bundled with the
+training missions on the same selection screen**, not the numbered
+continuation of the story -- exactly the "simulator" characterization
+the user gave it. Its total absence of Klaus Steiner (Pass 88) is now
+fully explained rather than a loose thread: it isn't part of his
+story arc because it isn't part of the main story sequence at all.
+
+### Corrected summary
+
+| Mission | Role |
+|---|---|
+| `mission28.dte` | **The true final story mission.** Klaus Steiner's death/sacrifice sequence (`Steiner suicide curvePoint1/2`, `Steiner blow up point`, Pass 88) plays out here, and completing it is the one mission-transition the game engine special-cases as categorically different from normal play. |
+| `mission29.dte` | A standalone bonus/replay "final battle" scenario (7-boss gauntlet, `GAME CLEAR` ending) -- reachable from the main menu's hidden ending-replay button and the star-map's mission-select screen, NOT from normal campaign progression. Matches the user's "simulator" framing. |
+| `mission30.dte` | Confirmed flight-training tutorial (Pass 87) -- same selection screen as 29. |
+
+### Open follow-ups
+
+- Whether `mission31`/`mission32` (the star-map's other 2 branches,
+  never decoded) are further simulator/bonus scenarios of the same
+  kind -- plausible given the pattern, not checked.
+- Whether `mission29`'s content is literally a "watch only" cinematic
+  or a fully playable bonus mission -- it has real gameplay-shaped
+  object data (AI ship spawns, boss waves), suggesting playable,
+  but this wasn't independently confirmed against `RunMissionGameplay`
+  behavior for this specific mission index.
