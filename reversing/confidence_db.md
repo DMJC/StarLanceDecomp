@@ -2169,3 +2169,21 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - Confirming `SpawnObjectRecord+0x00`'s dual role independently.
 - `DAT_0052952c`'s remaining fields/bounds.
 - `MissionTriggerInstance`'s still-unmapped ~24 bytes (Pass 92).
+
+## Pass 94 -- Real-data confirmation of the spawn-record link; more trigger-array and index-table fields (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `SpawnObjectRecord+0x00`'s low 16 bits index `g_pObjectTriggerIndexTable` | 5 (up from Pass 93's 3) | Cross-referenced all 118 real objects in `mission1.dte`: every `triggerCount>0` entry has a real in-bounds `triggerStartIndex`; every `triggerCount==0` entry uses sentinel `0xffff`. Zero exceptions. |
+| `MissionTriggerInstance+0x02` (`scriptRef`) is a real, non-constant field | 4 (up from 2) | Real values across 41 `mission1.dte` records: small, mostly-increasing integers (0..774) with occasional -1. Consistent with a script-instruction-stream byte offset. |
+| `MissionTriggerInstance+0x14` (`armed`) genuinely varies | 5 | 40/41 real records armed at mission start; exactly 1 pre-disarmed. |
+| `argSlots` (`+0x1c`) population depends on `triggerTypeCode` | 3 | Type 6 records populate `argSlots[2:4]`; types 0/4 populate `argSlots[0:2]`. Reproducible within `mission1.dte`, not cross-checked against a 2nd file. |
+| `MissionTriggerInstance` has several fields that are constant within runs of consecutive records, changing at apparent object-ownership boundaries (`+0x06..+0x0d`, `+0x10`, `+0x17..+0x18`, `+0x1a..+0x1b`) | 2 | Structural pattern only -- no individual field's semantic role identified. Not to be read as confirming any specific label. |
+| `ObjectTriggerIndexEntry+0x00` (byte) is real/populated | 1 | Values 0/1/2 observed; does not correlate with `triggerCount>0` (a counterexample exists). Meaning undetermined. |
+| `ObjectTriggerIndexEntry+0x04` (i32) is 0 except for the Player_Ship entry (=1) | 2 | Suggestive of a player/special-object flag; single (N=1) data point, not cross-checked against a 2nd mission. |
+
+### Open follow-ups
+
+- Cross-check the `+0x04` "player flag" theory and `argSlots` type-shape correlation against a 2nd mission file.
+- Individually label the "constant-per-owner-run" `MissionTriggerInstance` fields.
+- `ObjectTriggerIndexEntry+0x00`'s 3-value enum, meaning undetermined.

@@ -2922,3 +2922,41 @@ DAT_0052952c -- static per-trigger-TYPE metadata (28-byte stride,
   <- open: DAT_0052952c's remaining fields/bounds
   <- open: MissionTriggerInstance's ~24 still-unmapped bytes (Pass 92)
 ```
+
+## Real-data confirmation of spawn-record link; more trigger/index-table fields (2026-09-10, Pass 94)
+
+```
+SpawnObjectRecord+0x00 (low 16 bits) --index--> g_pObjectTriggerIndexTable[id]
+  CONFIRMED (confidence 5, up from Pass 93's 3) by cross-referencing all
+  118 real objects in mission1.dte:
+    triggerCount>0  => triggerStartIndex is real, in-bounds into
+                        g_pMissionTriggerArray (e.g. id0/Player_Ship ->
+                        {count=3,start=0}; id15 -> {count=3,start=19})
+    triggerCount==0 => triggerStartIndex == 0xffff sentinel, always
+  -> zero exceptions across the full object set of a real mission
+
+ObjectTriggerIndexEntry, refined from mission1.dte's real entry7 data:
+    +0x00: byte, real/populated, values {0,1,2}; does NOT correlate with
+           triggerCount>0 (counterexample exists) -- meaning open
+    +0x01: triggerCount (byte) [Pass 93]
+    +0x02: triggerStartIndex (i16) [Pass 93]
+    +0x04: i32, ==0 for every entry except object id 0 (Player_Ship),
+           which is 1 -- single data point, plausible player/special flag
+
+MissionTriggerInstance, refined from mission1.dte's 41 real records:
+    +0x02 scriptRef (i16): confirmed real & varying (0..774, occasional -1)
+           -- strengthens "script-position reference" read (confidence 4)
+    +0x14 armed: confirmed varying, 40/41 armed, 1 pre-disarmed
+    +0x1c argSlots[10] (i16): population depends on triggerTypeCode --
+           type 6 -> slots[2:4]; types 0/4 -> slots[0:2] (confidence 3,
+           single-file observation)
+    +0x06..+0x0d, +0x10, +0x17..+0x18, +0x1a..+0x1b: constant within runs
+           of consecutive records, changing at apparent object-ownership
+           boundaries -- structural pattern only, NO semantic labels
+           assigned (confidence 2)
+
+  <- open: cross-check +0x04 "player flag" and argSlots-shape correlation
+           against a 2nd mission file
+  <- open: individually label the "constant-per-owner-run" fields
+  <- open: ObjectTriggerIndexEntry+0x00's 3-value enum
+```

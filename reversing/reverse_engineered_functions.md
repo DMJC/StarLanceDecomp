@@ -10901,3 +10901,85 @@ mapped further this pass.
   verified as this table's actual capacity).
 - `MissionTriggerInstance`'s still-unmapped ~24 bytes (open since
   Pass 92).
+
+## Pass 94 -- Real mission data confirms the spawn-record link, and fills in more trigger-array fields (2026-09-10)
+
+Direct follow-up on all 3 of Pass 93's open items. Rather than keep
+reading consumer code, extended `decode_dte.py`'s in-memory logic
+(one-off script, not committed as a tool change) to pull `.dte` entry
+5 (`g_pMissionTriggerArray`) and entry 7 (`g_pObjectTriggerIndexTable`)
+directly out of a real mission file (`mission1.dte`) and
+cross-reference them against entry 3's `SpawnObjectRecord`s -- the
+same "verify against ground truth" method used since Pass 63.
+
+### `SpawnObjectRecord+0x00`'s dual role as a trigger-index -- CONFIRMED, not just plausible
+
+Confidence 5 (up from Pass 93's 3). Computed
+`g_pObjectTriggerIndexTable[objectRecord.id_low16]` for all 118 real
+objects in `mission1.dte` and checked the result against
+`g_pMissionTriggerArray`'s real bounds (41 entries). The pattern is
+completely clean: **every entry with `triggerCount > 0` has a
+`triggerStartIndex` that's genuinely in-bounds** (e.g. object id 0 =
+`Player_Ship` -> `{count=3, start=0}`; id 15 = `mammoth (ANS Guliver)`
+-> `{count=3, start=19}`; id 22/23 = the two `ger_lueneburg` ships ->
+`{count=1, start=17}`/`{count=1, start=18}`), **and every entry with
+`triggerCount == 0` uses the exact same `0xffff` sentinel for
+`triggerStartIndex`**. This is real, internally-consistent data, not
+coincidence -- the link is confirmed.
+
+### `ObjectTriggerIndexEntry`'s remaining bytes, partially resolved
+
+Confidence 1-2 (real, populated data confirmed; semantic meaning
+still open):
+
+- **`+0x00`** (byte) -- an enum-shaped field, values `0`/`1`/`2`
+  observed across the table, does NOT cleanly correlate with whether
+  the entry has any triggers (e.g. object id 1's entry has `b0=1` but
+  a real `count=1`). Meaning undetermined.
+- **`+0x04`** (int32) -- `0` for every entry except object id `0`
+  (`Player_Ship`'s own entry), which reads `1`. Suggestive of a
+  "player/special object" flag, but this is a single data point --
+  not confirmed against a second mission file.
+
+### `MissionTriggerInstance`: real data fills in more of the picture
+
+Dumped and tabulated all 41 real trigger records from `mission1.dte`.
+Confidence 4 on `scriptRef` (`+0x02`): real values are small,
+mostly-increasing non-constant integers (0, 18, 36, 82, ... 774) with
+occasional `-1` -- consistent with a byte offset into a mission
+script's instruction stream (Pass 32's stack-VM cursor concept),
+raised from Pass 92's confidence 2. Confidence 5 that `+0x14`
+(`armed`) is real and meaningful -- 40 of 41 records are armed at
+mission start; exactly one (`record 14`) is pre-disarmed.
+
+**A structural refinement to `argSlots` (`+0x1c`)**: the 10-`int16`
+array isn't used uniformly -- which pair of slots gets populated
+depends on the record's `triggerTypeCode` (`+0x00`): type `6` records
+consistently populate `argSlots[2:4]`, while types `0`/`4` consistently
+populate `argSlots[0:2]`, with all other slots staying `-1`. This is
+consistent with each trigger TYPE having its own fixed argument
+"shape" (plausibly described by `DAT_0052952c`'s per-type metadata
+table, Pass 93), not a simple flat list every type uses the same way.
+**Confidence 3** -- the correlation is real and reproducible within
+this one file's data, not independently cross-checked against a
+second mission.
+
+Several other offsets (`+0x06`-`+0x0d`, `+0x10`, `+0x17`-`+0x18`,
+`+0x1a`-`+0x1b`) show a distinctive pattern: their values stay
+**constant across runs of consecutive records, changing only at what
+look like object-ownership boundaries** (matching
+`g_pObjectTriggerIndexTable`'s per-source slicing). This is consistent
+with some of these fields caching per-source/owner context directly
+in each trigger instance (redundant with, or an alternative lookup
+path to, `g_pObjectTriggerIndexTable`), but no individual field's
+exact meaning was pinned down -- reported as a genuine structural
+observation, confidence 2, rather than assigned specific labels.
+
+### Open follow-ups
+
+- Cross-check the `+0x04` "player flag" theory and the `argSlots`
+  type-shape correlation against a second mission file.
+- The "constant-per-owner-run" fields (`+0x06`-`+0x0d`, `+0x10`,
+  `+0x17`-`+0x18`, `+0x1a`-`+0x1b`) -- structural pattern observed,
+  no individual semantic labels assigned.
+- `ObjectTriggerIndexEntry+0x00`'s 3-value enum, meaning undetermined.
