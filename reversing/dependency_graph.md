@@ -1666,3 +1666,32 @@ Real asset confirmation: reliant.shp / yamato.shp (carrier 3D models), reliant_h
   for BOTH ships), "reliant_induction" (Reliant-specific onboarding sequence, role
   unconfirmed beyond its error string).
 ```
+
+## The missing AI link found: UpdateShipAiTick + the real AI state stack (2026-09-10, Pass 66)
+
+```
+UpdateShipAiTick (0x40c5f0, was FUN_0040c5f0) -- per-object AI tick
+  <- depended on by: ProcessMissionSimulationTick (confirmed call site), FUN_00457cd0,
+     FUN_0040c8f0, FUN_00416450 (other callers, not individually traced)
+  -> drains object+0xb90/+0xb8c (QueueAiEvent's perception queue, Pass 20), promoting an
+     eligible event (expiry passed AND priority >= current top-of-stack state's priority,
+     via PTR_DAT_004e06e0 catalog lookup) into the active AI-state record
+  -> runs object+0x684's TOP-OF-STACK state catalog entry's slot-0 (OnEnter, once via the
+     object+0x688 "fresh" flag) and slot-4 (OnUpdate, every tick) callbacks
+  -> if the state catalog flags have bit 0x20 ("unconditional transition"): runs OnUpdate,
+     FUN_0040ce70, then RECURSES into itself (immediate same-tick re-evaluation)
+
+PushAiState (0x40cc10, was FUN_0040cc10) -- CORRECTS Pass 17's "AI command structure" model:
+  object+0x684 (base ptr) / object+0x680 (depth) = a real 20-entry (0x208=520 byte, 26
+    bytes/entry) PUSHDOWN STACK of AI states, not a single current-state slot
+  -> depends on: TrySetAiState (priority gate), SR_MEM_allocate (lazy 520B stack +
+     144B/0x90 scratch buffer @ object+0x68c, source-tagged aigeneric.cpp)
+  -> move-to-front dedup: if the new state+params already exist deeper in the stack,
+     removes that entry and re-pushes at top instead of duplicating
+  -> on real push: shifts stack up, writes new top entry, zeroes 4 payload fields (the
+     same fields UpdateShipAiTick fills FROM a queued event), sets object+0x688 "fresh"
+     flag unless the state is an unconditional-transition type, zeroes the scratch buffer,
+     tags with an incrementing generation ID (DAT_005185a8) when DAT_005185b1 is set
+  <- depended on by: UpdateShipAiTick, SetShipDestroyedState (Pass 17)
+  -> first gate: FUN_0040ca00 (semantics not confidently determined, confidence 1)
+```

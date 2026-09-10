@@ -8250,3 +8250,126 @@ that mission 19 is precisely where the game's internal model of
   to further story beats (the campaign has ~29 missions total; this
   pass only investigated the one boundary the user's context pointed
   at).
+
+## Pass 66 -- The missing AI link found: `UpdateShipAiTick` and the real AI state STACK (2026-09-10)
+
+Direct continuation of the combat-AI thread. Picked up the oldest
+unresolved item in that whole line of investigation (flagged back in
+the twentieth pass): *"the actual link between `QueueAiEvent`'s queue
+and `TrySetAiState`'s state transitions... finding whatever reads
+`object+0xb90`'s queue would settle this."* Found it via
+`search_byte_patterns` on the `+0xb8c` displacement bytes, which
+turned up a previously untouched function right next to
+`TrySetAiState` itself.
+
+### `UpdateShipAiTick` (`0x40c5f0`, was `FUN_0040c5f0`) -- the per-object AI tick, confirmed called from `ProcessMissionSimulationTick`
+
+```c
+void __fastcall UpdateShipAiTick(int shipSlot);
+```
+
+Does exactly two jobs, run once per AI-controlled object per
+simulation tick:
+
+1. **Drains the perception/event queue** (`QueueAiEvent`'s buffer,
+   Pass 20) entry by entry: an event is eligible once its expiry tick
+   has passed (`event.expiry <= currentTick`) AND -- this is the
+   actual missing link -- **its state-catalog priority is `>=` the
+   ship's CURRENTLY ACTIVE state's priority** (the exact same
+   priority lookup `TrySetAiState` itself performs, Pass 17/18). An
+   eligible event gets its payload copied straight into the ship's
+   active AI-state record and is removed from the queue (shifting the
+   rest down) -- perceptions really do become state data once they
+   win the same priority gate real explicit `TrySetAiState` calls go
+   through elsewhere.
+2. **Runs the current (top-of-stack) AI state's callbacks**: if the
+   state was just entered (a `+0x688` "fresh" flag), calls its slot-0
+   (**OnEnter**) callback once and clears the flag; always calls
+   slot-4 (**OnUpdate**) every tick -- confirming Pass 18's
+   "plausibly OnEnter/OnUpdate" guess for the state catalog's two
+   leading callback slots. If the state's catalog flags have the
+   `0x20` ("unconditional transition") bit set, it runs OnUpdate, then
+   an unopened `FUN_0040ce70`, then **recurses into itself** --
+   unconditional-transition states re-evaluate immediately within the
+   same tick rather than waiting for the next one.
+
+**Confidence 5** -- directly read, and the queue-to-priority-gate
+connection is exactly the mechanism this project had been assuming
+existed but never located for 46 passes.
+
+### `PushAiState` (`0x40cc10`, was `FUN_0040cc10`) -- correcting the "AI command structure" model: it's a real 20-entry STACK
+
+Called by `UpdateShipAiTick` above (and, per Pass 17's
+`SetShipDestroyedState`, by other gameplay code directly) to actually
+commit a new AI state. Reading it fully **corrects and completes**
+Pass 17's tentative "AI command/state structure... pushes a command
+onto it" description: `object+0x684`/`object+0x680` are the base
+pointer and DEPTH of a genuine **pushdown stack of up to 20 AI
+states** (`0x208` = 520 bytes = 20 x 26-byte entries; the push is
+refused once depth exceeds `0x13`), not a single current-state slot.
+
+- **Early-out**: if the requested state+params are already an exact
+  match for the CURRENT top-of-stack entry, skips straight to success
+  without calling `TrySetAiState` again (avoids redundant re-entry
+  every tick for a state that keeps re-requesting itself).
+- **Priority gate**: otherwise calls `TrySetAiState` itself first;
+  bails out entirely if it refuses.
+- **Move-to-front deduplication**: searches the REST of the existing
+  stack for an entry matching the new state+params; if found, removes
+  it from its current position (shifting entries above it down) so it
+  can be re-pushed at the top instead of creating a duplicate deeper
+  in the stack -- a ship's history of "what it was doing before"
+  doesn't accumulate duplicate entries.
+- **Lazy allocation**: the first time a ship needs this stack, allocates
+  BOTH the 520-byte state-stack buffer and a separate 144-byte
+  (`0x90`) scratch buffer (`object+0x68c`) -- source-tagged
+  `C:\lancer\game\aigeneric.cpp`, confirming a dedicated AI source
+  file distinct from the already-known `Ai.cpp`.
+- **On a real (non-duplicate) push**: shifts every existing entry up
+  one slot, writes the new state's 3 parameters and state ID into the
+  new top slot, zeroes 4 payload fields (the same fields
+  `UpdateShipAiTick` copies FROM a queued event INTO this exact
+  struct -- confirming those fields are event-carried context data,
+  reset to 0 for an explicitly-requested state that didn't come from
+  the event queue). If the new state ISN'T an "unconditional
+  transition" state, sets the `+0x688` "freshly entered" flag (which
+  `UpdateShipAiTick` reads to fire the one-time OnEnter callback) and
+  zeroes the 144-byte scratch buffer for the new state's own working
+  data. Finally tags the entry with an incrementing generation ID
+  (`DAT_005185a8`) when a global flag (`DAT_005185b1`) is set, and
+  increments the stack depth.
+
+**Confidence 5** -- directly read in full. This is a materially
+different (and more complete/correct) model than Pass 17's original
+"AI command/state structure" language: it's specifically a **bounded,
+deduplicating pushdown stack**, which explains why a ship can
+meaningfully "resume its previous behavior" after a transient state
+(like a scripted attack or a queued perception) finishes -- popping
+back to whatever was underneath, rather than the game needing a
+separate "previous state" field.
+
+### `FUN_0040ca00` -- a minor bounds/flag gate, not fully characterized
+
+`PushAiState`'s very first check. Reads as roughly "reject if
+`shipSlot` fails a comparison against `DAT_0058832c` (a
+player-count-shaped global, sense not independently re-verified
+here), or the requested state's catalog index exceeds 99, or the
+target state's own catalog flags have bit `0x1` set." **Confidence 1**
+on the exact semantics -- flagged honestly rather than asserted, since
+the direction of the first comparison didn't cleanly fit either
+"blocks player states" or "blocks AI states" on a quick read.
+
+### Open follow-ups
+
+- `FUN_0040ca00`'s exact semantics (which ships/states it actually
+  blocks) -- needs a more careful re-read or a live-debugging check.
+- `FUN_0040ce70` (called for unconditional-transition states before
+  `UpdateShipAiTick` recurses) and `FUN_0040c520` (the flags-bit-`0x40`
+  callback in the same function) -- not decompiled.
+- The generation-ID mechanism (`DAT_005185a8`/`DAT_005185b1`) --
+  purpose not traced (plausibly multiplayer state-sync versioning,
+  not confirmed).
+- Cross-reference the 12-per-object `reserved1`/`reserved2` hub-room
+  flags (Pass 64) against this AI system -- unrelated systems as far
+  as traced, but both live in similarly-shaped per-object structures,
+  worth a sanity check if confusion arises later.

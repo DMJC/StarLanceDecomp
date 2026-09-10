@@ -1751,3 +1751,18 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - `DAT_0052a470`'s write site (confirms "transfer cutscene already shown" semantics) -- not located.
 - The Reliant "induction" sequence's role -- only its existence confirmed.
 - Other mission-index thresholds possibly corresponding to further story beats -- not surveyed beyond mission 19.
+
+## Pass 66 -- The missing AI link found: `UpdateShipAiTick` + the real AI state stack (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `UpdateShipAiTick` (0x40c5f0, was `FUN_0040c5f0`) -- per-object AI tick, called from `ProcessMissionSimulationTick` | 5 | Drains the `QueueAiEvent` perception queue (Pass 20) using the exact same priority-gate `TrySetAiState` uses, then runs the top-of-stack state's OnEnter(once)/OnUpdate(every tick) callbacks. This is the missing link flagged unresolved since Pass 20. |
+| `PushAiState` (0x40cc10, was `FUN_0040cc10`) -- `object+0x684`/`+0x680` is a real 20-entry pushdown STACK, not a single "current command" | 5 | Corrects/completes Pass 17's "AI command/state structure" language. Move-to-front deduplication against the existing stack, priority-gated via `TrySetAiState`, lazy-allocates a 520-byte stack + 144-byte scratch buffer (source-tagged `aigeneric.cpp`). |
+| State catalog's leading two callback slots = OnEnter/OnUpdate | 5 | Confirms Pass 18's "plausibly OnEnter/OnUpdate" guess -- directly read in `UpdateShipAiTick`. |
+| `FUN_0040ca00` (PushAiState's first gate check) | 1 | Mechanism read, exact semantics (which ships/states it blocks) not confidently determined. |
+
+### Open follow-ups
+
+- `FUN_0040ca00`'s exact semantics.
+- `FUN_0040ce70`/`FUN_0040c520` not decompiled.
+- The generation-ID mechanism (`DAT_005185a8`/`DAT_005185b1`) -- purpose not traced.
