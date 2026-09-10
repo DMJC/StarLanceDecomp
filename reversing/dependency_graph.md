@@ -2381,3 +2381,33 @@ Updated nRoomType catalog (cumulative):
   <- open: CD room's own 4-way branching not traced
   <- open: types 1/3/6 not fully decoded
 ```
+
+## nRoomType==6 identified: RunMedalCaseScreen (2026-09-10, Pass 82)
+
+```
+RunMedalCaseScreen (0x4362f0, was FUN_004362f0) -- nRoomType==6 handler,
+  self-identified via "MedalDisplay resource: error searching/loading %s"
+  1. play locker-open anim: rel_locklup.bik (Reliant) / locklidup.bik (Yamato)
+  2. DAT_00588730+0x88 = RenderBriefingHubFrame  [same per-frame callback
+     as the briefing hub room, Pass 64]
+  3. for i in 0..5:
+       if DAT_00562dfc[i] != 0: load "rmedal_%d.spr"/"medal_%d.spr" (i+1)
+       if DAT_00562e14[i] != 0: load "rbar_%d.spr"/"bar_%d.spr" (i+1)
+  4. per-frame: HitTestRectArray(6 entries pre-mission19 / 11 post) over
+     the medal slots; SaveScreenshotTga on key 0xb
+  5. play locker-close anim: rel_lockldo.bik / lokliddo.bik -> free all
+     loaded medal/bar sprites -> return
+
+CORRECTION to Pass 64: PlayerProfile.reserved1[6] (DAT_00562dfc mirror) =
+  medal-earned flags; reserved2[6] (DAT_00562e14 mirror) = bar/ribbon-
+  earned flags. Sharpens Pass 64's confidence-2 "which hub objects" guess
+  to a confirmed, specific mapping (confidence 5) -- same fields, more
+  precise role.
+
+Ties to Pass 59 (much earlier, pre-ITAC session work): the .spr RLE format
+  was decoded from a real screenshot (SL_Medal_Case.webp) long before the
+  in-game function that renders it was identified -- this closes that loop.
+
+  <- open: which VR room node(s) carry nRoomType==6
+  <- open: 6-vs-11 hotspot layout not mapped slot-by-slot
+```

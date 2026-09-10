@@ -1994,3 +1994,17 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - `nRoomType == 8` -- not seen/confirmed in any node read so far.
 - The CD room's further 4-way branching (`0x506d70`'s targets) -- not traced.
 - `nRoomType` 1/3/6's exact semantics -- still only structurally sketched.
+
+## Pass 82 -- `nRoomType == 6` identified: `RunMedalCaseScreen`, correcting Pass 64's `PlayerProfile` fields (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `RunMedalCaseScreen` (0x4362f0, was `FUN_004362f0`) -- the player's medal locker display, `nRoomType==6` | 5 | Self-identified via its own "MedalDisplay resource" assertion strings. Locker-open animation -> loads up to 6 medal + 6 bar sprites -> per-slot hotspot poll (supports screenshot save) -> locker-close animation. Shares `RenderBriefingHubFrame` as its per-frame callback with the briefing hub room. |
+| **CORRECTION** (sharpened, not reversed): `PlayerProfile.reserved1[6]`/`reserved2[6]` = medal-earned / bar-earned flags | 5 | Up from Pass 64's confidence-2 "which hub objects" mapping. Directly gates which `rmedal_N.spr`/`rbar_N.spr` sprite loads in `RunMedalCaseScreen`. |
+| Ties Pass 59's early `.spr` RLE-format decode (verified against `SL_Medal_Case.webp`) to the actual in-game render function | 5 | Closes the loop between early asset-level work and the later room-graph/`profile.bin` work. |
+
+### Open follow-ups
+
+- Which VR room node(s) have `nRoomType==6` -- not traced from the room-graph side.
+- The 6-vs-11-hotspot Reliant/Yamato medal-case layout difference -- not mapped slot-by-slot.
+- `nRoomType` 1/3's exact semantics -- still open.

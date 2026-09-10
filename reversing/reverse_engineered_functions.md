@@ -9855,3 +9855,73 @@ the bunkroom** (arrival clip `rel_pod2c.bik`), alongside `0x506c80`
   `0x506b90`/`0x506bc0`/`0x506e00`/`0x506e90`) -- not traced.
 - Types 1/3/6's exact semantics -- still only structurally sketched,
   not fully decoded.
+
+## Pass 82 -- `nRoomType == 6` identified: `RunMedalCaseScreen`, and a correction to Pass 64's `PlayerProfile` fields (2026-09-10)
+
+Direct request: look into `FUN_004362f0` (the room-type-6 handler left
+unidentified across Passes 73/81). Fully decompiled -- it's the
+player's **personal medal locker display**, self-identified via its
+own `"MedalDisplay resource: error searching for %s"` /
+`"...error loading %s"` assertion strings. Renamed
+`RunMedalCaseScreen` (`0x4362f0`, was `FUN_004362f0`).
+
+### What it does
+
+1. Plays a locker-opening animation (`rel_locklup.bik` for the
+   Reliant / `locklidup.bik` for the Yamato, on the same
+   mission-19 threshold used everywhere else).
+2. Installs `RenderBriefingHubFrame` as the per-frame render callback
+   (`DAT_00588730+0x88`) -- **the same callback the briefing hub room
+   uses** (Pass 64), confirming this locker display shares rendering
+   machinery with the hub room rather than being a fully separate
+   screen.
+3. Loads up to 6 medal sprites (`rmedal_%d.spr`/`medal_%d.spr`) and 6
+   "bar" sprites (`rbar_%d.spr`/`bar_%d.spr`), **each conditionally,
+   gated on `DAT_00562dfc[i]`/`DAT_00562e14[i]` being non-zero**.
+4. Polls a per-slot hotspot-rect array (6 entries pre-mission-19, 11
+   post) every frame, and supports **saving a screenshot of the medal
+   case** via `SaveScreenshotTga` on a dedicated key (`0xb`).
+5. On exit: plays the matching locker-closing animation
+   (`rel_lockldo.bik`/`lokliddo.bik`), frees every loaded medal/bar
+   sprite, and returns.
+
+### CORRECTION: Pass 64's `PlayerProfile.reserved1`/`reserved2` are medal/bar-earned flags, not generic hub-room flags
+
+Pass 64 identified `PlayerProfile+0x30`/`+0x48` (session mirrors
+`DAT_00562dfc`/`DAT_00562e14`) as "hub-room prop/hotspot enabled-flags,"
+confidence 4 on the general role but confidence 2 on which specific
+hub objects each of the 12 entries controlled. **This pass's direct
+read of `RunMedalCaseScreen` resolves that mapping precisely**: these
+are exactly the **6 earned-medal flags and 6 earned-bar(/ribbon)
+flags** gating which `rmedal_N.spr`/`rbar_N.spr` sprite loads for the
+player's medal case. Confidence raised to **5** for
+`reserved1[6]` = medal-earned flags, `reserved2[6]` = bar/ribbon-earned
+flags -- this is a strictly more specific reading of the same fields
+Pass 64 already had right in general shape, not a reversal.
+
+### Ties together with earlier, much-earlier session work
+
+This is the same "medal case" `.spr` RLE format decoded from a real
+screenshot all the way back in Pass 59 (`reversing/tools/decode_spr.py`,
+verified against `SL_Medal_Case.webp`) -- this pass identifies the
+actual in-game function that renders it, closing the loop between
+that early asset-level work and the room-graph/`profile.bin` work
+done many passes later.
+
+### `nRoomType` catalog, updated
+
+| Value | Meaning |
+|---:|---|
+| 6 | Launch `RunMedalCaseScreen` (**resolved this pass**) |
+
+(all other entries unchanged from Pass 81's table)
+
+### Open follow-ups
+
+- Which physical VR room node(s) have `nRoomType == 6` (i.e. which
+  hotspot leads to the medal case) -- not traced from the room graph
+  side this pass, only the destination function itself.
+- The exact 6-vs-11-hotspot layout difference between Reliant and
+  Yamato medal cases -- read as a fact (different rect-array sizes)
+  but not mapped slot-by-slot.
+- Types 1/3's exact semantics -- still open.
