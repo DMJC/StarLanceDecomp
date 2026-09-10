@@ -2338,3 +2338,46 @@ WinMain's post-RunReliantInductionTour dispatcher: jump table @ 0x4aa8c8,
      clips whose names don't literally match the exit stage) reflect
      deliberate generic-clip reuse or a wrong stage-index assumption
 ```
+
+## The pod bay's 3 exits: CD Player room, ITAC, Mission Select Map (2026-09-10, Pass 81)
+
+```
+Pod bay (0x506cb0/0x506bf0) outgoing targets (0x506d40/0x506c20/0x506ce0),
+  all read and traced one hop further:
+
+0x506c20 -- 3rd copy of the ITAC vestibule junction (pod-bay-arrival variant)
+  arrival clip: rel_pod2itac.bik
+  targets: 0x506c50 (ITAC itself, nRoomType=2), 0x506e60 (corridor return),
+           0x506cb0 (pod-bay return)
+  -- identical hotspot rect + targets to Pass 73's 0x506b30 (corridor-
+     arrival copy); only the arrival clip differs
+
+0x506d40 -- the CD PLAYER ROOM (CORRECTION: "cd" != "cargo deck")
+  arrival clip: rel_pod2cd.bik, alt: rel_cdloop.bik (same loop
+    RunReliantInductionTour's stage 2 uses, Pass 79)
+  targets (4): 0x506b90, 0x506bc0, 0x506e00, 0x506e90 (not traced further)
+  -- ALSO reachable via 0x506da0 (arrival clip rel_bunk2cd.bik, one of
+     the CD room's own targets), which has nRoomType=9:
+     CONFIRMED via disassembly (RunShipInteriorVRLoop @ 0x43ad91:
+       CMP AX,0x9; JNZ <skip>; CALL RunCdPlayerPropScreen (0x437fc0))
+     -> nRoomType==9 = launch RunCdPlayerPropScreen (Pass 68)
+
+0x506ce0 -- Mission Select Map launcher
+  arrival clip: rel_podop2c.bik, nRoomType=5 -> RunMissionSelectMapScreen
+  single target: 0x506d10 -> a 3RD bunkroom-arrival-variant copy
+    (shares 0x506b30/0x506b60/0x506b00 targets with Pass 73's 0x506c80
+     post-ITAC-arrival bunkroom node; arrival clip rel_pod2c.bik)
+  -- matches Pass 73's already-confirmed "next room after mission map"
+     hardcode in RunShipInteriorVRLoop
+
+Updated nRoomType catalog (cumulative):
+  0 = plain still-image room       5 = RunMissionSelectMapScreen
+  1 = loadout screen trigger       6 = unidentified (FUN_004362f0)
+  2 = RunItacScreen                7 = RunBriefingHubNewsReport
+  3 = special ship-preview movie   9 = RunCdPlayerPropScreen (NEW, Pass 81)
+  4 = news room (vr_news.spr)
+
+  <- open: nRoomType==8 not seen yet
+  <- open: CD room's own 4-way branching not traced
+  <- open: types 1/3/6 not fully decoded
+```

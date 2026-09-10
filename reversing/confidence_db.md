@@ -1978,3 +1978,19 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 
 - What the pod bay's 3 shared outgoing targets (`0x506d40`/`0x506c20`/`0x506ce0`) lead to -- not traced.
 - Whether the clip-name/stage mismatches reflect deliberate asset reuse or a wrong stage-index assumption -- not resolved.
+
+## Pass 81 -- The pod bay's 3 exits mapped: CD Player room, ITAC, and Mission Select Map (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| Pod bay is a 3-way hub: `0x506c20` (ITAC vestibule), `0x506d40` (CD Player room), `0x506ce0` (Mission Select Map launcher) | 5 | All 3 targets read directly and traced one hop further. |
+| `0x506c20` -- a 3rd copy of the ITAC vestibule junction (pod-bay-arrival variant) | 5 | Identical hotspot rect and 3 outgoing targets to Pass 73's corridor-arrival copy (`0x506b30`); differs only in arrival clip. |
+| **CORRECTION**: "cd" = the CD Player room, not "cargo deck" | 5 | `0x506d40`'s `pMoviePathAlt` is `rel_cdloop.bik`, the same ambient loop `RunReliantInductionTour`'s stage 2 used (Pass 79); cross-confirmed via `RunCdPlayerPropScreen` (Pass 68) and a dedicated `nRoomType==9` trigger node found inside this room's own branching. |
+| `nRoomType == 9` = launch `RunCdPlayerPropScreen` | 5 | Confirmed via disassembly at `RunShipInteriorVRLoop`'s room-dispatch (`0x43ad91`: `CMP AX,0x9; JNZ <skip>; CALL RunCdPlayerPropScreen`). 7th confirmed `nRoomType` value. |
+| `0x506ce0`'s single target (`0x506d10`) is a 3rd bunkroom-arrival-variant copy | 5 | Shares the exact same 3 outgoing targets as Pass 73's bunkroom node; also matches Pass 73's already-confirmed "next room after mission map" hardcode. |
+
+### Open follow-ups
+
+- `nRoomType == 8` -- not seen/confirmed in any node read so far.
+- The CD room's further 4-way branching (`0x506d70`'s targets) -- not traced.
+- `nRoomType` 1/3/6's exact semantics -- still only structurally sketched.

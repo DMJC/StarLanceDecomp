@@ -9771,3 +9771,87 @@ confirmed.
   reflect deliberate asset reuse or a mistaken assumption about which
   stage index corresponds to which room -- not independently
   resolved.
+
+## Pass 81 -- The pod bay's 3 exits mapped: CD Player room, ITAC, and Mission Select Map (2026-09-10)
+
+Direct follow-up closing Pass 80's open item. Read all 3 of the pod
+bay's outgoing `VRRoomNode` targets (`0x506d40`, `0x506c20`,
+`0x506ce0`) plus one hop further on each.
+
+### The pod bay is a 3-way hub
+
+| Target | Leads to | Confidence |
+|---|---|---|
+| `0x506c20` | The ITAC entry vestibule (**pod-bay-arrival variant**) | 5 |
+| `0x506d40` | The **CD Player room** | 5 |
+| `0x506ce0` | Launches `RunMissionSelectMapScreen` directly (`nRoomType==5`) | 5 |
+
+### `0x506c20` -- a third copy of the ITAC vestibule junction
+
+Same shape as Pass 73's `0x506b30` (the corridor-arrival ITAC
+vestibule): identical hotspot rect `(562,0,78,480)` and identical 3
+outgoing targets (`0x506c50` = the ITAC room itself, `nRoomType==2`;
+`0x506e60` = corridor return; `0x506cb0` = pod-bay return) -- the only
+difference is the arrival clip (`rel_pod2itac.bik` here vs.
+`rel_t2itac.bik` for the corridor-arrival copy). Confirms the "one
+physical junction, one node copy per arrival direction" pattern now
+has **3 known copies** for this specific junction (corridor-arrival,
+pod-bay-arrival, and Pass 80's itac-exit-arrival `0x506e60`).
+
+### `0x506d40` -- CORRECTION: "cd" is the CD Player room, not "cargo deck"
+
+Confidence 5. `0x506d40`'s arrival clip is `rel_pod2cd.bik` ("pod to
+cd"), and its `pMoviePathAlt` is `rel_cdloop.bik` -- the exact same
+ambient-loop clip `RunReliantInductionTour`'s stage 2 already used
+(Pass 79). The original ITAC room-name-fragment list (this session's
+opening summary) left `"cd"` ambiguous alongside `"t"` as a generic
+corridor variant; **this is wrong** -- confirmed instead by
+cross-referencing `RunCdPlayerPropScreen` (Pass 68, `0x437fc0`,
+already known to pick between `rel_bunk2cd.tga`/`brd2cd.tga`
+backgrounds), and independently by this room's own further branching
+containing a dedicated trigger node for that exact function (next).
+
+### `nRoomType == 9` identified: launches `RunCdPlayerPropScreen`
+
+Confidence 5, directly confirmed via disassembly. One of the CD room's
+own further targets, `0x506da0` (arrival clip `rel_bunk2cd.bik`,
+`nRoomType == 9`), is a genuine special-room trigger:
+`RunShipInteriorVRLoop`'s room-type dispatch (`0x43ad91`) does
+`CMP AX, 0x9; JNZ <skip>; CALL RunCdPlayerPropScreen`. This adds a 7th
+confirmed entry to the `nRoomType` catalog alongside 2 (ITAC), 5
+(Mission Select Map), and the others documented across the VR-room
+passes: **9 = launch the CD-player interactive prop screen.**
+
+### `0x506ce0` -> Mission Select Map -> back to a 3rd bunkroom-arrival copy
+
+`0x506ce0` (`nRoomType==5`) has exactly 1 outgoing target,
+`0x506d10`, which the map-screen return code (Pass 73) already
+confirmed is `RunShipInteriorVRLoop`'s hardcoded "next room after the
+mission map" for the Reliant. Reading it now shows it shares the
+*exact same 3 outgoing targets* as Pass 73's bunkroom node
+(`0x506b30`/`0x506b60`/`0x506b00`) -- **a 3rd arrival-variant copy of
+the bunkroom** (arrival clip `rel_pod2c.bik`), alongside `0x506c80`
+(post-ITAC arrival, Pass 73) and this one (post-mission-map arrival).
+
+### Updated `nRoomType` catalog (cumulative across all passes)
+
+| Value | Meaning |
+|---:|---|
+| 0 | Plain still-image room (normal hotspot navigation) |
+| 1 | Loadout/equipment screen trigger (`RunMenuScreenLoop(7)`) |
+| 2 | Launch `RunItacScreen` (Pass 73) |
+| 3 | Special ship-preview movie room (Pass 73, not fully decoded) |
+| 4 | News-related room, loads `vr_news.spr` (Pass 73) |
+| 5 | Launch `RunMissionSelectMapScreen` (Pass 73/74) |
+| 6 | Unidentified (`FUN_004362f0`, Pass 73) |
+| 7 | `RunBriefingHubNewsReport` (Pass 73) |
+| 9 | Launch `RunCdPlayerPropScreen` (**new this pass**) |
+
+### Open follow-ups
+
+- `8` in the `nRoomType` catalog -- not seen/confirmed in any node
+  read so far.
+- The CD room's further 4-way branching (`0x506d70`'s targets
+  `0x506b90`/`0x506bc0`/`0x506e00`/`0x506e90`) -- not traced.
+- Types 1/3/6's exact semantics -- still only structurally sketched,
+  not fully decoded.
