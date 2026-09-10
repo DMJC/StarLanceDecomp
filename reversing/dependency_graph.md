@@ -2446,3 +2446,54 @@ RunShipInteriorVRLoop's nRoomType==6 branch (0x43ac8a), confirmed via
   <- open: 0x506ef0 not read
   <- open: Yamato's 0x50b3a8 locker-room equivalent not read
 ```
+
+## Campaign-outcome branch table's filenames resolved (2026-09-10, Pass 84)
+
+```
+InitializeMissionGameplay (0x4934f0) -- campaign-outcome branch table,
+  read via DAT_005883c0/DAT_00588400[slot] (Pass 25/35), now with
+  filenames visible (LoadSquadronRoster's prototype was already applied
+  from a prior session -- this pass just re-decompiled the consumer):
+
+  outcome 0/0xf4 (default)     -> DAT_005883c0=0x116 -> preg_frm.shp  [loads]
+  mission 0x19 special case    -> DAT_005883c0=0x112 -> kamg_frm.shp  [loads]
+  outcome 1/0xf5                -> DAT_005883c0=0x10e -> nagg_frm.shp  [loads]
+  outcome 2/0xf6                -> DAT_005883c0=0x108 -> gre2_frm.shp  [no load]
+  outcome 3/0xf7                -> DAT_005883c0=0x107 -> cru3_frm.shp  [loads]
+  outcome 4/0xf8                -> DAT_005883c0=0x106 -> coyg_frm.shp  [no load]
+  outcome 5/0xf9                -> DAT_005883c0=0x10b -> mirg_frm.shp  [no load]
+  outcome 6/0xfa                -> DAT_005883c0=0x11b -> temg_frm.shp  [loads]
+  outcome 7/0xfb                -> DAT_005883c0=0x10f -> pat2_frm.shp  [no load]
+  outcome 8/0xfc                -> DAT_005883c0=0x11e -> wolv_frm.shp  [no load]
+  outcome 9/0xfd                -> DAT_005883c0=0x117 -> rea2_frm.shp  [no load]
+  outcome 10/0xfe                -> DAT_005883c0=0x11a -> shr2_frm.shp  [loads]
+  outcome 11/0xff                -> DAT_005883c0=0x112 -> phe2_frm.shp  [no load]
+
+  -> matches Pass 35's independently-derived yes/no LoadSquadronRoster
+     table exactly (built from goto-target analysis alone)
+  -> all filenames verified via read_memory against raw bytes
+
+REFINEMENT to Pass 35: filenames are X_frm.shp, NOT .sro as Pass 35's
+  format guess assumed (srofiles.cpp source-tag still directly confirms
+  SOME "sro" association at the module/format level). Two open readings:
+  (1) "_frm" = formation-layout data sharing the tagged-chunk container
+      with regular .shp meshes, refining "roster" to "formation"
+  (2) roster and formation describe the same underlying wing/hardpoint
+      data from two angles, not a real contradiction
+  No rename applied -- flagged open rather than forced.
+
+Codenames (nagg/gre2/cru3/coyg/mirg/temg/pat2/wolv/rea2/shr2/phe2/preg/
+  kamg) read as plausible enemy squadron/wing names (wolv~Wolverine,
+  shr2~Shrike 2) -- not cross-checked against other confirmed squadron
+  names elsewhere in the project.
+
+ATTEMPTED (not resolved): re-opening the .dte script-interpreter /
+  named-command-table relationship (open since Pass 32). Byte-pattern
+  search on the command table's base address (0x4f31a8) and
+  instruction-operand searches (MOV/LEA/IMUL referencing 0x4f31xx or
+  the 0x74-byte stride) all found ZERO references -- consistent with
+  3 prior dedicated passes (27, 31, 32) hitting the same wall.
+  <- open: likely needs live debugging (same conclusion as Pass 70's
+     renderer +0x50 mystery) -- no further static-analysis avenue
+     identified.
+```

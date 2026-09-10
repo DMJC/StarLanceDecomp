@@ -2022,3 +2022,16 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - `0x506ec0`'s predecessor (which hotspot leads to the lock-lid-up entry variant) -- not traced.
 - `0x506ef0` (target of the lock-lid-up entry copy) -- not read.
 - The Yamato's `0x50b3a8` locker-room equivalent -- not read.
+
+## Pass 84 -- Campaign-outcome branch table's filenames resolved (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| Campaign-outcome -> filename table fully resolved (13 entries, `InitializeMissionGameplay`) | 5 | Applied `LoadSquadronRoster`'s prototype (already set from a prior session) and re-decompiled the consumer -- all 13 filenames now directly visible, each independently verified via `read_memory`. Yes/no `LoadSquadronRoster`-call pattern matches Pass 35's independently-derived table exactly. |
+| **Refinement (not a hard correction)**: these are `X_frm.shp` files, not `.sro` files | 3 | Pass 35 called `FUN_004a44d0` an `.sro`-format parser (confidence 3, filename unconfirmed). Every resolved filename actually uses `.shp`. Two open readings: `_frm` = formation data sharing the generic tagged-chunk container with mesh `.shp` files, or "roster" and "formation" describing the same data from two angles. Not resolved definitively; no rename applied. |
+| Attempted to re-open the `.dte` interpreter/named-command-table relationship (open since Pass 32) | 0 (still unresolved) | Byte-pattern and instruction-operand searches for the command table's base address found zero references, consistent with 3 prior dedicated passes (27-32). Likely needs live debugging, same conclusion as the Pass 70 renderer `+0x50` mystery. |
+
+### Open follow-ups
+
+- Whether `_frm.shp` files share the exact tagged-chunk format with regular mesh `.shp` files (Pass 55/56) -- not compared.
+- The `.dte` interpreter/named-command relationship -- still open, likely needs live debugging.

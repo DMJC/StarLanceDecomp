@@ -9974,3 +9974,94 @@ in Passes 73/81).
 - The Yamato's `0x50b3a8` locker-room-equivalent node -- not read
   (only confirmed as the hardcoded post-medal-case destination via
   Pass 73's earlier note).
+
+## Pass 84 -- Campaign-outcome branch table's filenames resolved, correcting/refining Pass 35's `.sro` reading (2026-09-10)
+
+Direct request: work on mission loading/campaign progression. Rather
+than re-open the still-cold `.dte` script-interpreter/named-command
+relationship (open since Passes 27-32, resisted a dedicated pass each
+time), picked up Pass 35's own concrete, ready-made open item: apply
+`LoadSquadronRoster`'s now-known prototype and re-decompile
+`InitializeMissionGameplay` to reveal the filename argument the
+campaign-outcome branch table resolves to. (The `set_function_prototype`
+call had already been applied in Ghidra from a prior session --
+confirmed via `get_function_signature` -- so this pass just
+re-decompiled the consumer.)
+
+### The full campaign-outcome -> file table, now directly visible
+
+| Outcome code | `DAT_005883c0` | Filename | Calls `LoadSquadronRoster`? |
+|---:|---:|---|---|
+| 0 / `0xf4` (default) | `0x116` | `preg_frm.shp` | yes |
+| mission `0x19` special case | `0x112` | `kamg_frm.shp` | yes |
+| 1 / `0xf5` | `0x10e` | `nagg_frm.shp` | yes |
+| 2 / `0xf6` | `0x108` | `gre2_frm.shp` | no |
+| 3 / `0xf7` | `0x107` | `cru3_frm.shp` | yes |
+| 4 / `0xf8` | `0x106` | `coyg_frm.shp` | no |
+| 5 / `0xf9` | `0x10b` | `mirg_frm.shp` | no |
+| 6 / `0xfa` | `0x11b` | `temg_frm.shp` | yes |
+| 7 / `0xfb` | `0x10f` | `pat2_frm.shp` | no |
+| 8 / `0xfc` | `0x11e` | `wolv_frm.shp` | no |
+| 9 / `0xfd` | `0x117` | `rea2_frm.shp` | no |
+| 10 / `0xfe` | `0x11a` | `shr2_frm.shp` | yes |
+| 11 / `0xff` | `0x112` | `phe2_frm.shp` | no |
+
+**Confidence 5** -- read directly, and the yes/no pattern matches
+Pass 35's independently-derived `FUN_004a44d0`-call table (built from
+`goto` targets alone, without seeing filenames) exactly, entry for
+entry. Every filename was independently confirmed via `read_memory`
+against its raw bytes, not just the Ghidra-sanitized string label.
+
+### CORRECTION/refinement: these are `_frm.shp` files, not `.sro` files
+
+Pass 35 identified `FUN_004a44d0` as an `.sro`
+("squadron-roster"-shaped, source-tagged `srofiles.cpp`) file parser,
+confidence 3, and left the actual resolved filename/extension
+unconfirmed. **Every filename this branch table resolves to uses a
+literal `X_frm.shp` extension**, not `.sro`. Two readings, both
+consistent with the already-decoded parser shape (600-byte top-level
+records, per-record wing sub-tables up to `0x1c` entries, hardpoint
+records matching `"startup"`/`"deploy"` tags, geometric plane-normal
+computations):
+
+1. The `srofiles.cpp` parser module handles a squadron **formation**
+   layout format (`_frm` = formation, not roster) that happens to
+   share the generic tagged-chunk container convention with `.shp`
+   files, and Pass 35's "roster" label was a reasonable but slightly
+   off reading of what the wing/hardpoint sub-tables actually encode
+   (spatial formation-slot positions rather than personnel identity).
+2. "Roster" and "formation" describe the same underlying data from
+   two angles (which ships/wings are in the squadron AND where they
+   fly relative to each other) -- not a contradiction, just two labels
+   for one file.
+
+Not resolved definitively either way this pass -- flagged as an open
+semantic question rather than forcing a rename, since the
+`srofiles.cpp` source-tag string is itself strong, directly-read
+evidence for SOME "sro" association at the format/module level
+regardless of these specific files' `.shp` extension. Left
+`LoadSquadronRoster`'s name as-is pending further evidence.
+
+The naming pattern also strongly suggests these are named **enemy
+squadron/wing codenames** tied to specific campaign-outcome branches
+(`nagg`, `gre2`, `cru3`, `coyg`, `mirg`, `temg`, `pat2`, `wolv`,
+`rea2`, `shr2`, `phe2`, `preg`, `kamg`) -- e.g. `wolv` plausibly
+"Wolverine," `shr2` "Shrike 2" -- consistent with Star Lancer's
+squadron-naming conventions seen elsewhere in this project's ITAC
+work (real named units), though none of these specific codenames were
+independently cross-checked against other confirmed squadron names.
+
+### Open follow-ups
+
+- Whether `_frm.shp` files use the exact same tagged-chunk container
+  format as regular ship-mesh `.shp` files (Pass 55/56) or a
+  format that merely shares the extension -- not compared.
+- The 12 `DAT_005883c0` codes' own consumer(s) beyond the debrief-text
+  selection already noted in Pass 35 -- not re-traced.
+- The `.dte` script-interpreter/named-command-table relationship
+  (open since Pass 32) -- still unresolved; static search (byte-pattern
+  and instruction-operand searches for the command table's base
+  address) found zero references this pass, consistent with prior
+  attempts. Live debugging is likely the only remaining avenue, per
+  the same conclusion reached for the renderer `+0x50` mystery
+  (Pass 70).
