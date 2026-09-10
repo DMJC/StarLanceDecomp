@@ -2140,3 +2140,16 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - `SENDWORLDSTATE`'s ~8.8KB buffer layout not decoded field-by-field.
 - `VERS`'s extra 172 bytes beyond `profile.bin`'s 208 not individually mapped.
 - `DAT_005d60b9`/`DAT_00587cdc`'s full semantics not fully characterized.
+
+## Pass 92 -- Trigger-instance record mapped; ship-group table connects mission parsing to AI targeting (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `MissionTriggerInstance` (0x30-byte record, `DAT_005294e0[N]`) substantially mapped | 4-5 | Read directly from `MatchTriggerAgainstWaitingScripts` (0x45cea0): triggerTypeCode(+0x00), mode(+0x01, 0=oneshot/2=repeat), scriptRef(+0x02, i16), argSlots(+0x1c, i16 array), armed(+0x14), objectClassFilter(+0x15), priorityOrBlockID(+0x16), repeatCounter(+0x19). ~24 of 48 bytes still unmapped. |
+| `.dte` entry 4 (`DAT_005267cc`, renamed `g_pMissionShipGroupTable`) identified: named ship-group table for AI targeting | 5 | Read directly in `ScanForTargetCandidate` (0x401cf3): 20-byte-stride records, `+9` = member count (doubles as "has members" flag), iterated when an AI object's target-mode selector (`object+0x684+2`) is 1. Directly connects Pass 85's `.dte` group-name strings ("45th Group", "badguys", "pumagroup") to the AI target-selection mechanism. |
+
+### Open follow-ups
+
+- `MissionTriggerInstance`'s remaining ~24 unmapped bytes.
+- `g_pMissionShipGroupTable`'s record layout beyond the member-count byte -- member storage not located.
+- `ScanForTargetCandidate`'s other 2 selector modes' data sources not connected to any `.dte` table.

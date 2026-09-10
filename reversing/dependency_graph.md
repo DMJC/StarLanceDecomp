@@ -2846,3 +2846,39 @@ ANSWER: NO true mid-mission resume/checkpointing exists.
   <- open: VERS's extra 172 bytes beyond profile.bin's 208
   <- open: DAT_005d60b9/DAT_00587cdc full semantics
 ```
+
+## Trigger-instance record + ship-group table for AI targeting (2026-09-10, Pass 92)
+
+```
+MissionTriggerInstance (DAT_005294e0[N], stride 0x30=48 bytes), mapped via
+  MatchTriggerAgainstWaitingScripts (0x45cea0):
+    +0x00 triggerTypeCode (byte)     -- indexes Pass 31's trigger-type catalog
+    +0x01 mode (byte)                -- 0=one-shot, 2=repeat-N (uses +0x19 counter)
+    +0x02 scriptRef (i16)            -- -1 = invalid/unarmed
+    +0x14 armed (byte)               -- nonzero=active, cleared on fire (if not repeating)
+    +0x15 objectClassFilter (byte)   -- matched against firing event's secondary type
+    +0x16 priorityOrBlockID (byte)   -- passed to FUN_0045b8d0 (script-wake queue)
+    +0x19 repeatCounter (byte)
+    +0x1c argSlots (i16 array, up to param_5 entries, -1=unused) -- extra match args,
+          each checked via FUN_0045d810 against the firing event's own arguments
+    <- ~24 bytes still unmapped (0x02-0x14 minus scriptRef, 0x17-0x18, 0x1a-0x1b)
+
+.dte directory entry 4 IDENTIFIED: DAT_005267cc, renamed g_pMissionShipGroupTable
+  -- a named ship-GROUP table, directly read by ScanForTargetCandidate (0x401cf3,
+     the AI target-selection function):
+       selector = object[+0x684][+2]     // AI target-mode (Pass 66 state stack)
+       selector==0: direct callback (self/explicit target)
+       selector==1: groupIndex = object[+0x684][+4]
+                    group = g_pMissionShipGroupTable + groupIndex*0x14  (20-byte stride)
+                    memberCount = group[+9]  (doubles as "has members" flag)
+                    for i in 0..memberCount: try candidate via GetObjectIndexFromPointer
+       selector==2: ScanNavigationGraphTarget(callback)
+
+  -> CONNECTS Pass 85's .dte object-name-table group strings ("45th Group",
+     "badguys", "pumagroup") to the real AI targeting mechanism: mission
+     scripts/AI directives reference a group by index, ScanForTargetCandidate
+     iterates its members looking for a valid target
+
+  <- open: group record's member-storage layout beyond the +9 count byte
+  <- open: selector 0/2's data sources not connected to any .dte table
+```

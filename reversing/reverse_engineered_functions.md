@@ -10723,3 +10723,92 @@ mechanism."
   flags gating `WinMain`'s various `SaveSessionCheckpoint`/
   `LoadSessionCheckpoint` call sites) -- read enough to place them
   structurally, not fully characterized.
+
+## Pass 92 -- Combat AI + mission parsing: the trigger-instance record mapped, and a named ship-group table connects `.dte` groups to AI targeting (2026-09-10)
+
+Direct request: focus on single-player combat AI, level loading, and
+mission parsing. Picked up two concrete, still-open threads that sit
+at the intersection of all three: the 0x30-byte trigger-instance
+record (open since Pass 31) and `.dte` directory entry 4 (undecoded
+since Pass 85-87).
+
+### The trigger-instance record (`0x30` = 48 bytes), substantially mapped
+
+Confidence 4-5 per field, read directly from
+`MatchTriggerAgainstWaitingScripts` (`0x45cea0`) -- the function that
+walks `DAT_005294e0[triggerIndex*0x30]` (Pass 31/32's array) to decide
+whether a just-fired game-world trigger should wake a waiting mission
+script:
+
+```c
+struct MissionTriggerInstance {           // DAT_005294e0[N], stride 0x30 (48 bytes)
+    byte     triggerTypeCode;              // +0x00, indexes the Pass-31 trigger-type catalog
+    byte     mode;                          // +0x01, 0=one-shot, 2=repeat-N (uses +0x19 as counter)
+    int16_t  scriptRef;                     // +0x02, -1 = invalid/unarmed
+    // ... unmapped ...
+    int16_t  argSlots[N];                   // +0x1c, up to `param_5` extra match arguments
+                                            //   (int16, -1 = unused), each additionally checked
+                                            //   via FUN_0045d810 against the firing event's args
+    byte     armed;                         // +0x14, nonzero = active; cleared to 0 once a
+                                            //   one-shot (or exhausted repeat) trigger fires
+    byte     objectClassFilter;             // +0x15, compared against the firing event's
+                                            //   secondary type/class byte
+    byte     priorityOrBlockID;             // +0x16, passed to FUN_0045b8d0 (script-wake queue)
+    // ... unmapped ...
+    byte     repeatCounter;                 // +0x19, decremented each fire when mode==2
+};
+```
+
+**Confidence 5** that this is the real field layout for the bytes
+listed (directly read comparison/assignment code, not inferred).
+**Confidence 2** on the semantic labels for `scriptRef`/
+`priorityOrBlockID`/`objectClassFilter` (plausible from context, not
+independently cross-checked against a second consumer). Roughly half
+of the 48 bytes remain unmapped (everything between `+0x02` and
+`+0x14` except what's listed, and `+0x17`-`+0x18`, `+0x1a`-`+0x1b`).
+
+### `.dte` directory entry 4 identified: a named ship-group table, directly consumed by AI target selection
+
+Confidence 5. `DAT_005267cc` (entry 4, renamed `g_pMissionShipGroupTable`)
+turned up as a direct read in `ScanForTargetCandidate` (`0x401cf3`,
+already named from an earlier session) -- **the AI target-selection
+function**:
+
+```c
+// simplified from the real decompile
+selector = object[+0x684]->[+2];            // AI target-mode selector (Pass 66's state stack)
+if (selector == 0) { directCallback(); }
+else if (selector == 1) {                     // "target a member of GROUP N"
+    groupIndex = object[+0x684]->[+4];
+    group = g_pMissionShipGroupTable + groupIndex * 0x14;   // 20-byte stride
+    memberCount = group[+9];                   // doubles as "has members" (nonzero) flag
+    for (i = 0; i < memberCount; i++) {
+        candidate = GetObjectIndexFromPointer(...);
+        if (targetCallback(candidate)) break;
+    }
+}
+else if (selector == 2) { ScanNavigationGraphTarget(callback); }
+```
+
+**This directly connects two previously-separate findings**: Pass 85's
+`.dte` object-name-table entries like `"45th Group"`, `"badguys"`,
+`"pumagroup"` (found while decoding `mission2.dte`'s object table) are
+exactly the kind of named collections this table organizes -- a
+mission script or AI directive can say "attack anyone in group N," and
+`ScanForTargetCandidate` iterates that group's members looking for a
+valid target. **Confidence 5** on the mechanism and the 20-byte
+stride; **confidence 2** on the group record's internal layout beyond
+`+9` (member count) -- the member list/pointer storage itself (likely
+somewhere in bytes `0x00`-`0x08`) wasn't reverse-engineered this pass.
+
+### Open follow-ups
+
+- `MissionTriggerInstance`'s remaining ~24 unmapped bytes (a second
+  consumer function, cross-checked, would likely resolve these
+  faster than reading `MatchTriggerAgainstWaitingScripts` alone).
+- `g_pMissionShipGroupTable`'s 20-byte record layout beyond the `+9`
+  member-count byte -- where/how member object pointers or indices are
+  actually stored not identified.
+- Whether `ScanForTargetCandidate`'s `selector==0`/`2` paths
+  (direct-target and navigation-graph-target) read from any other
+  `.dte` table not yet connected.
