@@ -10983,3 +10983,91 @@ observation, confidence 2, rather than assigned specific labels.
   `+0x17`-`+0x18`, `+0x1a`-`+0x1b`) -- structural pattern observed,
   no individual semantic labels assigned.
 - `ObjectTriggerIndexEntry+0x00`'s 3-value enum, meaning undetermined.
+
+## Pass 95 -- Cross-mission verification: `ObjectTriggerIndexEntry+0x00` resolved, `+0x04` "player flag" retracted (2026-09-11)
+
+Direct continuation of "work on trigger instance and index tables."
+Re-ran Pass 94's analysis across 5 real mission files
+(`mission1/2/5/16/23.dte`) instead of just one, specifically to test
+the two single-file hypotheses flagged as unconfirmed, plus the
+"owner back-reference" guess for the run-constant trigger fields.
+
+### `ObjectTriggerIndexEntry+0x00` -- RESOLVED: it's a slot-occupied flag
+
+Confidence 5. First discovered *why* `g_pObjectTriggerIndexTable`'s
+own element count (the entry-7 directory tag) is consistently larger
+than the mission's real object count (e.g. `mission1.dte`: 172 vs
+118 objects; `mission2.dte`: 405 vs 299): **the table's count is
+exactly `max(objectID) + 1`, checked and exact across all 5 files.**
+This proves the table is indexed by the *raw* `objectID` value itself
+(sparse, with gaps -- consistent with Pass 86's "roughly increasing
+but with gaps" description of `SpawnObjectRecord+0x00`), not by a
+compacted object-array position. The table therefore needs dead slots
+for every `objectID` value that was never assigned to a real object.
+
+That directly explains `+0x00`: checked across all 5 files, **every
+slot at an index equal to a real, used `objectID` has `+0x00 == 0`,
+and every slot at an unused/gap `objectID` has `+0x00 != 0` (value 1
+or 2), with zero exceptions across all ~1,479 combined slots
+checked.** `+0x00` is a slot-occupied flag (`0`=real object here,
+nonzero=gap), not an enum describing the object itself. The specific
+1-vs-2 split among gap slots shows no further pattern found and may
+just be stale/uninitialized editor bytes -- not asserted as
+meaningful.
+
+### `ObjectTriggerIndexEntry+0x04` -- Pass 94's "player flag" theory RETRACTED
+
+**Explicit correction, non-silent.** Pass 94 reported (confidence 2)
+that `+0x04` was `0` everywhere except `object id 0`
+(`Player_Ship`), suggesting a player/special-object flag, but flagged
+it as an N=1 single-file observation. Checking the other 4 files
+falsifies this outright: in `mission5.dte` the real player object
+(`PLAYER Pheonix A2`, id 2) has `+0x04 == 16`, while a *different*,
+unremarkable object (`us_predator A3`, id 6) has `+0x04 == 1`. The
+field is real (confirmed non-constant, values seen: `0, 1, 8, 16,
+24` -- all either `0` or a value with only bits from `{0, 3, 4}` set,
+consistent with a small bitmask/flags byte rather than a boolean), but
+it is **not player-specific**. Tested against "is this a
+waypoint/camera/control-point object" (by name keyword) as a second
+hypothesis -- also shows no clean split (both waypoint-named and
+ship-named objects appear on both sides). **Confidence 1** -- real
+data, meaning still open, previous label withdrawn.
+
+### Run-constant trigger fields -- the "owner back-reference" hypothesis RETRACTED
+
+**Explicit correction, non-silent.** Pass 94 observed that several
+`MissionTriggerInstance` bytes (`+0x06`-`+0x0d`, `+0x10`,
+`+0x17`-`+0x18`, `+0x1a`-`+0x1b`) stay constant across runs of
+consecutive records and speculated (confidence 2) this might be a
+cached owner-object back-reference. Directly tested this by computing,
+for every trigger record, its true owning object (via
+`g_pObjectTriggerIndexTable`'s `triggerStartIndex`/`triggerCount`
+slices) and checking whether each candidate field's value equals
+either the owner's array index or its `objectID`. Across 5 files the
+match rates are at noise level (0-4 matches out of 28-83 trigger
+records per file, i.e. coincidence, not a real relationship) -- **the
+owner-back-reference guess is false.** The underlying structural
+observation (constant-within-runs) still stands as real and
+unexplained; only the specific semantic guess is withdrawn.
+Confidence 2 for the structural pattern, 0 for any semantic label.
+
+### `argSlots` type-dependent population -- CONFIRMED across 5 files
+
+Confidence 4 (up from Pass 94's 3, single-file). Same check repeated
+on `mission1/2/5/16/23.dte`'s combined 224 trigger records: type `6`
+records always populate either `argSlots[2:4]` or the full
+`argSlots[0:4]`, and never any other slots; types `0`/`4` always
+populate either nothing or exactly `argSlots[0:2]`. Zero counter
+-examples across all 5 files and 9-13 distinct trigger types per
+file. The type-dependent "argument shape" is real and reproducible,
+though which exact argument each slot holds is still not identified.
+
+### Open follow-ups
+
+- `ObjectTriggerIndexEntry+0x04`'s real meaning (bitmask-shaped,
+  values `{0,1,8,16,24}`, not player- or waypoint-specific).
+- The run-constant `MissionTriggerInstance` fields' real meaning --
+  owner-back-reference now ruled out; no replacement hypothesis yet.
+- Why exactly 2 distinct "unused slot" values (`1` vs `2`) exist for
+  `ObjectTriggerIndexEntry+0x00` -- possibly meaningless editor noise.
+- `DAT_0052952c`'s remaining fields/bounds (open since Pass 93).

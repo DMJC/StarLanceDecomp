@@ -2960,3 +2960,43 @@ MissionTriggerInstance, refined from mission1.dte's 41 real records:
   <- open: individually label the "constant-per-owner-run" fields
   <- open: ObjectTriggerIndexEntry+0x00's 3-value enum
 ```
+
+## Cross-mission verification resolves +0x00, retracts two Pass 94 guesses (2026-09-11, Pass 95)
+
+```
+ObjectTriggerIndexEntry+0x00 RESOLVED (confidence 5, checked across
+  mission1/2/5/16/23.dte, ~1,479 slots, zero exceptions):
+    == 0   -> this table index IS a real object's objectID
+    != 0   -> this table index is an unused objectID gap (values 1 or 2,
+              1-vs-2 split unexplained, possibly meaningless)
+  -> explains why entry7's own tag (idxTag) always exceeds the real
+     object count: idxTag == max(objectID)+1 in all 5 files checked.
+     The table is direct-mapped by raw (sparse) objectID, not a
+     compacted array position -- consistent with Pass 86's "objectID
+     roughly increasing but with gaps" description.
+
+RETRACTED (Pass 94 -> Pass 95, non-silent correction):
+  ObjectTriggerIndexEntry+0x04 "player/special object" flag
+    -> falsified: mission5.dte's real player object has +0x04=16,
+       an unrelated ship has +0x04=1. Real bitmask-shaped field
+       (values {0,1,8,16,24}), not player-specific. No replacement
+       theory confirmed (confidence dropped 2 -> 1).
+
+  MissionTriggerInstance's run-constant fields (+0x06..+0x0d, +0x10,
+  +0x17..+0x18, +0x1a..+0x1b) as an owner-object back-reference
+    -> falsified: computed each record's true owner via
+       g_pObjectTriggerIndexTable slices, checked field value against
+       owner's array index AND objectID across 5 files -- match rates
+       at noise level (0-4 / 28-83 per file). Structural pattern
+       (constant within owner-runs) still real, semantic guess is not.
+
+CONFIRMED (Pass 94 -> Pass 95, strengthened):
+  argSlots type-dependent population -- zero counterexamples across
+  224 combined trigger records / 5 files (type 6 -> [2:4] or full;
+  types 0/4 -> [0:2] or empty). Confidence 3 -> 4.
+
+  <- open: ObjectTriggerIndexEntry+0x04's real meaning
+  <- open: run-constant trigger fields' real meaning
+  <- open: ObjectTriggerIndexEntry+0x00's 1-vs-2 unused-slot split
+  <- open: DAT_0052952c's remaining fields/bounds (Pass 93)
+```

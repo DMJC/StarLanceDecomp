@@ -2187,3 +2187,19 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - Cross-check the `+0x04` "player flag" theory and `argSlots` type-shape correlation against a 2nd mission file.
 - Individually label the "constant-per-owner-run" `MissionTriggerInstance` fields.
 - `ObjectTriggerIndexEntry+0x00`'s 3-value enum, meaning undetermined.
+
+## Pass 95 -- Cross-mission verification resolves one field, retracts two hypotheses (2026-09-11)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `ObjectTriggerIndexEntry+0x00` is a slot-occupied flag (0=real object, nonzero=gap) | 5 | Checked across 5 files (~1,479 slots): 100% clean. Also explains why the table's own count = `max(objectID)+1`, always exceeding the real object count -- the table is indexed by raw (sparse) `objectID`, not a compacted position. |
+| **RETRACTED**: `ObjectTriggerIndexEntry+0x04` is a "player/special object" flag (Pass 94) | 1 (down from 2) | Falsified in `mission5.dte`: the real player object has `+0x04==16`, while an unrelated ship has `+0x04==1`. Field is real (bitmask-shaped, values `{0,1,8,16,24}`) but not player-specific; no replacement theory confirmed. |
+| **RETRACTED**: run-constant `MissionTriggerInstance` fields are an owner-object back-reference (Pass 94) | 0 for the semantic guess, 2 for the structural observation | Directly tested against each record's true owner (via `g_pObjectTriggerIndexTable` slices); match rates across 5 files are noise-level. Structural "constant within owner-runs" pattern itself still stands, unexplained. |
+| `argSlots` type-dependent population (type 6 -> `[2:4]`/full; types 0/4 -> `[0:2]`/empty) | 4 (up from 3) | Confirmed with zero counterexamples across 224 combined trigger records in 5 mission files. |
+
+### Open follow-ups
+
+- `ObjectTriggerIndexEntry+0x04`'s real meaning (bitmask, not player/waypoint-specific).
+- Run-constant `MissionTriggerInstance` fields' real meaning (owner-back-reference ruled out).
+- `ObjectTriggerIndexEntry+0x00`'s 1-vs-2 "unused slot" distinction -- possibly meaningless.
+- `DAT_0052952c`'s remaining fields/bounds (open since Pass 93).
