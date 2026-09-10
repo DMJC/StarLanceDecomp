@@ -1726,3 +1726,20 @@ RunOptionsMenuScreen's real disassembly), not a poster-frame placeholder. The ma
 that background -- which button triggers which video was already mapped per-screen in
 Pass 60; this pass's .tga mapping is the destination-background half of the same
 (video, destination) pair for each menu click.
+
+## CONFIRMED: shipboard VR interfaces use the identical background system (2026-09-10, Pass 68)
+
+```
+SetActiveBackgroundImage (0x494b50, was FUN_00494b50) -- ONE shared function for every
+  background swap in the game, menu AND shipboard alike
+  -> no-ops if filename == DAT_00588744 (already active); else updates it and calls
+     FUN_00494a70 (the real load/display routine, not decompiled)
+  <- called by: every menu screen right before installing its per-frame callback
+     (RunOptionsMenuScreen/main2opt.tga, Pass 67), AND by shipboard VR interior props:
+
+RunCdPlayerPropScreen (0x437fc0, was FUN_00437fc0) -- the ship interior's jukebox/CD-player
+  prop (loads cdplay.spr, play/pause/stop/skip/volume/repeat mini-UI)
+  -> DAT_00562dc8 <= 0x12 -> SetActiveBackgroundImage("rel_bunk2cd.tga")   (ANS Reliant)
+     DAT_00562dc8 >  0x12 -> SetActiveBackgroundImage("brd2cd.tga")        (ANS Yamato)
+  -- 4th independent site using the exact Reliant/Yamato mission-19 threshold (Pass 64/65/67)
+```

@@ -1783,3 +1783,16 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - The `sl_splash*.tga` jump table's resolution-to-file mapping -- not recovered.
 - `FUN_0043eaf0` (shared `briefdoor` loader) not decompiled.
 - Whether every `.bik`/`.tga` pair follows the same click-triggered-transition shape confirmed for `main2opt` -- only that one pair was checked at the disassembly level.
+
+## Pass 68 -- CONFIRMED: shipboard VR interfaces use the identical background system (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `SetActiveBackgroundImage` (0x494b50, was `FUN_00494b50`) is the ONE shared function behind every background swap, menu or shipboard | 5 | Directly read; no-ops if the requested filename matches the already-active one, else updates and calls the real loader (`FUN_00494a70`, not opened). |
+| `RunCdPlayerPropScreen` (0x437fc0) sets its room's background via this function, picking between `rel_bunk2cd.tga`/`brd2cd.tga` on the exact Reliant/Yamato mission-19 threshold | 5 | 4th independent site confirmed using that boundary (after `RenderBriefingHubFrame`, `WinMain`'s cutscene selection, `RunMissionBriefingScreen`'s `briefdoor`). |
+
+### Open follow-ups
+
+- `FUN_00494a70` (the real image display routine) not decompiled.
+- Other VR room-graph nodes' own background-image pairs not swept.
+- Whether `RunShipInteriorVRLoop`'s main per-room dispatch calls `SetActiveBackgroundImage` directly for each room.

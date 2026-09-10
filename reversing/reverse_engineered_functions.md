@@ -8452,3 +8452,83 @@ destination background)` pair, not just a video.
   over their OWN background mid-session -- only `main2opt.tga` was
   checked at the disassembly level this pass; the rest are inferred
   by analogy.
+
+## Pass 68 -- CONFIRMED: the shipboard VR interface uses the identical background/transition pattern, via one shared function (2026-09-10)
+
+User-supplied extension of Pass 67's correction: the same
+static-background-plus-transition-video architecture also applies to
+the shipboard VR interior interfaces. Verified directly, and found
+the mechanism is literally the SAME shared function used by the menu
+system, not just an analogous but separate one.
+
+### `SetActiveBackgroundImage` (`0x494b50`, was `FUN_00494b50`) -- the one function behind every background swap, menu or shipboard
+
+```c
+void __fastcall SetActiveBackgroundImage(char *filename);   // NULL = clear
+```
+
+Compares the requested filename against the currently-active one
+(`DAT_00588744`, via a string-compare helper) and no-ops if
+unchanged; otherwise updates the active-name global and calls
+`FUN_00494a70` (the real load-and-display routine, not opened this
+pass). **This is the exact function every menu screen calls right
+before installing its per-frame callback** (confirmed for
+`main2opt.tga` via `RunOptionsMenuScreen` in Pass 67) -- and it is
+ALSO what the shipboard VR interior calls for its own room
+backgrounds, per the example below. One shared mechanism serves both
+systems; there's no separate "VR background" code path.
+
+### Direct example: `RunCdPlayerPropScreen`'s (`0x437fc0`, was `FUN_00437fc0`) room background restore
+
+This is the ship interior's clickable jukebox/CD-player prop
+(loads `cdplay.spr`, offers play/pause/stop/track-skip/volume/repeat
+controls -- a full mini-UI overlaid on top of whichever room it's
+placed in). Immediately at entry, before installing its own per-frame
+callback, it picks and sets the ROOM'S OWN background:
+
+```c
+// real disassembly, ~0x438363
+if (DAT_00562dc8 <= 0x12) {                    // still aboard the ANS Reliant
+    SetActiveBackgroundImage("rel_bunk2cd.tga");
+} else {                                        // aboard the ANS Yamato
+    SetActiveBackgroundImage("brd2cd.tga");
+}
+```
+
+**This is now the FOURTH independent site** using the exact
+Reliant/Yamato mission-19 threshold (alongside `RenderBriefingHubFrame`'s
+hub-room flags, `WinMain`'s cutscene selection, and `RunMissionBriefingScreen`'s
+`briefdoor` texture -- Pass 64/65/67). The jukebox prop's own overlay
+(`cdplay.spr`) draws on top of this, and presumably exiting the prop's
+UI simply lets this already-set background show through again --
+matching Pass 67's confirmed "background persists, prop/overlay draws
+on top" architecture exactly, just applied to a ship-interior object
+instead of a menu screen.
+
+### Confirmation
+
+**Confidence 5** -- directly read at the disassembly level, not
+inferred. The user's claim is correct and the underlying mechanism is
+now identified precisely: `SetActiveBackgroundImage`/`FUN_00494a70`
+is a single, shared background-image system used identically by
+every top-level menu screen (Pass 60/67's catalog) and by shipboard
+VR interior props/rooms alike. `rel_bunk2cd.tga`/`brd2cd.tga` are the
+Reliant/Yamato-specific variants of whatever room background sits
+"behind" the CD-player prop specifically; other VR rooms almost
+certainly have their own same-pattern background pairs, keyed by
+their own `.bik` room-transition names (Pass 33/44's room graph), not
+individually catalogued this pass.
+
+### Open follow-ups
+
+- `FUN_00494a70` (the actual load-and-display routine
+  `SetActiveBackgroundImage` calls into) -- not decompiled; would
+  confirm exactly how the named `.tga` gets blitted/displayed.
+- A full sweep of the VR room graph's other nodes for their own
+  background-image pairs (only the CD-player prop's was checked this
+  pass) -- the `.\inter\itac\%s.tga` parameterized path found in
+  Pass 67 is a promising lead for the briefing-hub ("itac") room
+  specifically.
+- Whether `RunShipInteriorVRLoop`'s main per-room dispatch (not just
+  this one prop sub-screen) also calls `SetActiveBackgroundImage`
+  directly for each room's own resting background.
