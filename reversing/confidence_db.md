@@ -1840,7 +1840,22 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 ### Open follow-ups
 
 - Table fields 3/4 (called from undecompiled `FUN_004404a0`) -- likely per-frame update / record-selection.
-- `FUN_004abb80`/`LAB_004403f0`/`FUN_0043eaf0` (room-transition-out internals) not decompiled.
-- `DAT_00523088`'s set-site not traced.
-- `FUN_004406a0`, `FUN_00440770`, `FUN_00440bd0` (remaining itac.cpp-tagged functions) not decompiled.
 - ITAC's room-graph exits (the `rel_itac2X.bik`/`itac2X.bik` clips) not mapped to hotspots/destinations.
+
+## Pass 72 -- Room-transition-out internals and the remaining itac.cpp functions (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `PlayBinkMovieFromArchiveWithVolume` (0x4abb80, was `FUN_004abb80`) -- a 3rd generic Bink-player variant | 5 | Confirmed generic via `get_xrefs_to`: 11 `WinMain` sites, `AdvanceCampaignMissionAndSaveProfile`, 4 other VR-room helpers, plus exactly 1 call from `RunItacScreen`'s room-transition-out. Differs from the Pass 71 pair by explicit `_BinkSetVolume_8` and a `+0x1ac` render-mode check instead of `+0x15f8`. |
+| `ItacRoomTransitionFrameCallback` (0x4403f0, was `FUN_004403f0`/`LAB_004403f0`) -- fade+cursor per-frame overlay hook | 4 | Installed at `DAT_00588730+0x88` during transition-out; chains any prior `+0x80` callback, drives the fade via `FUN_0043fe90(DAT_0052082c)`, draws the mouse cursor when not in the `DAT_0052308c` waiting state. |
+| `ActivateItacTransitionBackground` (0x43eaf0, was `FUN_0043eaf0`) | 4 | Formats `%s.tga`, triggers renderer `+0x78` begin-frame, calls `SetActiveBackgroundImage` -- the final step that actually swaps in the destination room's background. |
+| `DynamicList_GetByIndex` (0x4406a0, was `FUN_004406a0`) -- core record-list traversal primitive | 5 | Self-identified via its own `DynamicList::GetByIndex` assertion string. Confirmed via `get_xrefs_to` as the single shared list-walker used by every ITAC record-browser category (Kills, Capital Ships, Fighters, Personnel, Squadrons) -- structurally generic, but this binary only exercises it from itac.cpp. |
+| `InitializeItacLanguageStrings` (0x440770, was `FUN_00440770`) -- ITAC's own localized string-table loader | 5 | Directly read in full: loads `itaclang.dll`, two-pass `LoadStringA` walk (count+size, then copy+index) into a flat buffer + pointer table. Behind the already-known `"language_init: Can't find ITACLANG.DLL"` assertion. |
+| `RegisterItacTooltip` (0x440bd0, was `FUN_00440bd0`) | 5 | Bounded (30-slot) tooltip-string registration list; asserts `"Too many tooltips"` past slot 29. |
+
+### Open follow-ups
+
+- Table fields 3/4 of the category callback table (called from undecompiled `FUN_004404a0`).
+- `DAT_00588730+0x1ac`'s render-mode values not independently mapped.
+- `DAT_00523088`'s set-site still not traced.
+- ITAC's room-graph exits (`rel_itac2X.bik`/`itac2X.bik` clips) still not mapped to hotspots/destinations.

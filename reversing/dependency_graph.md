@@ -1859,8 +1859,62 @@ Table field 2 callbacks:
     [qualitatively different: rotating 3D display, not a flat list]
 
   <- open: table fields 3/4 (per-category, called from undecompiled FUN_004404a0)
-  <- open: FUN_004abb80/LAB_004403f0/FUN_0043eaf0 (room-transition-out internals)
   <- open: DAT_00523088's set-site
-  <- open: FUN_004406a0, FUN_00440770, FUN_00440bd0 (remaining itac.cpp functions)
+  <- open: ITAC's room-graph exits (rel_itac2X.bik/itac2X.bik clips) not mapped to hotspots
+```
+
+## Room-transition-out internals + remaining itac.cpp functions (2026-09-10, Pass 72)
+
+```
+RunItacScreen's room-transition-out (DAT_005251dc != 0), continued from Pass 71:
+  ... chdir back -> DAT_00588730+0x88 = &ItacRoomTransitionFrameCallback -> ...
+  -> SafeFormatString(trans-line token) -> PlayBinkMovieFromArchiveWithVolume
+     (0x4abb80, was FUN_004abb80) -> ActivateItacTransitionBackground (0x43eaf0)
+  -> DAT_005251dc = 0
+
+PlayBinkMovieFromArchiveWithVolume (0x4abb80) -- a 3RD generic Bink-player variant,
+  alongside PlayBinkMovieFromArchiveByName/PlayBinkMovieFromHandle (Pass 71). Same
+  FindBinkMovieInArchive lookup + 0x800000-byte open as ...ByName, but adds
+  _BinkSetVolume_8(handle, 0x8000) and checks DAT_00588730+0x1ac == 0|2 (render-mode)
+  instead of +0x15f8. Confirmed generic via get_xrefs_to: 11x WinMain, x1
+  AdvanceCampaignMissionAndSaveProfile, 4x other VR-room helpers (FUN_0048b6b0,
+  FUN_004abd40 x2, FUN_004abde0, FUN_004ac620), + exactly 1x RunItacScreen.
+
+ItacRoomTransitionFrameCallback (0x4403f0, was FUN_004403f0/LAB_004403f0)
+  -> chains DAT_00588730+0x80 if set -> *DAT_00594544 = time/frame counter
+  -> FUN_0043fe90(DAT_0052082c) [fade amount] -> if !DAT_0052308c (not waiting) and
+     DAT_00522f54: FUN_0043fe00 -> draw mouse cursor via (*DAT_005959e4)(cursor sprite,
+     DAT_0051db34, DAT_0051dacc)  [same hover-position globals as the hotspot hit-test]
+
+ActivateItacTransitionBackground (0x43eaf0, was FUN_0043eaf0)
+  -> SafeFormatString("%s.tga", param) -> renderer +0x78 (begin frame) ->
+     SetActiveBackgroundImage
+  [final step of room-transition-out: swaps in the destination room's background]
+
+DynamicList_GetByIndex (0x4406a0, was FUN_004406a0) -- generic singly-linked-list
+  node walker, self-named via its own "DynamicList::GetByIndex" assertion string.
+  <- called by (get_xrefs_to): every ITAC record-browser category's list helpers:
+       Kills:        FUN_00441320, FUN_00441540
+       Capital Ships: FUN_00423cb0, FUN_00424130
+       Fighters:     FUN_00425b70, FUN_00426030
+       Personnel:    FUN_0044e0a0, FUN_0044ea50, FUN_0044ed00
+       Squadrons:    FUN_0044fde0, FUN_00450180, FUN_004508d0, FUN_00450cc0
+  -> confirms every list-style ITAC category shares this one traversal primitive,
+     indexed by scroll position
+
+InitializeItacLanguageStrings (0x440770, was FUN_00440770)  [itac.cpp]
+  -> LoadLibraryA(itaclang.dll) [asserts "language_init: Can't find ITACLANG.DLL"]
+  -> pass 1: LoadStringA(id=1,2,3,...) until 0 -> count (DAT_00520828) + total bytes
+     (DAT_00520838)
+  -> SR_MEM_allocate flat buffer (DAT_00520830) + pointer table (DAT_005231ac)
+  -> pass 2: re-load each string by id -> copy into flat buffer, record start ptr
+
+RegisterItacTooltip (0x440bd0, was FUN_00440bd0)
+  -> appends param to &DAT_00520368[DAT_005231b4++], bounded at 30 slots
+     (asserts "Too many tooltips" past slot 29)
+
+  <- open: table fields 3/4 (called from undecompiled FUN_004404a0)
+  <- open: DAT_00588730+0x1ac's render-mode values not independently mapped
+  <- open: DAT_00523088's set-site
   <- open: ITAC's room-graph exits (rel_itac2X.bik/itac2X.bik clips) not mapped to hotspots
 ```

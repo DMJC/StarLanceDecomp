@@ -8909,3 +8909,108 @@ per-category ones (read but not further exercised):
 - The room-graph connections out of ITAC (the many `rel_itac2X.bik`/
   `itac2X.bik` room-transition clips referenced in the string list)
   not mapped to specific hotspots/destinations.
+
+## Pass 72 -- Room-transition-out internals and the remaining itac.cpp functions (2026-09-10)
+
+User request: "Work on FUN_004abb80 etc.), and three remaining itac.cpp-tagged functions" -- directly continuing Pass 71's open follow-up list.
+
+### `PlayBinkMovieFromArchiveWithVolume` (0x4abb80, was `FUN_004abb80`) -- a THIRD generic Bink-player variant
+
+Confidence 5, directly read. Nearly identical shape to
+`PlayBinkMovieFromArchiveByName` (looks a clip up by name via
+`FindBinkMovieInArchive`, opens with a fixed 0x800000-byte buffer),
+but differs in two ways: it explicitly sets playback volume
+(`_BinkSetVolume_8(handle, 0x8000)`) and its early-out check tests
+`DAT_00588730+0x1ac == 2 || == 0` (a render-mode field) instead of
+the `+0x15f8` tiny-window flag the other two check. **Confirmed
+generic, not ITAC-specific** via `get_xrefs_to`: called from `WinMain`
+(11 sites -- ordinary cutscene playback), `AdvanceCampaignMissionAndSaveProfile`,
+and four other VR-room helper functions (`FUN_0048b6b0`,
+`FUN_004abd40` x2, `FUN_004abde0`, `FUN_004ac620`), plus exactly one
+call from `RunItacScreen` (0x43f8db) -- the room-transition-out
+sequence documented in Pass 71. So the game has (at least) three
+near-duplicate Bink-player entry points distinguished by lookup
+method and volume handling; ITAC's transition-out uses this one
+specifically for its volume control.
+
+### `ItacRoomTransitionFrameCallback` (0x4403f0, was `FUN_004403f0`/`LAB_004403f0`)
+
+Confidence 4, directly read. This is the callback `RunItacScreen`'s
+room-transition-out installs at `DAT_00588730+0x88` (the renderer's
+per-frame overlay hook). It chains any pre-existing `+0x80` callback,
+copies a value into `*DAT_00594544` (likely a frame/time counter, not
+independently re-verified), calls `FUN_0043fe90(DAT_0052082c)` (the
+fade-amount global from Pass 71's category-switch sequence), and --
+only when not in the `DAT_0052308c` "waiting" state and with
+`DAT_00522f54` set -- draws the mouse cursor via a WinVFX sprite call
+(`(*DAT_005959e4)(...)` with cursor position from `DAT_0051db34`/
+`DAT_0051dacc`, the same hover-position globals used by the hotspot
+hit-test). In short: a fade-overlay + cursor per-frame render hook,
+active only during the transition-out window.
+
+### `ActivateItacTransitionBackground` (0x43eaf0, was `FUN_0043eaf0`)
+
+Confidence 4, directly read. Takes a filename-base argument, formats
+it as `%s.tga`, calls the renderer's `+0x78` begin-frame callback,
+then calls `SetActiveBackgroundImage`. This is the final step of the
+room-transition-out sequence (Pass 71): it's what actually swaps in
+the destination room's background image using the just-resolved
+trans-line filename, sandwiched by an explicit frame-begin call.
+
+### `DynamicList_GetByIndex` (0x4406a0, was `FUN_004406a0`) -- the core record-list primitive
+
+Confidence 5. Self-identified via its own assertion string
+(`"DynamicList::GetByIndex - index >= i"`-style message). A plain
+singly-linked-list node walker: follows `*param_1` (next-pointer at
+offset 0) `param_2` times, asserting on a null mid-walk. **Not
+ITAC-specific** in the structural sense (looks like a shared
+`DynamicList` collection class), but `get_xrefs_to` shows it is the
+single shared traversal primitive used by every one of ITAC's
+per-category record browsers: the Kills helpers (`FUN_00441320`,
+`FUN_00441540`), Capital Ships (`FUN_00423cb0`, `FUN_00424130`),
+Fighters (`FUN_00425b70`, `FUN_00426030`), Personnel (`FUN_0044e0a0`,
+`FUN_0044ea50`, `FUN_0044ed00`), and Squadrons (`FUN_0044fde0`,
+`FUN_00450180`, `FUN_004508d0`, `FUN_00450cc0`) all call it directly.
+This confirms every "list" category (news, kills, persons, squads,
+fighters, capships) is backed by the same generic linked-list type,
+indexed by scroll position when the player pages through records.
+
+### `InitializeItacLanguageStrings` (0x440770, was `FUN_00440770`) -- ITAC's own localized string table
+
+Confidence 5, directly read in full. This is the function behind the
+already-known `"language_init: Can't find ITACLANG.DLL"` assertion:
+1. `LoadLibraryA("itaclang.dll")`, asserting if it fails.
+2. First pass: calls `LoadStringA` with resource IDs starting at 1,
+   incrementing until it returns 0, counting both the number of
+   strings (`DAT_00520828`) and their total byte length
+   (`DAT_00520838`).
+3. Allocates a flat character buffer (`DAT_00520830`, sized to the
+   total) and a parallel pointer table (`DAT_005231ac`, 4 bytes per
+   string).
+4. Second pass: re-loads each string by ID, copies it into the flat
+   buffer, and records its start address in the pointer table.
+
+This is ITAC's per-string localization loader -- the same overall
+shape as a typical Windows string-table resource loader, but entirely
+itac.cpp-local (separate from the game's main `LANGUAGE.DLL`-style
+localization, matching the "ITAC has its own localization DLL" fact
+established in Pass 71).
+
+### `RegisterItacTooltip` (0x440bd0, was `FUN_00440bd0`)
+
+Confidence 5, directly read. Appends its argument (a string pointer,
+presumably one of `InitializeItacLanguageStrings`' resolved strings)
+to a fixed 30-slot array (`&DAT_00520368`, index `DAT_005231b4`),
+asserting `"Too many tooltips"` past slot 29. A simple bounded
+registration list for hotspot tooltip text.
+
+### Open follow-ups
+
+- Table fields 3/4 of the category callback table (called from
+  undecompiled `FUN_004404a0`) still not resolved.
+- `DAT_00588730+0x1ac`'s render-mode values (0/2 vs. others) not
+  independently mapped.
+- `DAT_00523088`'s set-site (what marks eye-recognition as already
+  done) still not traced.
+- ITAC's room-graph exits (the `rel_itac2X.bik`/`itac2X.bik` clips)
+  still not mapped to specific hotspots/destinations.
