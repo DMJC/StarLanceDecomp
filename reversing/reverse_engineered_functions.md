@@ -9136,3 +9136,119 @@ Reliant side fully:
 - Fields 3/4 of the other 7 categories' table entries not
   individually decompiled (only Debrief's and Video Reports' field 3,
   and Video Reports' field 4, were read this pass).
+
+## Pass 74 -- Remaining clip names/nodes resolved; every category's fields 3/4 decoded (2026-09-10)
+
+User request: "work on the remaining clip names and fields, then work
+on VR room missing clip names and fields" -- closing out Pass 73's
+open items.
+
+### Remaining `itac2X`/`X2itac` clip names, resolved
+
+`get_xrefs_to` found nothing for these four string addresses (same
+blind spot as `pod2itac.bik`/`lock2itac.bik` in Pass 73 -- Ghidra
+hasn't indexed the `VRRoomNode.pMoviePath` field as a data reference
+in this region). Located all four by `search_byte_patterns` on the
+string address's little-endian bytes instead, which found the exact
+`VRRoomNode` holding each as `pMoviePath` (struct starts 8 bytes
+before the match, since `pMoviePath` is at struct offset 8):
+
+| Clip | `VRRoomNode` | Findings |
+|---|---|---|
+| `rel_cap2itac.bik` | 0x506f50 (Reliant) | `nHotspotX/Y/W/H` and `nNumTargets` all 0 -- a true terminal/scripted node, not reached via any other node's `pTarget` (searched for `0x506f50` itself as a target pointer -- zero hits). Consistent with "cap" = the one-time capital-ship-transfer cutscene context from Pass 65, not the normal interactive room graph. |
+| `itac2pod_hud.bik` | 0x50acb8 (Yamato) | `nRoomType == 5` -- arriving here launches `RunMissionSelectMapScreen` directly (not a plain room). Its `pTarget0` (0x50b678) matches exactly the node `RunShipInteriorVRLoop` hardcodes as the "next room after the mission map" for the Yamato, confirming the connection. |
+| `itac2dor.bik` | 0x50ab08 (Yamato) | Ordinary room node (`nRoomType == 0`), 3 further hotspots -- the "door" room mentioned in Pass 71's room-name-fragment list. |
+| `itac2itac.bik` | 0x50ada8 (Yamato) | **`nRoomType == 2` -- this IS the Yamato's ITAC room node**, the exact counterpart to Reliant's 0x506c50 that Pass 73 failed to locate via graph traversal. Same hotspot rect (150 area, 181,150,340,150-class) as the other confirmed post/into-ITAC nodes. |
+
+### Yamato's ITAC room node located, with 2 incoming edges
+
+Confidence 5. `search_byte_patterns` for `0x50ada8`'s own address
+(as a raw pointer) found it referenced as a `pTarget` slot from two
+different junction nodes:
+- **0x50ab68** (lock-room junction, movie `ir_l2i.bik`, alt
+  `itac_itacl.bik`) -- `pTarget2 == 0x50ada8`.
+- **0x50ae34** (a second junction, movie `ir_f2i.bik`, alt
+  `itac_itacl.bik`) -- `pTarget1 == 0x50ada8`.
+
+This mirrors the Reliant pattern found in Pass 73 (a junction node
+just outside ITAC's door with ITAC as one of several fan-out targets)
+and confirms the Yamato reaches ITAC from at least two different
+interior locations, consistent with the multiple `X2itac` clip names
+found in Pass 71's string search (`pod2itac.bik`, `lock2itac.bik`).
+
+### Every category's fields 3/4 decoded
+
+Field 3 (per-frame update) and field 4 (hover-preview render) for all
+9 categories are now read. Confirms and extends the Pass 73 pattern:
+
+- **Debrief** field 4, `ItacDebriefRenderTransferSummary` (0x424930,
+  was `FUN_00424930`) -- richer than a plain preview: renders the
+  rank/callsign transfer summary (old vs. new rank via language
+  strings 0xe8/0xe9 and the profile's rank-history arrays,
+  `DAT_00562e64`/`DAT_00562df4`), and on the player's most recent
+  mission (`DAT_00523078 == DAT_0051d380 + 1`) draws a distinct
+  "continue" prompt icon instead of the normal one.
+- **News Reports**: `ItacNewsReportsPerFrameUpdate` (0x44dea0) /
+  `ItacNewsReportsRenderPreview` (0x44dfe0, draws a per-entry
+  portrait/graphic from a table at `DAT_004eb100` plus a border).
+- **Video Reports**: `ItacVideoReportsRenderPreview` (0x450760) --
+  renders a temporary thumbnail preview of the selected record
+  (distinct from `ItacSelectVideoReportRecord`'s full clip playback).
+- **Fighters**: `ItacFightersPerFrameUpdate` (0x425980) /
+  `ItacFightersRenderPreview` (0x425a70, draws a ship-class icon from
+  `fighters.spr` using the selected record's field `+0x3c`).
+- **Capital Ships**: `ItacCapShipsPerFrameUpdate` (0x423930) /
+  `ItacCapShipsRenderPreview` (0x423ac0, same shape, indexes via
+  record field `+0x1e` through an large all-`break` switch whose
+  cases don't diverge -- likely optimized-away class-specific sound
+  selection, not independently confirmed).
+- **Squadrons**: `ItacSquadronsPerFrameUpdate` (0x44fb80) /
+  `ItacSquadronsRenderPreview` (0x44fd10, portrait from `squads.spr`
+  via a 28-byte/entry (`0x1c`) squad-record array).
+- **Personnel**: `ItacPersonnelPerFrameUpdate` (0x44e590) /
+  `ItacPersonnelRenderPreview` (0x44e720, portrait from `persons.spr`
+  via record field `+0x1e`).
+- **Kills**: `ItacKillsPerFrameUpdate` (0x441280, notably simpler --
+  no redraw-gate, no sub-tab handling, just scroll bounds-checking) /
+  `ItacKillsRenderPreview` (0x441300, trivially just flushes captions
+  -- consistent with Kills being visually driven by its distinctive
+  live 3D-scene renderer from Pass 71's field 2, not a 2D portrait).
+
+**New finding: 4 of the 9 categories have their own internal sub-tabs.**
+Fighters, Capital Ships, Squadrons, and Personnel each additionally
+poll a *second* hotspot row (shared table around `0x4e96c4`-`0x4e96d0`,
+indexed by a shared "current sub-tab" global `DAT_00523058`) to switch
+between what are presumably class/rank filters on their roster list --
+News Reports, Video Reports, Debrief, and Kills do not have this.
+Confidence 3 for the exact size/semantics of that sub-tab table (not
+independently mapped this pass).
+
+### The 4 shared per-frame primitives behind every category
+
+Confidence 5, all directly read:
+- `FindHotspotIndexAtCursor` (0x43fe40, was `FUN_0043fe40`) -- generic
+  hit-test over a hotspot-rect array against the cursor position;
+  the single shared primitive behind hover/click detection everywhere
+  in ITAC (and the main 9-category tab bar itself).
+- `IsClickConfirmEdge` (0x441060, was `FUN_00441060`) -- click debounce:
+  passes once per press, suppresses repeats while held.
+- `DrawFadingTextCaptions` (0x43ff50, was `FUN_0043ff50`) -- iterates a
+  6-slot floating-caption array (`DAT_005202fc` onward) and renders
+  each with an optional fade-in animation; the generic on-screen-text
+  renderer every category's field 3/4 calls at the end.
+- `UpdateHoverAnimationWidget` (0x4409f0, was `FUN_004409f0`) -- a
+  generic hover-triggered "wiggle" animation updater for a small
+  widget struct (float position at `+0x14`, direction/counter at
+  `+0x18`, redraw callback at `+0x20`); exact struct/widget identity
+  not resolved.
+
+### Open follow-ups
+
+- The sub-tab hotspot table (~`0x4e96c4`-`0x4e96d0`) -- exact entry
+  count and the meaning of its per-entry short values not mapped.
+- `ItacCapShipsRenderPreview`'s 19-case switch on record field `+0x1e`
+  -- all cases currently decompile identically; not independently
+  confirmed whether this reflects real optimized-away behavior or a
+  decompilation artifact.
+- `UpdateHoverAnimationWidget`'s widget struct not identified.
+- `DAT_00588730+0x1ac`'s render-mode values not independently mapped.

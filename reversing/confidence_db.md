@@ -1874,6 +1874,23 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 ### Open follow-ups
 
 - `DAT_00588730+0x1ac`'s render-mode values not independently mapped.
-- Yamato's exact ITAC room node not located.
-- `rel_cap2itac.bik`, `itac2pod_hud.bik`, `itac2dor.bik`, `itac2itac.bik` not traced to specific nodes.
-- Fields 3/4 of the other 7 categories not individually decompiled.
+
+## Pass 74 -- Remaining clip names/nodes resolved; every category's fields 3/4 decoded (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `rel_cap2itac.bik`'s `VRRoomNode` (0x506f50) -- a true terminal/scripted node | 4 | Zero hotspot size, zero targets, and nothing else points to it (`search_byte_patterns` on its own address found no hits). Consistent with the one-time capital-ship-transfer cutscene context (Pass 65), not the interactive room graph. |
+| `itac2pod_hud.bik`'s `VRRoomNode` (0x50acb8) -- `nRoomType==5`, launches `RunMissionSelectMapScreen` | 5 | Its `pTarget0` (0x50b678) matches exactly the hardcoded "next room after the mission map" in `RunShipInteriorVRLoop`, confirming the link. |
+| `itac2dor.bik`'s `VRRoomNode` (0x50ab08) -- ordinary room, 3 targets | 4 | The "door" room from Pass 71's name-fragment list. |
+| **Yamato's ITAC room node located**: `VRRoomNode` at 0x50ada8 (movie `itac2itac.bik`), `nRoomType==2` | 5 | The counterpart to Reliant's 0x506c50 that Pass 73 failed to find via graph traversal; found instead via `search_byte_patterns` on the string address. Has 2 confirmed incoming edges: junction nodes at 0x50ab68 (`ir_l2i.bik`, lock room) and 0x50ae34 (`ir_f2i.bik`). |
+| Every category's field 3 (per-frame update) and field 4 (hover-preview render) now decoded | 5 | All 14 remaining functions decompiled and renamed: `ItacDebriefRenderTransferSummary`, `ItacNewsReportsPerFrameUpdate`/`RenderPreview`, `ItacVideoReportsRenderPreview`, `ItacFightersPerFrameUpdate`/`RenderPreview`, `ItacCapShipsPerFrameUpdate`/`RenderPreview`, `ItacSquadronsPerFrameUpdate`/`RenderPreview`, `ItacPersonnelPerFrameUpdate`/`RenderPreview`, `ItacKillsPerFrameUpdate`/`RenderPreview`. |
+| **New**: 4 of 9 categories (Fighters, Capital Ships, Squadrons, Personnel) have their own internal sub-tabs | 3 | Poll a second hotspot row (shared table ~`0x4e96c4`-`0x4e96d0`, indexed by shared global `DAT_00523058`) presumably filtering the roster by class/rank. News Reports/Video Reports/Debrief/Kills don't have this. Exact table size/semantics not mapped. |
+| The 4 shared per-frame primitives: `FindHotspotIndexAtCursor`, `IsClickConfirmEdge`, `DrawFadingTextCaptions`, `UpdateHoverAnimationWidget` (0x43fe40/0x441060/0x43ff50/0x4409f0) | 5 | Generic hit-test, click-debounce, floating-caption-fade renderer, and hover-animation updater used across every category and the main tab bar. |
+
+### Open follow-ups
+
+- `DAT_00588730+0x1ac`'s render-mode values not independently mapped.
+- The sub-tab hotspot table's exact entry count/semantics.
+- `ItacCapShipsRenderPreview`'s 19-case switch (all cases decompile identically -- not confirmed as real behavior vs. decompilation artifact).
+- `UpdateHoverAnimationWidget`'s widget struct not identified.
+- `rel_cap2itac.bik`/`itac2pod_hud.bik`/`itac2dor.bik` fully placed structurally but not connected to a specific gameplay trigger (e.g. what puts the player at 0x506f50).

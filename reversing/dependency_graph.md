@@ -1981,8 +1981,82 @@ ITAC's room-graph exits (VRRoomNode graph, RunShipInteriorVRLoop @ 0x439fb0):
       get_xrefs_to on pod2itac.bik/lock2itac.bik string addresses returned no
       references (unindexed by Ghidra)
 
-  <- open: rel_cap2itac.bik, itac2pod_hud.bik, itac2dor.bik, itac2itac.bik not traced
-  <- open: Yamato's exact ITAC room node
-  <- open: fields 3/4 of the other 7 categories not individually decompiled
   <- open: DAT_00588730+0x1ac's render-mode values not independently mapped
+```
+
+## Remaining clip names/nodes + every category's fields 3/4 (2026-09-10, Pass 74)
+
+```
+Remaining itac2X/X2itac VRRoomNodes (found via search_byte_patterns on the string
+  address's LE bytes -- get_xrefs_to found nothing, same blind spot as Pass 73's
+  pod2itac.bik/lock2itac.bik):
+
+  0x506f50 (Reliant) -- pMoviePath="rel_cap2itac.bik", hotspot=0x0/0x0, nNumTargets=0,
+    nRoomType=0. TRUE TERMINAL: nothing else points to 0x506f50 either (searched for
+    it as a raw pointer, zero hits) -- reached via scripted code, not the room graph.
+    Consistent with the one-time capital-ship-transfer cutscene (Pass 65's "cap").
+
+  0x50acb8 (Yamato) -- pMoviePath="itac2pod_hud.bik", hotspot(260,220,80,100),
+    nNumTargets=1 -> pTarget0=0x50b678, nRoomType=5 (launches RunMissionSelectMapScreen
+    directly). pTarget0 matches RunShipInteriorVRLoop's hardcoded "next room after
+    mission map" for Yamato -- confirms the connection.
+
+  0x50ab08 (Yamato) -- pMoviePath="itac2dor.bik", hotspot(220,0,200,480), nNumTargets=3
+    -> 0x50a958, 0x50a9e8, 0x50aad8. nRoomType=0 (the "door" room).
+
+  0x50ada8 (Yamato) -- pMoviePath="itac2itac.bik", hotspot(181,150,340,150),
+    nNumTargets=0, nRoomType=2  <-- THIS IS YAMATO'S ITAC ROOM NODE, the counterpart
+    to Reliant's 0x506c50 that Pass 73 failed to locate via graph traversal.
+    Confirmed 2 incoming edges (found via search_byte_patterns on 0x50ada8 itself):
+      0x50ab68 (lock-room junction, movie "ir_l2i.bik", alt "itac_itacl.bik")
+        -> pTarget0=0x50ae08, pTarget1=0x50ab38, pTarget2=0x50ada8(ITAC)
+      0x50ae34 (2nd junction, movie "ir_f2i.bik", alt "itac_itacl.bik")
+        -> pTarget0=0x50ad78, pTarget1=0x50ada8(ITAC), pTarget2=0x50ae08
+    Mirrors the Reliant "corridor junction fans out to ITAC + 2 other destinations"
+    pattern from Pass 73. Confirms >=2 physical approaches to Yamato's ITAC.
+
+Every category's field 3 (per-frame update) + field 4 (hover-preview render), decoded:
+  cat0 Debrief:      field4 = ItacDebriefRenderTransferSummary (0x424930)
+                      [renders rank/callsign transfer summary; distinct "continue"
+                       prompt on the player's most-recent mission]
+  cat1 News:         field3 = ItacNewsReportsPerFrameUpdate (0x44dea0)
+                      field4 = ItacNewsReportsRenderPreview (0x44dfe0)
+  cat2 VideoReports: field4 = ItacVideoReportsRenderPreview (0x450760)
+                      [temp thumbnail of selected record, distinct from full playback]
+  cat3 Fighters:     field3 = ItacFightersPerFrameUpdate (0x425980)
+                      field4 = ItacFightersRenderPreview (0x425a70) [icon from record+0x3c]
+  cat4 CapShips:     field3 = ItacCapShipsPerFrameUpdate (0x423930)
+                      field4 = ItacCapShipsRenderPreview (0x423ac0) [icon from record+0x1e,
+                        via a 19-case switch whose cases all decompile identically --
+                        not confirmed as real vs. decompilation artifact]
+  cat5 Squadrons:    field3 = ItacSquadronsPerFrameUpdate (0x44fb80)
+                      field4 = ItacSquadronsRenderPreview (0x44fd10) [squads.spr portrait,
+                        0x1c-byte/entry record array]
+  cat6 Personnel:    field3 = ItacPersonnelPerFrameUpdate (0x44e590)
+                      field4 = ItacPersonnelRenderPreview (0x44e720) [persons.spr portrait
+                        from record+0x1e]
+  cat7 Kills:        field3 = ItacKillsPerFrameUpdate (0x441280) [no redraw-gate, no
+                        sub-tabs, just scroll bounds-check]
+                      field4 = ItacKillsRenderPreview (0x441300) [trivial: caption flush
+                        only -- Kills is driven by its Pass 71 live-3D field 2 instead]
+
+  NEW: Fighters/CapShips/Squadrons/Personnel (cat 3/4/5/6) each poll a SECOND hotspot
+    row (shared table ~0x4e96c4-0x4e96d0, indexed by shared global DAT_00523058) to
+    switch roster sub-tabs (class/rank filter, exact semantics not mapped). News/
+    VideoReports/Debrief/Kills do not have this.
+
+Shared per-frame primitives used by every category and the main tab bar:
+  FindHotspotIndexAtCursor (0x43fe40, was FUN_0043fe40) -- generic rect-array hit-test
+    against cursor position
+  IsClickConfirmEdge (0x441060, was FUN_00441060) -- click debounce (fires once per press)
+  DrawFadingTextCaptions (0x43ff50, was FUN_0043ff50) -- renders the 6-slot floating-
+    caption array (DAT_005202fc+) with optional fade-in
+  UpdateHoverAnimationWidget (0x4409f0, was FUN_004409f0) -- generic hover "wiggle"
+    animation updater for a small widget struct (float @+0x14, counter @+0x18,
+    redraw callback @+0x20); widget identity not resolved
+
+  <- open: sub-tab hotspot table's exact entry count/semantics
+  <- open: ItacCapShipsRenderPreview's 19-case switch (identical cases)
+  <- open: UpdateHoverAnimationWidget's widget struct
+  <- open: DAT_00588730+0x1ac's render-mode values
 ```
