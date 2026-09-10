@@ -1796,3 +1796,17 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - `FUN_00494a70` (the real image display routine) not decompiled.
 - Other VR room-graph nodes' own background-image pairs not swept.
 - Whether `RunShipInteriorVRLoop`'s main per-room dispatch calls `SetActiveBackgroundImage` directly for each room.
+
+## Pass 69 -- `DisplayActiveBackgroundImage` decoded: the real TGA display pipeline (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `DisplayActiveBackgroundImage` (0x494a70, was `FUN_00494a70`) | 5 | Two paths: a callback override (`DAT_00588740`) bypassing the image pipeline entirely, or the real static-image load/decode/blit sequence. |
+| `SR_TGA_rle_uncompress` (0x4cad60, was `FUN_004cad60`) -- complete, correct TGA RLE decoder | 5 | Self-identified via its own 3 assertion strings; correctly handles both TGA orientation flags and the real RLE packet format. |
+| `ComputePixelFormatFromMasks` (0x4c3430, was `FUN_004c3430`) -- channel-mask-to-bpp helper | 4 | Every observed call site uses the same fixed ARGB8888 masks; general-case behavior for other masks not independently re-verified. |
+| `SetActiveBackgroundCallback` (0x494bb0, was `FUN_00494bb0`) -- dynamic-background sibling to `SetActiveBackgroundImage` | 4 | Directly read; no caller located yet to show a concrete dynamic-background example. |
+
+### Open follow-ups
+
+- No `SetActiveBackgroundCallback` caller located.
+- `rendererState+0x50`'s actual blit target not traced.

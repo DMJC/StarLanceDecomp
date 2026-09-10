@@ -8532,3 +8532,97 @@ individually catalogued this pass.
 - Whether `RunShipInteriorVRLoop`'s main per-room dispatch (not just
   this one prop sub-screen) also calls `SetActiveBackgroundImage`
   directly for each room's own resting background.
+
+## Pass 69 -- `DisplayActiveBackgroundImage` decoded: the real TGA display pipeline, plus a second "dynamic background" path (2026-09-10)
+
+Direct follow-up on Pass 68's open item. Fully decoded the function
+`SetActiveBackgroundImage` calls into, plus its sibling entry point
+and the two helpers it uses -- one of which self-identifies its exact
+role via its own assertion strings.
+
+### `DisplayActiveBackgroundImage` (`0x494a70`, was `FUN_00494a70`)
+
+```c
+void DisplayActiveBackgroundImage(void);
+```
+
+Two entirely different paths, selected by which of `SetActiveBackgroundImage`
+/`SetActiveBackgroundCallback` (below) was called most recently:
+
+1. **Callback path**: if `DAT_00588740` (a function pointer) is
+   non-null, just calls it directly and returns -- a "dynamic
+   background" escape hatch for screens that render something other
+   than a flat image (a live 3D view, a procedural effect, etc.),
+   bypassing the whole TGA pipeline entirely.
+2. **Static-image path** (the common case): loads the active filename
+   whole via `SR_FileAlloc` (the same generic loader used for
+   `.SHP`/`.sro`, Pass 55), reads its **width/height directly from the
+   real TGA header** (offsets `0xc`/`0xe`, exactly per spec, matching
+   Pass 61's format confirmation), computes the destination pixel
+   format via `ComputePixelFormatFromMasks` (`0x4c3430`, was
+   `FUN_004c3430` -- given fixed ARGB masks `0xff000000`/`0xff0000`/
+   `0xff00`/`0xff`, i.e. always decodes to 32-bit ARGB regardless of
+   the source file's own bit depth), allocates a raw pixel buffer
+   sized exactly `width * height * bytesPerPixel`, decodes the file
+   into it via `SR_TGA_rle_uncompress` (below), then blits it through
+   a renderer-state function pointer (`rendererState+0x50`) before
+   freeing both buffers.
+3. **Neither set** (empty filename, no callback): just calls the
+   renderer's `+0x50` blit function directly with no new image --
+   effectively "redraw whatever's already on screen."
+
+**Confidence 5** -- directly read.
+
+### `SR_TGA_rle_uncompress` (`0x4cad60`, was `FUN_004cad60`) -- a complete, correct TGA RLE decoder
+
+Self-identified via its own three assertion strings
+(`"SR_TGA_rle_uncompress: Null dest..."` /
+`"...Null TGA p[ointer]..."` / `"...Destination bpp must be 1-4..."`).
+A genuine, general-purpose implementation of the real Targa RLE
+packet format:
+
+- Skips the header (`18 + idLength` bytes) and, if present, the color
+  map (`colorMapLength * colorMapEntrySize/8` bytes) to reach the real
+  image data -- exactly the same offset arithmetic already confirmed
+  for the palette reader in Pass 61.
+- **Handles both TGA orientation flags correctly**: the image
+  descriptor byte's bit `0x20` (top-to-bottom vs. bottom-to-top) and
+  bit `0x10` (left-to-right vs. right-to-left) both flip the
+  destination write direction/starting point accordingly -- a
+  textbook-correct implementation, not a simplified special-case one.
+- **The real RLE packet loop**: each packet's header byte's top bit
+  selects a repeat-run (copy one pixel `(header & 0x7f) + 1` times) or
+  a raw-run (copy that many literal pixels), exactly per the TGA 2.0
+  spec's RLE compression scheme.
+
+**Confidence 5** -- directly read, and unambiguously confirmed by its
+own error strings (this project's most reliable source of ground
+truth throughout, whenever available).
+
+### `SetActiveBackgroundCallback` (`0x494bb0`, was `FUN_00494bb0`) -- the dynamic-background sibling entry point
+
+```c
+void __fastcall SetActiveBackgroundCallback(void (*renderCallback)(void));
+```
+
+Two-line sibling to `SetActiveBackgroundImage`: clears the active
+filename and installs a custom render callback instead, which
+`DisplayActiveBackgroundImage` will call directly in place of the
+whole TGA pipeline. Confirms the background system genuinely supports
+two independent kinds of "background" -- a named static image, or an
+arbitrary render callback -- selected by which setter was called
+last (`SetActiveBackgroundImage` always clears the callback;
+`SetActiveBackgroundCallback` always clears the filename, so exactly
+one is ever active).
+
+### Open follow-ups
+
+- No callers of `SetActiveBackgroundCallback` were located this pass
+  -- finding one would show a concrete example of a "dynamic"
+  (non-image) background in practice.
+- `ComputePixelFormatFromMasks`'s general channel-mask-to-bpp logic
+  wasn't fully re-verified against a caller using non-fixed masks
+  (every call site seen so far in this project uses the same fixed
+  `0xff000000/0xff0000/0xff00/0xff` ARGB8888 constants).
+- The renderer-state `+0x50` function pointer itself (the actual
+  blit-to-screen call) -- not traced to its target.

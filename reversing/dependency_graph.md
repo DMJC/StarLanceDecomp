@@ -1743,3 +1743,26 @@ RunCdPlayerPropScreen (0x437fc0, was FUN_00437fc0) -- the ship interior's jukebo
      DAT_00562dc8 >  0x12 -> SetActiveBackgroundImage("brd2cd.tga")        (ANS Yamato)
   -- 4th independent site using the exact Reliant/Yamato mission-19 threshold (Pass 64/65/67)
 ```
+
+## `DisplayActiveBackgroundImage` decoded: the real TGA display pipeline (2026-09-10, Pass 69)
+
+```
+DisplayActiveBackgroundImage (0x494a70, was FUN_00494a70)
+  -> if DAT_00588740 (callback ptr) set: call it directly, bypass everything below
+  -> else if active filename set: SR_FileAlloc (load whole file) -> read width/height from
+     the real TGA header (offsets 0xc/0xe) -> ComputePixelFormatFromMasks(ARGB8888 masks)
+     -> allocate width*height*bpp buffer -> SR_TGA_rle_uncompress (decode) ->
+     rendererState+0x50 (blit, not traced) -> free buffers
+  -> else: rendererState+0x50 with no new image (redraw as-is)
+  <- called by: SetActiveBackgroundImage, SetActiveBackgroundCallback (indirectly, via the
+     callback it installs)
+
+SR_TGA_rle_uncompress (0x4cad60, was FUN_004cad60) -- self-named via its own assertion
+  strings. Complete real TGA RLE decoder: skips header+colormap correctly, handles both
+  orientation flags (image descriptor bits 0x10/0x20), real RLE packet format (top bit =
+  repeat vs raw run, low 7 bits = run length - 1)
+
+SetActiveBackgroundCallback (0x494bb0, was FUN_00494bb0) -- sibling to
+  SetActiveBackgroundImage: installs DAT_00588740 (dynamic/non-image background), clears
+  the active filename. No caller located yet.
+```
