@@ -2730,3 +2730,53 @@ CORRECTED roles:
      bonus scenarios of the same kind
   <- open: whether mission29 is playable or pure cinematic
 ```
+
+## No true mid-mission resume exists (2026-09-10, Pass 90)
+
+```
+Research question: does the game support launching a mission mid-mission?
+
+RunInGameOptionsScreen (0x4394d0, pause menu, reachable mid-mission):
+  case0 = Save Game -> RunSaveGameBrowserScreen (save mode)
+  case1 = Load Game -> RunSaveGameBrowserScreen (load mode)
+  -> both route through saves\<callsign>GAME%02d.IFF, same format the
+     main menu's save/load browser uses
+
+Save writer traced fully:
+  RunSaveGameBrowserScreen -> FUN_00475650 -> loop over 5-entry chunk
+  table @ 0x500a24 -> FUN_00475930 (generic IFF chunk writer: write
+  placeholder length -> write data -> backpatch length via FUN_004d0407)
+
+  Chunk table (5 entries, {dataPtr, dataSize, 4-char tag}):
+    VERS: DAT_00562dc8 (campaign-progress/PlayerProfile-adjacent struct,
+          Pass 63), 380 bytes
+    VARS: DAT_00562f44, 4 bytes
+    PILO: DAT_00562f78, 120 bytes
+    ALPH: DAT_005047d0, 4 bytes
+    (5th): DAT_0058a958 (the small struct FUN_0049cd20 resets on new-
+           pilot creation, Pass 89), 12 bytes
+  Total: ~520 bytes across 5 fixed-size sections. NONE reference ship/
+  object arrays, AI state, or mission-script VM thread state (compare:
+  a single mission's object table alone is up to 512*76=38912 bytes,
+  Pass 86).
+
+ANSWER: NO true mid-mission resume/checkpointing exists.
+  - Pause-menu Save is real and mid-mission-reachable, but only
+    persists campaign-level bookkeeping (same category
+    AdvanceCampaignMissionAndSaveProfile already writes at normal
+    mission boundaries, Pass 63)
+  - Loading a save restarts the CURRENT mission from its own beginning
+    via the standard InitializeMissionGameplay pipeline, not from
+    wherever you were flying
+  - Every mission-launch path found project-wide (WinMain normal flow,
+    Ctrl+Potato debug menu, RunMissionSelectMapScreen, main menu's
+    hidden ending-watch button) reloads the .dte fresh every time
+  - The separate "slot 100" auto-save/restore pair (FUN_00475d20/
+    FUN_00475d30, saves\<callsign>game100.iff, tied to DAT_00520840 /
+    the ITAC-debrief "Continue" flow) is the SAME KIND of
+    mission-boundary checkpoint, not a mid-combat one either
+
+  <- open: slot-100 pair's exact trigger timing
+  <- open: VERS/VARS/PILO/ALPH field-by-field contents
+  <- open: multiplayer "join in progress" not investigated
+```

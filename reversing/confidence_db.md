@@ -2110,3 +2110,17 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 
 - Whether `mission31`/`32` are further bonus scenarios on the same menu -- not checked.
 - Whether `mission29` is playable or a pure cinematic -- has gameplay-shaped object data, not independently confirmed either way.
+
+## Pass 90 -- No true mid-mission resume exists (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `RunInGameOptionsScreen` (pause menu) offers Save/Load mid-mission | 5 | Case 0/1 route through the same `RunSaveGameBrowserScreen` the main menu uses. |
+| IFF savegame format only serializes ~520 bytes of campaign metadata, no gameplay state | 5 | Traced the actual chunk-writer table (`0x500a24`, 5 entries): `VERS` (380B, campaign-progress struct), `VARS` (4B), `PILO` (120B), `ALPH` (4B), a 5th 12B section. None reference ship/object/AI/script-VM state. |
+| **Answer**: no true mid-mission resume/checkpointing exists | 5 | Every mission-launch path found across the whole project reloads the `.dte` fresh via `InitializeMissionGameplay`. Saving mid-mission only persists campaign bookkeeping; loading restarts the current mission from its own beginning. |
+
+### Open follow-ups
+
+- The slot-100 auto-save/restore pair's exact trigger timing.
+- `VERS`/`VARS`/`PILO`/`ALPH` field-by-field contents not decoded.
+- Multiplayer "join in progress" not investigated.

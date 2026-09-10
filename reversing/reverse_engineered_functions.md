@@ -10515,3 +10515,81 @@ story arc because it isn't part of the main story sequence at all.
   object data (AI ship spawns, boss waves), suggesting playable,
   but this wasn't independently confirmed against `RunMissionGameplay`
   behavior for this specific mission index.
+
+## Pass 90 -- Answering "does the game support launching a mission mid-mission?" -- no true mid-mission resume exists (2026-09-10)
+
+Direct research question. Every mission-launch path this project has
+found (`WinMain`'s normal flow, the Ctrl+Potato debug menu, `RunMission
+SelectMapScreen`, the main menu's hidden ending-watch button, Pass 89)
+funnels through the same `InitializeMissionGameplay` -> `LoadMissionFile`
+-> `RunMissionGameplay` -> `UnloadMission` pipeline, loading the `.dte`
+file completely fresh every time. This pass specifically looked for a
+counter-example: a save/checkpoint mechanism that could resume
+mid-combat rather than from a mission's start.
+
+### The in-game pause menu DOES offer Save/Load while a mission is active
+
+Confidence 5, directly read. `RunInGameOptionsScreen` (`0x4394d0`,
+reachable mid-mission, confirmed by earlier passes) has case 0 = Save
+Game and case 1 = Load Game, both routing through the same
+`RunSaveGameBrowserScreen`/`saves\<callsign>GAME%02d.IFF` mechanism
+the main menu uses. So the game genuinely does let you trigger a save
+while flying a mission -- the question is what that save actually
+captures.
+
+### But the IFF savegame format only serializes ~500 bytes of campaign metadata -- no live gameplay state at all
+
+Confidence 5. Traced the actual writer: `RunSaveGameBrowserScreen`'s
+save path -> `FUN_00475650` -> a loop over a **5-entry chunk table**
+at `0x500a24` (each entry `{dataPtr, dataSize, 4-char IFF tag}`,
+written via the generic chunk-writer `FUN_00475930`, itself calling
+`FUN_004d0407` to backpatch each chunk's length -- textbook IFF
+container writing). Read the table directly:
+
+| Tag | Source pointer | Size |
+|---|---|---:|
+| `VERS` | `DAT_00562dc8` (the campaign-progress/`PlayerProfile`-adjacent struct base, Pass 63) | 380 bytes |
+| `VARS` | `DAT_00562f44` | 4 bytes |
+| `PILO` | `DAT_00562f78` | 120 bytes |
+| `ALPH` | `DAT_005047d0` | 4 bytes |
+| (5th) | `DAT_0058a958` (the small struct `FUN_0049cd20` resets on new-pilot creation, Pass 89) | 12 bytes |
+
+**None of these five sources are anywhere near large enough, or the
+right shape, to hold live combat state.** For comparison: a single
+mission's object-spawn table alone (Pass 86) is up to `512 * 76 =
+38912` bytes just for ship/trigger positions, before accounting for
+AI state, mission-script VM thread stacks (Pass 32's cooperative
+script scheduler), or per-object runtime fields -- none of that is
+referenced by this chunk table at all. The entire savegame totals
+roughly 520 bytes across 5 small, fixed-size, profile/session-shaped
+sections.
+
+### Answer
+
+**No -- the game does not support true mid-mission resume/checkpointing.**
+The pause menu's Save option is real and reachable mid-mission, but it
+only persists campaign-level bookkeeping (which mission you're on,
+profile/pilot data, a few small session flags) -- the same category of
+data `AdvanceCampaignMissionAndSaveProfile` (Pass 63) already writes
+at normal mission boundaries. Loading such a save routes back through
+the standard `InitializeMissionGameplay` pipeline and starts your
+current mission over from its own beginning (briefing/loadout, fresh
+`.dte` load), not from wherever you were flying when you saved. This
+also retroactively explains the separate "slot 100"
+(`saves\<callsign>game100.iff`) auto-save/restore pair found this
+pass (`FUN_00475d20`/`FUN_00475d30`, called from `WinMain` around the
+ITAC-debrief "Continue" flow, Pass 79/89 context) -- it's the same
+kind of mission-boundary checkpoint, not a mid-combat one either.
+
+### Open follow-ups
+
+- The exact trigger semantics of the slot-100 auto-save/restore pair
+  (`FUN_00475d20`/`FUN_00475d30`) -- confirmed to exist and to operate
+  at mission-flow boundaries, but the precise moment it fires (tied to
+  `DAT_00520840`, written from the ITAC debrief "Continue" flow and
+  `RunMultiplayerDebriefScreen`) wasn't fully pinned down.
+- `VERS`/`VARS`/`PILO`/`ALPH` tags' exact field-by-field contents --
+  only their source pointers and sizes were read, not decoded
+  field-by-field.
+- Whether multiplayer "join in progress" (a conceptually different
+  kind of mid-mission entry) exists -- not investigated this pass.
