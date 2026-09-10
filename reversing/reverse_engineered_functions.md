@@ -10338,3 +10338,104 @@ garbage) against all 4 sample mission files.
 - Entry 2's role (values still observed to scale with mission size,
   unconfirmed).
 - Entries 1, 4-26 remain undecoded.
+
+## Pass 88 -- Narrative grounding: the final mission, Klaus Steiner, and a possible correction (2026-09-10)
+
+User-supplied narrative context: "The main campaign final mission is
+a level with a Space Station and Klaus Steiner." Same methodology as
+Pass 65 (the Reliant->Yamato transfer): used the claim to search real
+game data and confirm/ground existing structural findings, using
+`decode_dte.py --objects` (Pass 86/87) plus `extract_language_strings.py`
+(Pass 77) against `LANGUAGE.DLL`.
+
+### `mission29.dte` independently confirmed as the true final mission
+
+Confidence 5. Its object table (178 real records, correctly bounded by
+its own directory tag per Pass 87) ends with `nav_point_GAME CLEAR`
+and `camera_point ENDING` -- literal, unambiguous confirmation. This
+also directly explains a previously-documented but narratively-ungrounded
+fact: `WinMain`/`InitializeMissionGameplay`'s special-case handling of
+mission index `0x1d` (29) -- `RunMissionBriefingScreen(); FUN_004ac620();
+DAT_00562dc8 = 1;` -- is precisely "show the ending, then reset the
+campaign index" logic, now confirmed as the literal end-of-campaign
+handler rather than an arbitrary numeric special case.
+
+### `mission29`'s structure: a 7-boss gauntlet ending at a Coalition gate installation
+
+Confidence 4. The mission is a long escalating gauntlet: 7 named "BOSS"
+encounters in sequence (`BOSS1 kurgen1/2`, `BOSS2 kurgen1/2` +
+`gurevich`, `BOSS3 sabre1-3` + `scarab_troopcarrier`, `BOSS4
+sabre-ber1/2` + `berijev`, `BOSS5 badanov` + `sabre1-4`, `BOSS6 zakov`
++ `mid_ramases` + `kiev`, `BOSS7 czar`), an asteroid field
+(`asteroid_011`-`074`), and a climactic **`coal_prototypegate`** /
+**`BOSS 7 warp gate`** installation immediately before the `GAME
+CLEAR` nav point -- a large, stationary Coalition ("coal_"-prefixed)
+structure, plausibly what's being described as a "space station,"
+though the object itself is literally named a "gate," not a
+"station." **Confidence 2** specifically on the gate/station
+identification -- flagged rather than forced, since the literal string
+"station" does not appear anywhere in `mission29.dte`'s data.
+
+### `coal_research_station` confirmed as a real object class elsewhere in the campaign
+
+Confidence 5 (directly read, unambiguous). `mission16.dte` genuinely
+does contain an object named `coal_research_station`, alongside `(AI)
+targets for 45th when station is dead` -- confirming "space station"
+IS a real, named structure type the campaign uses, just in an earlier
+mission (16), not 29.
+
+### Klaus Steiner: a recurring character across ~10 missions, but NOT present in `mission29`'s object data
+
+Confidence 5. `Klaus Steiner` (`GetLanguageString` ID `135`), `"Fly to
+Bremen and rendezvous with Steiner"` (ID `467`), and `"Protect
+Commander Steiner"` (ID `1015`) are all real entries in `LANGUAGE.DLL`
+(Pass 77's tooling). Scanning every mission file's object/dialogue
+data for "steiner" found him as a recurring ally wing commander across
+missions `3`, `8`, `16`, `19`, `23`, `24`, `28`, `191`, `251`/`271`/
+`311` -- including a dramatic rescue-from-the-Saladin beat in
+`mission23` (`"You will not rescue Steiner"`) and an ongoing rivalry
+with a named Coalition antagonist, `Petrov` (`mission271`:
+`"petrov:we meet again steiner...however, i can assure this WILL be
+the last time....DIE!!!!"`). **He does not appear anywhere in
+`mission29.dte`'s object table.**
+
+### CORRECTION/refinement of the narrative claim: Steiner's death beat is `mission28`, immediately BEFORE the technical final mission
+
+Confidence 4. `mission28.dte` (the mission directly preceding 29)
+contains an unmistakable character-death sequence: `ger_wolverine
+Steiner` (his flyable squadron ship), followed later by `Steiner
+suicide curvePoint1/2`, `Steiner suicide curveControl1/2`, `Steiner
+blow up point`, `steiner first suicide point`, and a dedicated
+`camera_pointsteinercam` -- cinematic camera-curve objects built
+specifically around Steiner's death/sacrifice. **This means the
+campaign's "Klaus Steiner" story beat and the campaign's technical
+final mission are two consecutive but DISTINCT levels** (28 and 29
+respectively), not one and the same -- a minor, explicitly-flagged
+correction to the user-supplied framing, offered as a finding rather
+than a rejection, since the underlying narrative (Steiner's climactic
+last mission is right at the end of the campaign) is otherwise fully
+confirmed.
+
+### Bonus, tying back to Pass 86's open `tail[10]` question
+
+`mission28`'s `Diceman_WL` squadron (7 fighters flying together)
+shows `tail[1]` values of exactly `256, 512, 768, 1024, 1280, 1536,
+1792` across its 7 members -- clean multiples of 256 -- while
+`tail[0]` is `13` for all 7. This is strong evidence `tail[0]` is a
+**squadron/formation-group ID** and `tail[1]` a **fixed-point
+formation-slot index** (`slot * 256`), refining Pass 86's vaguer
+"`tail[8]`/`[9]` possibly group ID" guess -- the real per-squadron
+signal is in `tail[0]`/`tail[1]`, not `[8]`/`[9]`.
+
+### Open follow-ups
+
+- Whether `coal_prototypegate`/`BOSS 7 warp gate` is genuinely what
+  in-universe dialogue calls a "space station" -- would need the
+  mission's own briefing/debrief text (localized, not statically
+  recoverable) or `ITACLANG.DLL`/mission-specific speech files
+  checked.
+- Whether Steiner is voiced/mentioned in `mission29`'s (not yet
+  checked) trigger/dialogue-adjacent tables beyond the object list
+  (entries 1, 4-26 still undecoded).
+- `tail[0]`/`tail[1]`'s formation-slot theory -- confirmed only for
+  one 7-ship squadron in one mission, not cross-checked elsewhere.

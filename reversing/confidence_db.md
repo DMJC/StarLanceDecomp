@@ -2080,3 +2080,20 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - Whether the header-tag-as-count role applies to any of the other 26 tables, or is unique to entry 3.
 - Entry 2's role (unconfirmed).
 - Entries 1, 4-26 remain undecoded.
+
+## Pass 88 -- Narrative grounding: final mission, Klaus Steiner (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `mission29.dte` confirmed as the true final campaign mission | 5 | Object table ends with `nav_point_GAME CLEAR` and `camera_point ENDING`. Explains `InitializeMissionGameplay`'s pre-existing `DAT_00562dc8==0x1d(29)` special-case as the literal end-of-campaign handler. |
+| `mission29`'s structure: 7-boss gauntlet ending at `coal_prototypegate`/`BOSS 7 warp gate` | 4 | Plausibly the "space station" referenced, though the literal string "station" doesn't appear in this file -- flagged, not forced. |
+| `coal_research_station` confirmed as a real object elsewhere (`mission16.dte`) | 5 | Confirms "space station" is a genuine campaign structure type, just in an earlier mission. |
+| Klaus Steiner confirmed as a recurring character across ~10 missions (3,8,16,19,23,24,28,191,251/271/311) via `LANGUAGE.DLL` + in-file dialogue | 5 | IDs 135/467/1015 in `LANGUAGE.DLL`; Saladin rescue in `mission23`; rivalry with `Petrov` in `mission271`. |
+| **Correction/refinement**: Steiner's death beat is `mission28`, one mission before the technical finale, not `mission29` itself | 4 | `mission28.dte` has an explicit death/sacrifice sequence (`Steiner suicide curvePoint1/2`, `Steiner blow up point`, dedicated death-cam objects). He does not appear in `mission29`'s object table at all. |
+| Bonus: `tail[0]`/`tail[1]` (not `[8]`/`[9]`) are squadron-ID/formation-slot fields | 4 | `mission28`'s 7-ship `Diceman_WL` squadron shows `tail[1]` = exact multiples of 256 (256..1792) with constant `tail[0]=13` -- refines Pass 86's vaguer guess. |
+
+### Open follow-ups
+
+- Whether `coal_prototypegate` is explicitly called a "space station" in dialogue/briefing text -- not statically recoverable.
+- Whether Steiner appears in `mission29`'s undecoded tables (1, 4-26) beyond the object list.
+- `tail[0]`/`[1]`'s formation-slot theory only confirmed for one squadron in one mission.

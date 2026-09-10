@@ -2621,3 +2621,64 @@ decode_dte.py --objects updated to use entry3's tag as the count
   <- open: whether "header tag = count" applies to any other table
   <- open: entry2's role; entries 1, 4-26 undecoded
 ```
+
+## Narrative grounding: final mission, Klaus Steiner (2026-09-10, Pass 88)
+
+```
+User context: "The main campaign final mission is a level with a Space
+  Station and Klaus Steiner." Grounded via decode_dte.py --objects
+  (Pass 86/87) across many mission files + extract_language_strings.py
+  (Pass 77) against LANGUAGE.DLL.
+
+mission29.dte CONFIRMED the true final mission:
+  object table (178 real records) ends with:
+    nav_point_GAME CLEAR, camera_point ENDING
+  -> explains the pre-existing InitializeMissionGameplay special case
+     for DAT_00562dc8==0x1d(29): RunMissionBriefingScreen() ->
+     FUN_004ac620() -> DAT_00562dc8=1  [now confirmed: literal
+     end-of-campaign handler, not an arbitrary numeric special case]
+
+mission29 structure: 7-boss gauntlet (BOSS1 kurgen x2, BOSS2 kurgen x2
+  +gurevich, BOSS3 sabre x3+scarab_troopcarrier, BOSS4 sabre-ber x2
+  +berijev, BOSS5 badanov+sabre x4, BOSS6 zakov+mid_ramases+kiev,
+  BOSS7 czar) + asteroid field + climax at coal_prototypegate /
+  "BOSS 7 warp gate" -> nav_point_GAME CLEAR
+  <- "space station" identification: plausible (coal_prototypegate is
+     a large stationary Coalition structure) but NOT lexically
+     confirmed -- literal string "station" absent from mission29.dte
+
+coal_research_station CONFIRMED real (mission16.dte) -- "space
+  station" is a genuine campaign object type, just used in mission 16,
+  not 29.
+
+Klaus Steiner CONFIRMED recurring character:
+  LANGUAGE.DLL IDs: 135="Klaus Steiner", 467="Fly to Bremen and
+    rendezvous with Steiner", 1015="Protect Commander Steiner"
+  Appears (object/dialogue scan across ALL mission*.dte files) in:
+    missions 3, 8, 16, 19, 23, 24, 28, 191, 251/271/311
+  mission23: Saladin rescue ("You will not rescue Steiner")
+  mission271: rivalry with Petrov ("we meet again steiner...i can
+    assure this WILL be the last time....DIE!!!!")
+  Does NOT appear in mission29.dte's object table.
+
+CORRECTION/refinement: Steiner's death/sacrifice beat is mission28.dte,
+  ONE MISSION BEFORE the technical finale (29), not the same mission:
+    ger_wolverine Steiner (his ship) -> Steiner suicide curvePoint1/2
+    -> Steiner suicide curveControl1/2 -> Steiner blow up point
+    -> steiner first suicide point -> camera_pointsteinercam
+  So the campaign's Steiner arc and technical final mission are two
+  consecutive but distinct levels (28, then 29) -- narrative otherwise
+  fully confirmed (his climactic mission IS right at the campaign's end).
+
+BONUS (ties to Pass 86's open tail[10] question): mission28's 7-ship
+  Diceman_WL squadron shows tail[1] = 256,512,768,1024,1280,1536,1792
+  (exact multiples of 256) with constant tail[0]=13 across all 7
+  -> tail[0] = squadron/group ID, tail[1] = formation-slot index*256
+     (refines Pass 86's vaguer "tail[8]/[9] possibly group ID" guess)
+
+  <- open: whether coal_prototypegate is explicitly called a "space
+     station" in unrecoverable localized dialogue
+  <- open: whether Steiner appears in mission29's undecoded tables
+     (entries 1, 4-26) beyond the object list
+  <- open: tail[0]/[1] formation theory confirmed for only 1 squadron
+```
