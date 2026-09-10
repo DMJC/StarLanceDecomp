@@ -2066,3 +2066,17 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - `tail[10]`'s remaining fields.
 - Whether an explicit per-mission object count field exists elsewhere in the directory.
 - Entries 1, 2, 4-26 remain undecoded.
+
+## Pass 87 -- CORRECTION: entry 3's directory tag is the object count, not a checksum (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| **CORRECTION**: entry 3's header tag (`DAT_00529504`) is the authoritative populated-object COUNT | 5 | Found via `FUN_0045cbc0` (one of `LoadMissionFile`'s finalization passes): its object-table walk uses `DAT_00529504` directly as the loop bound. Confirmed across 4 real files (118/299/279/23), all sensible small counts. |
+| **CORRECTION**: Pass 86's zero-padding-scan heuristic for the object count was wrong | 5 | `mission30.dte` proves it: tag=23, but non-zero *stale editor garbage* (truncated fragments of earlier real names) continues for ~300+ more slots. The zero-scan coincidentally matched for missions 1/2/5 only. The directory tag is the only reliable source. |
+| `mission30.dte` identified as a flight-training tutorial mission | 4 | Real objects: `training_hoop 1-9`, `Fly to Point`, `Bug Out Point`, `Enemy Drone`, `Back to Yamato` -- confirms this mission takes place aboard the Yamato. |
+
+### Open follow-ups
+
+- Whether the header-tag-as-count role applies to any of the other 26 tables, or is unique to entry 3.
+- Entry 2's role (unconfirmed).
+- Entries 1, 4-26 remain undecoded.

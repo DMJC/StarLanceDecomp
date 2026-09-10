@@ -10263,3 +10263,78 @@ Loose patterns observed, not fully mapped:
 - Entries 1, 2, 4-26 remain undecoded (entry 2's small integer values
   were observed to scale with mission size across 3 files, a plausible
   but unconfirmed "string-table bytes-used" role).
+
+## Pass 87 -- CORRECTION: entry 3's own directory tag IS the object count; the zero-padding heuristic was wrong (2026-09-10)
+
+Direct follow-up ("keep going") on Pass 86's open item about whether
+an explicit object-count field exists. It does -- and it was sitting
+in plain sight the whole time.
+
+### `FUN_0045cbc0` (one of `LoadMissionFile`'s 5 "finalization pass" calls) reveals it
+
+Decompiled in full. Among other post-load setup (resetting the
+mission-script VM's thread-state globals, an asset-dependency
+resolution loop calling `FUN_00457cd0` per object), it walks the
+object table exactly like this:
+
+```c
+iVar5 = DAT_0052951c;              // object table base (entry 3)
+if (DAT_00529504 != 0) {           // <-- entry 3's OWN directory tag!
+    do {
+        ...
+        iVar5 = iVar5 + 0x4c;      // next record
+    } while (uVar7 < DAT_00529504);
+}
+```
+
+`DAT_00529504` is exactly the global `LoadMissionFile` passes as
+entry 3's TYPE-field output (`ReadMissionDirectoryEntry(&local_8,
+&DAT_00529504, iVar1, &DAT_0052951c)`) -- the same header field Pass 85
+found varies unpredictably per mission and concluded probably wasn't a
+stable type tag. **It's the object count.** Cross-checked against the
+4 real mission files: `mission1`=118, `mission2`=299, `mission5`=279,
+`mission30`=23 -- all sensible small counts, not checksum-shaped
+values.
+
+### CORRECTION: Pass 86's zero-padding heuristic was wrong, proven by `mission30.dte`
+
+Pass 86 determined "118 real records" for `mission1.dte` by scanning
+for the first all-zero record -- which happened to agree with the
+true count for `mission1`/`mission2`/`mission5` (tag matches the
+zero-boundary exactly, verified this pass), but **`mission30.dte`
+breaks that coincidence**: its tag is `23`, yet non-zero data
+continues for many slots beyond index 23 -- **stale, truncated editor
+garbage** left over from an earlier, larger save of the mission
+(`"h Drone LaunchPoint1"`, `"int1"`, `"e LaunchPoint2"` -- truncated/
+overlapping fragments of real names seen earlier in the same file, at
+different offsets, not new content). The zero-padding scan would have
+silently included ~300+ bogus records for this file. **The
+directory-entry tag is the only correct way to know where real data
+ends** -- confirmed via the game's own loop bound, not inferred.
+
+### Bonus: `mission30.dte` identified as a flight-training tutorial mission
+
+Its real objects (`training_hoop 1`-`9`, `Fly to Point`, `Bug Out
+Point`, `Have another go Hoop`, `Back to Yamato`, `Enemy Drone`,
+`Watch Drone LaunchPoint1/2`) read unmistakably as a flight-school
+tutorial -- fly through hoops, practice against a drone, return to
+the carrier. `"Back to Yamato"` also confirms this mission takes place
+aboard the Yamato (consistent with `RunMissionSelectMapScreen`'s
+`mission30`/`31`/`32` branch being reached from the pod-bay hub, which
+Pass 71's earlier work already tied to post-transfer/Yamato-era
+gameplay).
+
+### Tool updated
+
+`reversing/tools/decode_dte.py --objects` now reads entry 3's own tag
+as the authoritative record count instead of scanning for zero
+padding. Re-verified clean output (correct start/end record, no
+garbage) against all 4 sample mission files.
+
+### Open follow-ups
+
+- Whether the header-tag field's role is ALSO "count" for any of the
+  other 26 tables, or unique to entry 3 -- not checked.
+- Entry 2's role (values still observed to scale with mission size,
+  unconfirmed).
+- Entries 1, 4-26 remain undecoded.

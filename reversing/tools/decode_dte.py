@@ -8,9 +8,13 @@ at its very start, one 8-byte entry per table:
 
     offset 0 (4 bytes): header word
         bits 0-15  = a per-file value that VARIES between missions for
-                     the same table slot (Pass 85 correction -- this is
-                     NOT a stable record-type tag as originally assumed;
-                     more likely a checksum/version stamp, not resolved)
+                     the same table slot (Pass 85 correction -- NOT a
+                     single stable record-type tag). Its role is
+                     PER-TABLE: for entry 3 specifically it's the
+                     authoritative populated-record COUNT (confirmed
+                     Pass 87 via FUN_0045cbc0's loop bound AND
+                     cross-checked against real files); other tables'
+                     roles for this field are not yet determined.
         bit 24-27  = 4 flag bits, each sets one global in LoadMissionFile
     offset 4 (4 bytes): absolute offset into the SAME decompressed buffer
                         (LoadMissionFile always passes base=start-of-buffer)
@@ -49,11 +53,12 @@ code. Each record:
                                   pair (possibly squadron/group ID) --
                                   not fully mapped
 
-Real objects are packed at the start of the 512-slot array; the
-remainder is zero-padded (mission1.dte: 118 real records, then 394
-zeroed slots -- no explicit "object count" field found in the
-directory-visible entries so far, the count was determined empirically
-by scanning for the zero-padding boundary).
+Real objects are packed at the start of the 512-slot array. The valid
+count is entry 3's own directory tag (see above) -- NOT a zero-padding
+scan: mission30.dte proves the difference matters, since it has only
+23 real records (tag=23) but stale, non-zeroed editor garbage
+(truncated/overlapping strings from an earlier, larger save of the
+mission) continues for many more slots past that point.
 
 The other 25 tables' internal layouts are NOT decoded by this tool --
 only their directory-entry location.
@@ -117,14 +122,15 @@ OBJECT_STRIDE = 0x4c
 OBJECT_CAPACITY = 512
 
 
-def read_objects(out, nameoff, objoff):
-    """Yields (index, objectID, name, (x,y,z), tail) for populated slots,
-    stopping at the first all-zero padding record."""
-    for i in range(OBJECT_CAPACITY):
+def read_objects(out, nameoff, objoff, count):
+    """Yields (index, objectID, name, (x,y,z), tail) for the first `count`
+    slots -- `count` is entry 3's own directory-entry tag (Pass 87:
+    confirmed authoritative via FUN_0045cbc0's loop bound, NOT a
+    zero-padding scan -- stale editor garbage can follow real records
+    without being zeroed, e.g. mission30.dte's indices 23+)."""
+    for i in range(min(count, OBJECT_CAPACITY)):
         base = objoff + i * OBJECT_STRIDE
         obj_id, name_idx = struct.unpack_from('<ii', out, base)
-        if obj_id == 0 and name_idx == 0 and i > 0:
-            break
         x, y, z = struct.unpack_from('<3f', out, base + 8)
         tail = struct.unpack_from('<10h', out, base + 0x28)
         name = cstr(out, nameoff + name_idx) if 0 <= name_idx < len(out) else None
@@ -148,8 +154,9 @@ def main():
 
     if objects:
         nameoff = entries[0][2]
-        objoff = entries[3][2]
-        for i, obj_id, name, pos, tail in read_objects(out, nameoff, objoff):
+        obj_tag, _, objoff = entries[3]
+        print(f"  entry3 tag (= object count, Pass 87): {obj_tag}")
+        for i, obj_id, name, pos, tail in read_objects(out, nameoff, objoff, obj_tag):
             print(f"  [{i:3}] id={obj_id:4} name={name!r:32s} "
                   f"pos=({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f}) tail={tail}")
         return

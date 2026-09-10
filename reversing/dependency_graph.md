@@ -2583,3 +2583,41 @@ mission1.dte: 118 real records (indices 0-117), then exact zero-padding
   <- open: whether an explicit object-count field exists elsewhere
   <- open: entries 1, 2, 4-26 still undecoded
 ```
+
+## CORRECTION: entry 3's directory tag is the object count (2026-09-10, Pass 87)
+
+```
+FUN_0045cbc0 (one of LoadMissionFile's 5 finalization-pass calls):
+    iVar5 = DAT_0052951c;              // object table base (entry3)
+    if (DAT_00529504 != 0) {           // entry3's OWN directory tag!
+        do { ...; iVar5 += 0x4c; } while (uVar7 < DAT_00529504);
+    }
+  -> DAT_00529504 = the global LoadMissionFile writes entry3's header-tag
+     into (confirmed via its own call:
+     ReadMissionDirectoryEntry(&local_8, &DAT_00529504, iVar1, &DAT_0052951c))
+  -> CONFIRMS: entry3's directory tag IS the object count, not a checksum
+     (Pass 85 flagged this field as "not a stable type tag" but didn't
+     know its real per-table role -- now resolved for entry3 specifically)
+
+Cross-checked, all sensible counts:
+    mission1.dte tag=118   mission2.dte tag=299
+    mission5.dte tag=279   mission30.dte tag=23
+
+CORRECTION to Pass 86: the "scan for first all-zero record" heuristic
+  used to determine mission1's 118-object count was WRONG as a general
+  method -- it only coincidentally matched the true tag for missions
+  1/2/5. mission30.dte proves it: tag=23 (correct), but STALE EDITOR
+  GARBAGE (truncated/overlapping fragments of real names from an
+  earlier save) continues non-zero for ~300+ more slots past index 23.
+  The directory tag is the only reliable source for where real data ends.
+
+BONUS: mission30.dte identified as a flight-TRAINING tutorial mission
+  (training_hoop 1-9, Fly to Point, Bug Out Point, Enemy Drone, Back to
+  Yamato) -- confirms it takes place aboard the Yamato.
+
+decode_dte.py --objects updated to use entry3's tag as the count
+  instead of zero-scanning; re-verified clean against all 4 sample files.
+
+  <- open: whether "header tag = count" applies to any other table
+  <- open: entry2's role; entries 1, 4-26 undecoded
+```
