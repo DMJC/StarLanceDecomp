@@ -10157,3 +10157,109 @@ lines cued to specific mission events.
   every file checked -- if this holds universally, these flags may not
   vary per-entry in practice despite the per-entry storage, worth a
   wider check.
+
+## Pass 86 -- Entry 3 decoded: the mission's object spawn table, fully mapped and legible (2026-09-10)
+
+Direct follow-up: "keep going and start with entry 3" (the float-heavy
+table flagged open in Pass 85). Found `GetObjectIndexFromPointer`
+(`0x4531c0`) among entry 3's dozens of readers (`TrySetAiState`,
+`ProcessNetworkMessage`, and many more core gameplay functions) --
+`return (uint)(param_1 - DAT_0052951c) / 0x4c;` directly confirms the
+record stride (76 bytes) from the game's own code, not guesswork.
+Extended `reversing/tools/decode_dte.py` with `--objects` support.
+
+### `SpawnObjectRecord` layout (76 = `0x4c` bytes, confirmed via `GetObjectIndexFromPointer`)
+
+```c
+struct SpawnObjectRecord {           // DAT_0052951c[512], directory entry 3
+    int32_t objectID;                // +0x00, editor-assigned, roughly increasing with
+                                      //   gaps -- NOT the array index
+    int32_t nameIndex;                // +0x04, byte offset into entry 0's string table
+    float    position[3];             // +0x08, world-space X, Y, Z
+    float    position2[3];            // +0x1c, byte-identical to `position` in every
+                                      //   record observed -- role of the duplicate open
+    int16_t  tail[10];                 // +0x28, partially understood (see below)
+};                                    // total 0x4c = 76 bytes
+```
+
+**Confidence 5** on the field boundaries and the string/position fields
+-- directly confirmed via real, sensible, decoded content across
+118 consecutive real records in `mission1.dte` with zero garbage.
+**Confidence 2** on the `tail[10]` fields beyond the loose pattern
+noted below.
+
+### Real content: mission1.dte's entire object layout, decoded
+
+The first 118 of the table's 512 fixed slots hold real data for
+`mission1.dte`; slot 118 onward is exact zero-padding (confirmed by
+scanning all 512 slots -- no separate "object count" field was found
+among the other directory entries, the boundary is empirical). A
+representative sample of what's actually in a Star Lancer mission
+file:
+
+```
+Player_Ship
+(A1)Naginata, (A3)Preditor, (A4)Grendal, (A5)Bandit Crusader, (WL)Viper's Coyote
+    -- a 5-ship enemy squadron with flight-position callsigns (A1/A3/A4/A5) + wing leader (WL)
+The Reliant                          -- the player's carrier
+Convoy Nav Point
+mammoth (ANS Guliver)                -- a named capital ship
+us_nanny, us_prowler, ger_lueneburg1, ger_lueneburg2   -- escorted convoy ships
+Bandit escort (A5), Viper escort (WL)
+ruskie jumpin point
+ussr_sabre1..4, ussr_kamov            -- the enemy strike group
+kamov_torp GUL1/GUL2/LUN1/LUN2        -- torpedo objects tied to specific targets
+us_fort_sherman
+planet_neptune, planet_triton         -- background celestial bodies
+Jump Home point, CentFollow Ambush, Follow Ambush
+Luenburg 1/2 in, Mammoth In here, Nanny in Here   -- convoy arrival markers
+ussr_lagg1..3, Kamov 1 in here, MP+1/MP+2 enemies in here
+ussr_sabre1b..3b, ussr_kamov 2, ussr_torpedo1..4
+ranger camPoint1/2, ranger camControl1/2          -- cinematic camera rigs
+ussr_sabrerussbkup1..6, russbkupjump in point, russbkupcam
+P1-P4 Escort Marker (A1-A4)
+REL_nanny, uk_mammoth, us_prowler     -- a second (post-battle?) formation snapshot
+Reliant Jump In, Rel_escort_1..6, Rel_nanny_in, Rel_prow_in, Rel_Mam_in
+Camera focus, watch Rel jump in, Nanny Fly 2
+us_cargo_pod1..16
+Sherman patrolPoint1/2, patrolControl1/2, patrol_Join1_Point2/Control1/Control2
+Loadup_mammoth, us_ripper, NANYpatrol_route2
+player snap to point1..4
+```
+
+This is, in effect, a complete human-legible blueprint of mission 1's
+world: a convoy-escort/ambush scenario with a named enemy squadron,
+capital-ship convoy, Soviet strike group with torpedo bombers,
+multiple camera rigs for cinematics, patrol routes, and snap-to points
+-- confirming the trigger-type catalog (Pass 31) and mission-scripting
+work (Passes 25-32) describe a system that really does drive scenarios
+exactly this rich.
+
+### `tail[10]`, partially characterized
+
+Loose patterns observed, not fully mapped:
+- `tail[2]`/`tail[3]` (bytes `+0x2c`) are frequently equal to each
+  other and often `90` -- plausibly a heading/orientation value stored
+  twice (matching the `position`/`position2` duplication pattern).
+- `tail[4..7]` are `-1` (`0xffff`) in every record observed --
+  plausibly unused/sentinel slots reserved for runtime-only fields
+  filled in after mission load, not meaningful in the static file.
+- `tail[8]`/`tail[9]` are always equal to each other and vary per
+  record (`0`, `2`, `9`, `358`, `359`, `356`...) -- plausibly a
+  squadron/group ID or a second heading value, not confirmed.
+- `tail[0]`/`tail[1]` vary less predictably (`12,7` / `12,775` /
+  `-1,-1`...) -- not characterized.
+
+### Open follow-ups
+
+- `position2`'s purpose (always identical to `position` in every
+  record checked -- spawn-vs-live position? two coordinate frames?).
+- `tail[10]`'s remaining fields, especially `tail[8]`/`tail[9]`'s
+  likely group/squadron-ID role.
+- Whether an explicit per-mission object COUNT exists anywhere in the
+  directory (not found among entries checked so far) or whether every
+  consumer really does scan for the zero-padding boundary the way this
+  pass's tool does.
+- Entries 1, 2, 4-26 remain undecoded (entry 2's small integer values
+  were observed to scale with mission size across 3 files, a plausible
+  but unconfirmed "string-table bytes-used" role).

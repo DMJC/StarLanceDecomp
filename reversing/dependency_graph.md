@@ -2546,3 +2546,40 @@ Entry 0 (DAT_00525fa8) = the mission's OBJECT/NAME STRING TABLE, confirmed
   <- open: whether entry0's strings are indexed by the other 26 tables
   <- open: header low-16-bit field's real meaning
 ```
+
+## Entry 3 decoded: the mission object spawn table (2026-09-10, Pass 86)
+
+```
+GetObjectIndexFromPointer (0x4531c0) -- confirms entry3's record stride
+  directly from game code (not guessed):
+    return (uint)(param_1 - DAT_0052951c) / 0x4c;   // 0x4c = 76 bytes
+
+SpawnObjectRecord (76 bytes, entry3/DAT_0052951c[512], fixed capacity):
+    +0x00 i32   objectID    -- editor-assigned, roughly increasing w/ gaps
+    +0x04 i32   nameIndex   -- byte offset into entry0's string table
+    +0x08 f32x3 position    -- world-space X,Y,Z
+    +0x1c f32x3 position2   -- byte-identical to position (role open)
+    +0x28 i16x10 tail       -- partially understood:
+        tail[2]/[3]: often equal, often 90 (heading, duplicated?)
+        tail[4..7]:  always -1 (sentinel/runtime-only?)
+        tail[8]/[9]: always equal to each other, varies per record
+                     (possible squadron/group ID)
+        tail[0]/[1]: not characterized
+
+reversing/tools/decode_dte.py --objects <mission.dte> -- new flag,
+  reads until the first all-zero padding record (empirically: no
+  explicit count field found elsewhere in the directory)
+
+mission1.dte: 118 real records (indices 0-117), then exact zero-padding
+  to the full 512-slot capacity. Full world layout decoded and legible:
+  Player_Ship, a 5-ship enemy squadron (A1/A3/A4/A5 flight positions +
+  WL wing leader), The Reliant (carrier), a named capital ship
+  ("mammoth (ANS Guliver)"), a Soviet strike group (ussr_sabre1-4,
+  ussr_kamov + torpedo objects), planets (neptune, triton), camera
+  rigs, patrol routes, cargo pods, snap-to points.
+
+  <- open: position2's purpose (identical to position everywhere checked)
+  <- open: tail[10]'s remaining fields
+  <- open: whether an explicit object-count field exists elsewhere
+  <- open: entries 1, 2, 4-26 still undecoded
+```

@@ -2051,3 +2051,18 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - Whether entry 0's strings are indexed by the other 26 tables -- not cross-referenced.
 - The directory header's low-16-bit field's real meaning -- not resolved.
 - Whether the 4 per-entry flag bits ever vary (all observed as `0xf` so far) -- not checked widely.
+
+## Pass 86 -- Entry 3 decoded: the mission's object spawn table (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `SpawnObjectRecord` layout (76 bytes, entry 3 / `DAT_0052951c`, 512-slot fixed array) | 5 | Stride confirmed independently via `GetObjectIndexFromPointer`'s `(ptr-base)/0x4c` in real game code. Fields: `objectID` (i32), `nameIndex` (i32, into entry 0's string table), `position[3]` (f32 world XYZ), `position2[3]` (duplicate of position), `tail[10]` (i16, partially understood). |
+| Real content decoded: mission1.dte's full 118-object layout | 5 | Every name resolves to sensible, legible mission content (enemy squadron with flight-position callsigns, capital-ship convoy, Soviet strike group, camera rigs, patrol routes, snap-points) -- zero garbage across all 118 real records. |
+| `tail[10]` sub-fields | 2 | Loose patterns only: `tail[2]/[3]` often equal (heading?), `tail[4..7]` always `-1` (sentinel), `tail[8]/[9]` always equal to each other and vary per record (group/squadron ID?). Not fully mapped. |
+
+### Open follow-ups
+
+- `position2`'s purpose (identical to `position` in every record checked).
+- `tail[10]`'s remaining fields.
+- Whether an explicit per-mission object count field exists elsewhere in the directory.
+- Entries 1, 2, 4-26 remain undecoded.

@@ -28,11 +28,37 @@ naming every ship/trigger/navpoint/group the mission places -- e.g. ship
 classes (`us_prowler`, `ussr_sabre1`), named capital ships
 (`mammoth (ANS Guliver)`), named trigger instances (`Proximity Trigger`,
 `ShipReached Trigger`), patrol routes, navpoints, and speech-cue file
-references (`ms_speech\\ms_nam1103.ut`). The other 26 tables' internal
-layouts are NOT decoded by this tool -- only their directory-entry
-location.
+references (`ms_speech\\ms_nam1103.ut`).
 
-Usage: python3 decode_dte.py <mission.dte> [--strings-only]
+Entry 3 (Ghidra global `DAT_0052951c`) is confirmed (Pass 86) as the
+mission's OBJECT SPAWN TABLE -- a fixed 512-slot array of 76-byte
+(`0x4c`) records, stride independently confirmed via
+`GetObjectIndexFromPointer`'s `(ptr - base) / 0x4c` in the game's own
+code. Each record:
+
+    +0x00 (i32)     objectID   -- editor-assigned ID, roughly increasing
+                                  but with gaps; NOT the array index
+    +0x04 (i32)     nameIndex  -- byte offset into entry 0's string table
+    +0x08 (3x f32)  position   -- world-space X, Y, Z
+    +0x1c (3x f32)  position2  -- byte-identical to +0x08 in every record
+                                  observed so far; role of the duplicate
+                                  not established
+    +0x28 (10x i16) tail       -- partially understood: often includes a
+                                  heading-like value (frequently 90), -1
+                                  sentinels, and a repeating small-int
+                                  pair (possibly squadron/group ID) --
+                                  not fully mapped
+
+Real objects are packed at the start of the 512-slot array; the
+remainder is zero-padded (mission1.dte: 118 real records, then 394
+zeroed slots -- no explicit "object count" field found in the
+directory-visible entries so far, the count was determined empirically
+by scanning for the zero-padding boundary).
+
+The other 25 tables' internal layouts are NOT decoded by this tool --
+only their directory-entry location.
+
+Usage: python3 decode_dte.py <mission.dte> [--strings-only] [--objects]
 """
 import struct
 import sys
@@ -75,9 +101,40 @@ def extract_strings(out, offset, length=4096):
     return re.findall(rb'[ -~]{3,}', chunk)
 
 
+def cstr(buf, off):
+    if off < 0 or off >= len(buf):
+        return None
+    end = buf.find(0, off)
+    if end < 0:
+        return None
+    try:
+        return buf[off:end].decode('latin1')
+    except Exception:
+        return None
+
+
+OBJECT_STRIDE = 0x4c
+OBJECT_CAPACITY = 512
+
+
+def read_objects(out, nameoff, objoff):
+    """Yields (index, objectID, name, (x,y,z), tail) for populated slots,
+    stopping at the first all-zero padding record."""
+    for i in range(OBJECT_CAPACITY):
+        base = objoff + i * OBJECT_STRIDE
+        obj_id, name_idx = struct.unpack_from('<ii', out, base)
+        if obj_id == 0 and name_idx == 0 and i > 0:
+            break
+        x, y, z = struct.unpack_from('<3f', out, base + 8)
+        tail = struct.unpack_from('<10h', out, base + 0x28)
+        name = cstr(out, nameoff + name_idx) if 0 <= name_idx < len(out) else None
+        yield i, obj_id, name, (x, y, z), tail
+
+
 def main():
     path = sys.argv[1]
     strings_only = '--strings-only' in sys.argv
+    objects = '--objects' in sys.argv
     data = open(path, 'rb').read()
     out = maybe_decompress(data)
     print(f"{path}: decompressed {len(out)} bytes")
@@ -87,6 +144,14 @@ def main():
         strs = extract_strings(out, entries[0][2], 8192)
         for s in strs:
             print(' ', s.decode('ascii'))
+        return
+
+    if objects:
+        nameoff = entries[0][2]
+        objoff = entries[3][2]
+        for i, obj_id, name, pos, tail in read_objects(out, nameoff, objoff):
+            print(f"  [{i:3}] id={obj_id:4} name={name!r:32s} "
+                  f"pos=({pos[0]:.1f}, {pos[1]:.1f}, {pos[2]:.1f}) tail={tail}")
         return
 
     for i, (typeid, flags, absoff) in enumerate(entries):
