@@ -1902,8 +1902,20 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 
 ### Open follow-ups
 
-- The sub-tab buttons' click-rect array (distinct from the confirmed data table) not located.
-- What the 2 sub-tabs and ~19 Capital Ship tint groups represent semantically.
-- `LAB_00425220` (hover-widget redraw callback) not decompiled.
+- `rel_cap2itac.bik`/`itac2pod_hud.bik`/`itac2dor.bik` fully placed structurally but not connected to a specific gameplay trigger.
+
+## Pass 76 -- Sub-tab click-rects, hover-widget callback, tint-group semantics investigated (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| Sub-tab click-rects located: `0x4e5460`, 2 entries | 5 | Found via `disassemble_function` on `ItacFightersPerFrameUpdate` (literal args don't survive decompilation): entry 0 = (551,59,64,41), entry 1 = (478,59,64,61) -- X/Y match Pass 75's confirmed draw-position table exactly. |
+| **CORRECTION**: `UpdateHoverAnimationWidget`'s Debrief callback is `BuildDebriefSummaryText`, not a wiggle-redraw | 5 | `LAB_00425220` -> `RefreshDebriefSummaryText` (0x425220) -> `BuildDebriefSummaryText` (0x425240) -- a large function assembling the mission-debrief narrative paragraph from per-mission outcome-flag arrays and template/language-string fragments. The generic hover-animation mechanism is reused here as a periodic text-refresh trigger, not an actual button wiggle. |
+| CapShips' 2 sub-tabs correspond to 2 distinct roster tables (21 vs. 27 ships) | 4 | `PopulateCapShipsRosterForSubTab` (0x424410, was `FUN_00424410`, called from `ItacEnterCapShipsCategory`) walks `0x4e42c0` (21 records) or `0x4e4560` (27 records) depending on sub-tab index, inserting each into the category's `DynamicList`. Each 32-byte record holds ~7-8 consecutive `GetLanguageString` IDs plus small numeric fields -- consistent with a name/description/stat card per ship class. |
+| Tint-group (Pass 75's 19-group lookup) semantic meaning | 1 | NOT resolved -- the localized string text those `GetLanguageString` IDs resolve to isn't available in this Ghidra project (separate language resource, not open in this session). Structural link to the roster tables confirmed; which classes fall in which group, and what unifies each group, remains unknown. |
+
+### Open follow-ups
+
+- The tint groups' actual semantic grouping (needs the localized string table, not available in this project).
+- `UpdateHoverAnimationWidget`'s other call site (`0x42a4f2`, outside ITAC) not traced -- unclear if it's a genuine wiggle-animation user there.
 - The per-mode-value driver DLL name passed to `LoadRendererBackendDriver` not traced (implicit register argument).
 - `rel_cap2itac.bik`/`itac2pod_hud.bik`/`itac2dor.bik` fully placed structurally but not connected to a specific gameplay trigger.

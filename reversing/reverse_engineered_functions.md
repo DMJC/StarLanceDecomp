@@ -9352,3 +9352,80 @@ others).
 - `LAB_00425220` (the hover-widget redraw callback) not decompiled.
 - The per-mode-value driver DLL name passed to
   `LoadRendererBackendDriver` not traced.
+
+## Pass 76 -- Sub-tab click-rects, hover-widget callback, and tint-group semantics investigated (2026-09-10)
+
+User request: "Investigate the sub-tab click-rects, the hover-widget's
+redraw callback target, the semantic meaning of the tint groups."
+
+### Sub-tab click-rects -- located and confirmed
+
+Confidence 5. Disassembled `ItacFightersPerFrameUpdate` (0x425980)
+directly (not just decompiled -- the literal args don't survive
+decompilation) and found the exact call: `MOV EDX,0x2; MOV
+ECX,0x4e5460; CALL FindHotspotIndexAtCursor`. Read the 16 bytes at
+`0x4e5460`:
+
+| Entry | X | Y | W | H |
+|---:|---:|---:|---:|---:|
+| 0 | 551 | 59 | 64 | 41 |
+| 1 | 478 | 59 | 64 | 61 |
+
+These X/Y exactly match the draw positions from Pass 75's confirmed
+data table (`0x4e96cc`/`0x4e96d0` = 551/478, 59/59), closing the loop:
+the two sub-tab buttons sit at (551,59) and (478,59), sized roughly
+64x41 and 64x61.
+
+### The hover-widget's redraw callback -- resolved: it's the debrief narrative-text builder, not a "wiggle" redraw
+
+Confidence 5. `LAB_00425220` (created as a function, `0x425220`) is a
+thin wrapper: `RefreshDebriefSummaryText` (was `FUN_00425220`) just
+calls `BuildDebriefSummaryText(1, 1.0)` (0x425240, was `FUN_00425240`).
+`BuildDebriefSummaryText` is a large function that assembles the
+mission-debrief narrative paragraph (e.g. kills/promotions/medals
+summary text) by checking several per-mission outcome-flag arrays
+(`DAT_00562e2c`, `DAT_00562e9c`, `DAT_00562ed6`, `DAT_0050099f`,
+`DAT_005009d7`, indexed by the currently-viewed mission) and
+string-concatenating matching template fragments (a small
+`local_14[]` array of 4 template pointers plus a default, selected by
+the mission's outcome class, `0`-`4`/`-1`) and/or `GetLanguageString`
+fragments (IDs `0x53f`/`0x540`/`0x541`/`0x566`, gated on the mission-
+end-reason code `DAT_00588394`) into a shared buffer, storing the
+final pointer to `_DAT_0051d304`. **This means `UpdateHoverAnimationWidget`
+isn't specifically a "wiggle" animator for Debrief** -- its generic
+periodic-refresh-on-tick-change mechanism is being reused here to
+periodically rebuild the debrief text, not to animate a button. (Its
+other call site outside ITAC, `0x42a4f2`, may still use it for an
+actual wiggle effect -- not traced.)
+
+### Tint-group semantics -- partially resolved: tied to two distinct capital-ship roster tables, but the group meaning itself stays unconfirmed
+
+Confidence 3. Decompiled `PopulateCapShipsRosterForSubTab` (0x424410,
+was `FUN_00424410`, called from `ItacEnterCapShipsCategory`) -- it
+takes the sub-tab index (0 or 1) and walks one of two separate
+32-byte-record tables: `0x4e42c0` (21 records, sub-tab 0) or
+`0x4e4560` (27 records, sub-tab 1), calling `FUN_00440710` (the
+DynamicList-insert helper) once per record. **So the 2 sub-tabs
+correspond to 2 genuinely separate capital-ship rosters** (21 vs. 27
+entries -- plausibly a per-faction split, matching the Coalition/
+Alliance framing elsewhere in the game, though not confirmed). Each
+32-byte source record holds ~7-8 consecutive `GetLanguageString` IDs
+(e.g. record 0: IDs 1262-1269) plus 1-2 small numeric fields --
+consistent with a name/description/stat "info card" per ship class.
+**The actual localized string text isn't available in this Ghidra
+project** (it lives in a separate language resource this session
+doesn't have open), so the tint-group-to-class-name mapping from
+Pass 75's 19-group lookup table couldn't be completed -- the
+structural link (roster tables exist, feed the same DynamicList the
+tint-group switch reads `+0x1e` from) is confirmed, but which classes
+land in which of the 19 groups, and what unifies each group, remains
+unresolved.
+
+### Open follow-ups
+
+- The tint groups' actual semantic grouping (needs the localized
+  string table, not available in this project).
+- `UpdateHoverAnimationWidget`'s other call site (`0x42a4f2`, outside
+  ITAC) not traced -- unclear if it's a genuine wiggle-animation user.
+- The per-mode-value driver DLL name passed to
+  `LoadRendererBackendDriver` not traced.

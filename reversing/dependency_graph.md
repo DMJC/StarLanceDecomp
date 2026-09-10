@@ -2112,3 +2112,46 @@ DAT_00588730+0x1ac -- RESOLVED: not a scalar render-mode flag, but the FIRST
      same lesson as Pass 70's "+0x50" investigation.
   <- open: per-mode-value driver DLL name (implicit register arg, not traced)
 ```
+
+## Sub-tab click-rects, hover-widget callback, tint-group semantics (2026-09-10, Pass 76)
+
+```
+Sub-tab click-rects (found via disassemble_function on ItacFightersPerFrameUpdate --
+  the literal args MOV EDX,0x2 / MOV ECX,0x4e5460 don't survive decompilation):
+  0x4e5460: [{X=551,Y=59,W=64,H=41}, {X=478,Y=59,W=64,H=61}]
+  -> X/Y match Pass 75's confirmed draw-position table (0x4e96cc/0x4e96d0) exactly
+
+UpdateHoverAnimationWidget's Debrief callback chain, resolved:
+  DAT_00588730... no -- 0x51d2e8+0x20 (_DAT_0051d308) = &RefreshDebriefSummaryText
+    (0x425220, was LAB_00425220/FUN_00425220)
+  RefreshDebriefSummaryText -> BuildDebriefSummaryText(1, 1.0)
+  BuildDebriefSummaryText (0x425240, was FUN_00425240) -- assembles the mission-
+    debrief narrative paragraph:
+    -> checks per-mission outcome-flag arrays (DAT_00562e2c/e9c/ed6, DAT_0050099f,
+       DAT_005009d7) indexed by the currently-viewed mission
+    -> selects a template from local_14[] (4 pointers + 1 default) by outcome class
+       (0-4 or -1), and/or GetLanguageString fragments (0x53f/0x540/0x541/0x566,
+       gated on mission-end-reason DAT_00588394)
+    -> concatenates matching fragments (separator &DAT_004e5440) into a buffer,
+       final pointer stored to _DAT_0051d304
+  CORRECTION: this is NOT a "wiggle" redraw for Debrief -- UpdateHoverAnimationWidget's
+    generic periodic-refresh-on-tick-change mechanism is reused here to periodically
+    rebuild the debrief text. Its other call site (0x42a4f2, outside ITAC) not traced,
+    so unclear whether it's ever used for an actual wiggle effect anywhere.
+
+Tint-group semantics -- partially resolved:
+  PopulateCapShipsRosterForSubTab (0x424410, was FUN_00424410, called from
+    ItacEnterCapShipsCategory) takes sub-tab index (0/1):
+    param==0 -> walks 0x4e42c0..0x4e4560 (21 x 32-byte records)
+    param==1 -> walks 0x4e4560..0x4e48c0 (27 x 32-byte records)
+    each record -> FUN_00440710 (DynamicList insert)
+  -> CONFIRMS: CapShips' 2 sub-tabs = 2 distinct ship rosters (21 vs 27 entries,
+     plausibly per-faction, not confirmed)
+  -> each 32-byte record holds ~7-8 consecutive GetLanguageString IDs (e.g. record0:
+     1262-1269) + 1-2 small numeric fields -- consistent with a name/description/
+     stat card per ship class
+  <- BLOCKED: the localized string TEXT for these GetLanguageString IDs is not
+     available in this Ghidra project (separate language resource, not open this
+     session) -- cannot map which classes fall into which of Pass 75's 19 tint
+     groups, or what unifies each group
+```
