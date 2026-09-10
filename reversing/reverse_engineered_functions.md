@@ -9429,3 +9429,78 @@ unresolved.
   ITAC) not traced -- unclear if it's a genuine wiggle-animation user.
 - The per-mode-value driver DLL name passed to
   `LoadRendererBackendDriver` not traced.
+
+## Pass 77 -- Tint-group semantics unblocked via direct LANGUAGE.DLL string extraction (2026-09-10)
+
+User re-sent the identical Pass 76 request. Pass 76 had fully resolved
+the sub-tab click-rects and the hover-widget callback; the tint-group
+item was blocked because the `GetLanguageString` text those capital-
+ship records reference lives in `LANGUAGE.DLL`, which wasn't open in
+Ghidra. **That DLL exists on disk** (`gamedata/StarLancer/LANGUAGE.DLL`),
+so this pass parsed its Win32 `RT_STRING` resource table directly in
+Python (`reversing/tools/extract_language_strings.py`, new tool,
+generic PE-resource STRINGTABLE reader -- also works on `ITACLANG.DLL`)
+rather than needing Ghidra to see it.
+
+### CORRECTION: the Capital Ships category's records hold PERSON names/callsigns, not ship-class names
+
+Extracting IDs 1262-1300 revealed real names and military callsigns
+("General Makin", "Sean Oliver", ... "Jester", "Zero", "Ace", "Link",
+"Sundown", "Jet", "Shooter", ...) -- **not ship-class names as Pass 76
+assumed.** IDs 1200-1244 (checked for context) turned out to be the
+game's own end-credits roll (dev names, "Quality Assurance Warthog",
+"Localization", etc.), and 1245-1261 are mission-specific objective
+text and named NPCs for a specific mission (the "Saladin" raid) --
+confirming this string range is the game's shared
+mission-briefing/NPC/credits text pool, not a dedicated "ship class"
+table. So each 32-byte `Capital Ships` record (previously described
+in Pass 74-76 as holding "~7-8 consecutive language-string IDs...
+consistent with a name/description/stat card") actually lists **8
+named individuals** per capital ship -- most plausibly its commanding
+officer and bridge crew, or (for at least one record, all 8 fields
+resolving to fighter-pilot callsigns) an embarked squadron roster --
+drawn from campaign, credits, and NPC beacon-name text, not a
+per-hull-class stat block.
+
+### Tint groups -- resolved: classIDs are used strictly in pairs, one pair per group, across all 48 records on both sub-tabs
+
+Confidence 4. Confirmed `FUN_00440710` (the record-insert helper) links
+the raw 32-byte source records directly into the category's
+`DynamicList` **by reference** (no copy) -- so the tint-group switch's
+`record+0x1e` field IS each record's own trailing 2-byte value.
+Decoded all 21 sub-tab-0 records (`0x4e42c0`) and all 27 sub-tab-1
+records (`0x4e4560`) and cross-checked their classIDs against Pass
+75's 56-byte group-lookup table (`0x423c74`):
+
+- classIDs actually used across both sub-tabs: 1, 2, 4, 5, 7, 8, 10,
+  11, 13, 14, 16, 17, 19, 20, 22, 23, 25, 26, 28, 29, 31, 32, 35, 37,
+  38, 40, 41, 43, 44, 46, 47, 49, 50, 52, 53, 56.
+- Every one of these falls on the table's "group" slot of its
+  group-of-3 -- **the "default" slot (3, 6, 9, 12, ..., 57) is never
+  assigned to any of the 48 real records**, on either sub-tab.
+- Several classIDs repeat across multiple distinct records
+  (`2` on 2 records, `14` on 2, `25` on 2, `40` on 3, `56` on 4,
+  etc.), confirming `classID` is a genuine shared category value, not
+  a unique per-ship identifier.
+
+This is a clean, fully corroborated structural pattern: the ~19 tint
+groups pair up exactly 2 populated classIDs each (36 of the 57
+possible ID slots are actually used, always the first two of each
+group-of-3), most plausibly representing 2 named
+variants/marks/individual-ships per hull class or per faction
+grouping, all sharing one UI accent color; the 3rd slot per group is
+a reserved/unused fallback in the lookup table that no real record
+ever exercises. The ultimate real-world label for each group (which
+specific hull class or faction) is still not determined --
+`capships.spr`'s actual icon art wasn't decoded, and the record text
+is person-names rather than a self-describing class label.
+
+### Open follow-ups
+
+- Which hull class or faction each of the ~19 tint groups actually
+  represents (would need `capships.spr`'s icon art decoded and
+  compared, not attempted).
+- `UpdateHoverAnimationWidget`'s other call site (`0x42a4f2`, outside
+  ITAC) not traced.
+- The per-mode-value driver DLL name passed to
+  `LoadRendererBackendDriver` not traced.

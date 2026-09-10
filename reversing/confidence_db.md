@@ -1915,7 +1915,22 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 
 ### Open follow-ups
 
-- The tint groups' actual semantic grouping (needs the localized string table, not available in this project).
 - `UpdateHoverAnimationWidget`'s other call site (`0x42a4f2`, outside ITAC) not traced -- unclear if it's a genuine wiggle-animation user there.
 - The per-mode-value driver DLL name passed to `LoadRendererBackendDriver` not traced (implicit register argument).
+- `rel_cap2itac.bik`/`itac2pod_hud.bik`/`itac2dor.bik` fully placed structurally but not connected to a specific gameplay trigger.
+
+## Pass 77 -- Tint-group semantics unblocked via direct LANGUAGE.DLL string extraction (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `LANGUAGE.DLL` exists on disk and its `RT_STRING` table is directly extractable | 5 | Pass 76 wrongly treated the localized text as unreachable. New tool `reversing/tools/extract_language_strings.py` parses the PE resource directory in Python (no Ghidra needed) -- generic Win32 STRINGTABLE reader, also works on `ITACLANG.DLL`. |
+| **CORRECTION**: Capital Ships' 32-byte records hold 8 PERSON names/callsigns each, not ship-class name/stat data | 5 | IDs 1262+ resolve to real names ("General Makin", "Sean Oliver"...) and callsigns ("Jester", "Zero", "Ace"...). Corrects Pass 74-76's assumption of a "name/description/stat card per ship class." IDs 1200-1244 are the game's own end credits; 1245-1261 are mission-specific objective text and NPC names for a specific mission -- confirming this is the shared campaign/credits/NPC text pool, not a dedicated ship-class table. |
+| Tint groups -- classIDs used strictly in pairs, one pair per group, across all 48 records on both sub-tabs | 4 | Decoded all 21+27 records; `FUN_00440710` links records into the `DynamicList` by reference (no copy), so `record+0x1e` is each record's own trailing field. Every classID actually used (36 distinct values, e.g. 1,2,4,5,7,8...56) lands on a "group" slot; the "default" slot (3,6,9,...,57) is never assigned to any real record on either sub-tab. Several classIDs repeat across multiple distinct records, confirming it's a shared category value, not a unique ID. |
+| Ultimate real-world label of each tint group (hull class? faction?) | 1 | Not determined -- would need `capships.spr`'s icon art decoded and compared; the record text is person-names, not a self-describing class label. |
+
+### Open follow-ups
+
+- Which hull class or faction each tint group represents (needs `capships.spr` icon art, not decoded).
+- `UpdateHoverAnimationWidget`'s other call site (`0x42a4f2`, outside ITAC) not traced.
+- The per-mode-value driver DLL name passed to `LoadRendererBackendDriver` not traced.
 - `rel_cap2itac.bik`/`itac2pod_hud.bik`/`itac2dor.bik` fully placed structurally but not connected to a specific gameplay trigger.

@@ -2150,8 +2150,57 @@ Tint-group semantics -- partially resolved:
   -> each 32-byte record holds ~7-8 consecutive GetLanguageString IDs (e.g. record0:
      1262-1269) + 1-2 small numeric fields -- consistent with a name/description/
      stat card per ship class
-  <- BLOCKED: the localized string TEXT for these GetLanguageString IDs is not
-     available in this Ghidra project (separate language resource, not open this
-     session) -- cannot map which classes fall into which of Pass 75's 19 tint
-     groups, or what unifies each group
+  <- UNBLOCKED in Pass 77 (see below) -- LANGUAGE.DLL exists on disk and its
+     RT_STRING resources are directly readable without Ghidra
+```
+
+## Tint-group semantics unblocked via direct LANGUAGE.DLL extraction (2026-09-10, Pass 77)
+
+```
+reversing/tools/extract_language_strings.py (new tool) -- generic Win32 PE
+  RT_STRING resource reader (16-strings-per-block STRINGTABLE format), reads
+  gamedata/StarLancer/LANGUAGE.DLL directly, no Ghidra required. Also works
+  on ITACLANG.DLL (identical PE resource format).
+
+CORRECTION: Capital Ships' 32-byte records (0x4e42c0 x21, 0x4e4560 x27) hold
+  8 PERSON names/callsigns each, NOT ship-class name/stat data as Pass 74-76
+  assumed:
+    ID 1262 "General Makin", 1263 "Sean Oliver", ... (record 0, all real names)
+    ID 1277 "Jester" (record 1's 8th name -- a callsign mixed into real names)
+    ID 1278 "Zero", 1279 "Ace", 1280 "Link", 1281 "Sundown", ... (record 2,
+      ALL callsigns -- likely an embarked fighter squadron roster)
+  Context check (IDs 1200-1261): 1200-1244 = the game's own END CREDITS
+    (dev names, "Quality Assurance Warthog", "Localization" section headers);
+    1245-1253 = mission objective text for a specific mission (the "Saladin"
+    raid); 1254-1261 = that mission's named NPCs/callsigns ("Admiral Petrov",
+    "Rasputin", "Hangman", "Electra"...)
+  -> CONFIRMS this ID range is the shared campaign/credits/NPC text pool, not
+     a dedicated per-ship-class table. Capital Ships category = named capital
+     ships + their commanding officers/bridge crew (or embarked squadron).
+
+Tint groups (Pass 75's 56-byte lookup @ 0x423c74) -- RESOLVED pairing pattern:
+  FUN_00440710 (record-insert helper) links the raw 32-byte records into the
+  DynamicList BY REFERENCE (no copy) -> record+0x1e IS the record's own
+  trailing 2-byte field, read directly by the tint switch.
+
+  All 21 sub-tab-0 classIDs:  1,2,4,5,7,14,8,2,11,10,13,14,16,17,19,20,22,
+                              23,25,25,26
+  All 27 sub-tab-1 classIDs:  28,29,31,32,35,37,38,40,46,41,41,29,56,43,40,
+                              44,46,47,49,40,50,52,53,56,44,56,56
+
+  -> Every value used lands on a "group" slot of the lookup table's
+     groupN,groupN,default(19) triplets -- the DEFAULT slot (classID
+     3,6,9,12,...,57) is NEVER assigned to any of the 48 real records on
+     EITHER sub-tab.
+  -> Several classIDs repeat across multiple distinct records (2 appears
+     twice, 14 twice, 25 twice, 40 three times, 56 four times) -- confirms
+     classID is a shared category value, not a unique per-ship ID.
+  -> CONCLUSION (confidence 4): the ~19 tint groups each reserve exactly 2
+     "populated" classID slots (36 of 57 total slots used) -- most plausibly
+     2 named variants/marks/ships per hull class or faction grouping, sharing
+     one UI accent color; the 3rd slot per group is an unused fallback that
+     no real record ever exercises.
+  <- open: which hull class/faction each group actually represents -- would
+     need capships.spr's icon art decoded and compared (not attempted; the
+     record text is person-names, not a self-describing class label)
 ```
