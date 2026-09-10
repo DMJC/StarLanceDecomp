@@ -1950,3 +1950,18 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - `UpdateHoverAnimationWidget`'s other call site (`0x42a4f2`, outside ITAC) not traced.
 - The per-mode-value driver DLL name passed to `LoadRendererBackendDriver` not traced.
 - `rel_cap2itac.bik`/`itac2pod_hud.bik`/`itac2dor.bik` fully placed structurally but not connected to a specific gameplay trigger.
+
+## Pass 79 -- Player creation / campaign start documented end-to-end (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| Full New Game -> pilot creation -> campaign start flow documented | 5 | Main Menu -> `RunNewGameSetupScreen` -> `RunDifficultySelectDialog` -> `LoadPlayerProfile` (Pass 62) -> `FUN_0049cd20` -> `WinMain`'s `DAT_00562dc8==1` gate -> `new_intro.bik` -> `RunReliantInductionTour` -> `RunShipInteriorVRLoop`. Each link directly read, not inferred. |
+| `RunReliantInductionTour` (0x438d50, was `FUN_00438d50`) -- new-pilot 5-stage orientation tour | 5 | Gated in `WinMain` on `DAT_00562dc8 == 1` exactly (brand-new pilot's first session only). 5 stages (locker/sim pod/cargo deck/ITAC/outro), each an ambient loop + narrated intro clip; returns which stage the player exited from. |
+| `FUN_0049cd20` -- resets transient per-campaign session state | 3 | Called only on new-pilot confirmation (not Load Existing). Fills a 260-byte array with value 2 + resets a small struct; not persisted in `profile.bin`; consumer/role not traced. |
+| `RunNewGameSetupScreen` case 5 clarified: "cancel callsign edit," not a field-clear | 4 | Up from Pass 62's unconfirmed rating. Resets the callsign-edit-mode flag (`DAT_0052019c`) and re-runs a trivial init call; typed characters aren't observed to be erased. |
+
+### Open follow-ups
+
+- `FUN_0049cd20`'s 260-byte array/struct -- role not traced to a consumer.
+- Whether `RunReliantInductionTour` can be aborted entirely vs. just exited early at a given stage.
+- The post-tour per-stage transition-clip jump table in `WinMain` -- only partially read.

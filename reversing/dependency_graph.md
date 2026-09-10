@@ -2257,3 +2257,47 @@ ActivateShapePalette (0x428410, was FUN_00428410):
   <- open: whether Fighters/Squadrons/Personnel/Kills/News/VideoReports'
      .spr files use the same multi-palette-per-group layout -- not checked
 ```
+
+## Player creation / campaign start (2026-09-10, Pass 79)
+
+```
+Main Menu "New Game" (DAT_0051dac4=0xc) -> RunNewGameSetupScreen (0x430490)
+  case 0/1: set pilot gender (g_wPilotGenderIsFemale / g_dwNewPilotGenderIsFemaleUI)
+  case 2: Load Existing Pilot -> screen 0xd (RunSaveGameBrowserScreen)
+  case 3: Confirm New Pilot -> RunDifficultySelectDialog (3-tier g_wCampaignDifficulty)
+    -> on confirm: SR_MEM_free(bg sprite) -> LoadPlayerProfile (Pass 62: loads or
+       silently creates profile.bin, currentMissionIndex=1 for a fresh pilot)
+    -> FUN_0049cd20 (fills a 260-byte array @ PTR_DAT_005047d2..0x5048d6 with value 2,
+       resets a small struct @ 0x58a958 -- transient session state, NOT in profile.bin;
+       only called for a genuinely new pilot, not Load Existing)
+    -> returns 1 up through RunMenuScreenLoop to WinMain
+  case 4: Exit to main menu
+  case 5: cancel callsign edit (DAT_0052019c=1, re-runs FUN_004aada0) -- NOT a field-clear
+  case 6: Options dialog
+  case 7: toggle recent-name list panel
+
+WinMain's main loop, first pass through after New Game (bVar1 true):
+  EnsureCorrectCDMounted()
+  if DAT_00562dc8 == 1 EXACTLY (brand-new pilot, never a resumed one):
+    PlayBinkMovieFromArchiveWithVolume("new_intro.bik")   [campaign opening cinematic]
+    RunReliantInductionTour (0x438d50, was FUN_00438d50)
+  else:
+    straight to RunShipInteriorVRLoop
+
+RunReliantInductionTour -- 5-stage new-pilot orientation walkthrough, narrated by "Enriq":
+  stage 0: locker room   (loop single_rel_c2lock.bik, narration enr_locker_box.bik)
+  stage 1: sim pod        (loop rel_podmon_loop.bik,   narration enr_simpod_box.bik)
+  stage 2: cargo deck     (loop rel_cdloop.bik,         narration enr_cd_box.bik)
+  stage 3: ITAC           (loop rel_itacloop.bik,       narration enr_itac_box.bik)
+  stage 4: outro          (loop rel_tv_enriq.bik,       narration enr_outro_box.bik)
+  -> each stage: play ambient loop, advance on input/timeout -> play narration clip -> next
+  -> returns exit stage (0-5); WinMain picks a follow-up transition clip via a per-stage
+     jump table (ESI*4+0x4aa8c8, only partially read: 0x506bf0, 0x4e8d08="rel_pod2itac.bik")
+  -> then RunShipInteriorVRLoop begins normal free-roam VR navigation aboard the Reliant,
+     eventually reaching mission 1's briefing via the existing room-graph navigation
+     (documented across the ITAC passes)
+
+  <- open: FUN_0049cd20's array/struct role not traced to a consumer
+  <- open: whether the tour can be aborted entirely vs. exited early at a stage
+  <- open: the post-tour transition-clip jump table not fully mapped
+```

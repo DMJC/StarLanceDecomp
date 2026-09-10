@@ -9602,3 +9602,112 @@ explained in every one of them.
   ITAC) not traced.
 - The per-mode-value driver DLL name passed to
   `LoadRendererBackendDriver` not traced.
+
+## Pass 79 -- Player creation / campaign start documented end-to-end (2026-09-10)
+
+Direct request: document the full player-creation-to-campaign-start
+flow. Pass 62-64 already covered pilot creation and `profile.bin` in
+depth; this pass ties that together with a genuinely new finding --
+what actually happens the moment a brand-new pilot's first session
+begins -- and tightens up one previously-unconfirmed detail
+(`RunNewGameSetupScreen` case 5).
+
+### The full flow, start to finish
+
+1. **Main Menu -> New Game** (`DAT_0051dac4 = 0xc`, documented Pass
+   45/46) launches `RunNewGameSetupScreen` (`0x430490`).
+2. **`RunNewGameSetupScreen`**'s button map (corrected in Pass 62,
+   case 5 now clarified below):
+
+   | Case | Action |
+   |---|---|
+   | 0 | Set pilot gender = Male |
+   | 1 | Set pilot gender = Female |
+   | 2 | Load Existing Pilot -> exits to screen `0xd` (`RunSaveGameBrowserScreen`) |
+   | 3 | Confirm New Pilot -> `RunDifficultySelectDialog`; on confirm, creates the pilot and returns 1 |
+   | 4 | Exit to main menu |
+   | 5 | Cancel callsign edit (see below) |
+   | 6 | Options dialog |
+   | 7 | Toggle the recent-name list panel |
+
+3. **`RunDifficultySelectDialog`** (Pass 62): a 4-hotspot modal
+   cycling `g_wCampaignDifficulty` through 3 tiers (Easy/Normal/Hard,
+   consumed later by `ScaleDamageForDifficulty`); confirm returns 1.
+4. **On confirm**, `RunNewGameSetupScreen` case 3 runs, in order:
+   `SR_MEM_free` (releases the setup screen's own background sprite),
+   `LoadPlayerProfile` (Pass 62 -- loads `profile.bin` if the typed
+   callsign already has one, or silently creates a fresh one:
+   `currentMissionIndex = 1`, all stats zeroed, default localized
+   name), then **`FUN_0049cd20`** (new this pass, see below), then
+   returns `1` up to `RunMenuScreenLoop` -> `WinMain`.
+5. **Back in `WinMain`**'s main loop**, on this first pass through
+   (`bVar1` true, i.e. "just came from the New Game flow" rather than
+   a resumed/loaded session): `EnsureCorrectCDMounted`, then a
+   `DAT_00562dc8 == 1` check (exact match, not just "early campaign")
+   gates a **brand-new-career-only intro**: play `new_intro.bik`
+   (the campaign's opening cinematic) via
+   `PlayBinkMovieFromArchiveWithVolume`, then run
+   `RunReliantInductionTour` (see below). Any other starting mission
+   index (a loaded/resumed pilot) skips straight to
+   `RunShipInteriorVRLoop`.
+
+### `FUN_0049cd20` -- resets transient per-campaign session state (not persisted in `profile.bin`)
+
+Confidence 3. Called only on successful new-pilot confirmation (never
+on Load Existing Pilot), so it's a "fresh campaign" reset distinct
+from `profile.bin`'s own persisted fields: fills a 260-byte array
+(`&PTR_DAT_005047d2` .. `0x5048d6`) with the byte value `2`, and resets
+a small 6-field struct at `0x58a958`. The array's exact role (mission
+availability? part/ship unlock state?) wasn't traced to a consumer
+this pass -- flagged as an open item rather than guessed.
+
+### `RunReliantInductionTour` (`0x438d50`, was `FUN_00438d50`) -- the new-pilot orientation tour
+
+Confidence 5, directly read in full. Gated in `WinMain` on
+`DAT_00562dc8 == 1` exactly -- **this only ever plays for a genuinely
+brand-new pilot's very first session**, never on a resumed one. A
+5-stage guided walkthrough of the ANS Reliant, narrated by a
+character referred to in the asset names as "Enriq":
+
+| Stage | Ambient loop clip | Narration clip (`%s_box.bik`) | Room |
+|---:|---|---|---|
+| 0 | `single_rel_c2lock.bik` | `enr_locker` | Locker room |
+| 1 | `rel_podmon_loop.bik` | `enr_simpod` | Sim pod |
+| 2 | `rel_cdloop.bik` | `enr_cd` | Cargo deck |
+| 3 | `rel_itacloop.bik` | `enr_itac` | ITAC |
+| 4 | `rel_tv_enriq.bik` | `enr_outro` | (outro) |
+
+Each stage plays its room's ambient loop and, on player input
+(advance key or a timeout via `FUN_004620a0`), cuts to that stage's
+narrated introduction clip, then advances. The function returns which
+stage the player was on when they exited (0-5, `5` = completed all
+5), and `WinMain`'s caller uses that return value to pick the correct
+follow-up transition clip before finally dropping the player into
+`RunShipInteriorVRLoop` for normal free-roam VR navigation -- from
+there, the existing room-graph/hotspot navigation (documented across
+the ITAC passes) takes over toward mission 1's briefing.
+
+### `RunNewGameSetupScreen` case 5, clarified
+
+Confidence 4 (up from Pass 62's "not independently confirmed").
+Case 5 sets `DAT_0052019c = 1` (the same flag callsign-editing clears
+to 0 on every keystroke/recent-name click) and re-runs part of the
+screen's own init (`FUN_004aada0`, trivially resets one unrelated
+input-state global). This is a **"stop editing the callsign, revert
+to browse mode" cancel action**, not a full field-clear -- the typed
+characters aren't observed to be erased, only the edit-mode flag is
+reset.
+
+### Open follow-ups
+
+- `FUN_0049cd20`'s 260-byte array and 6-field struct -- role not
+  traced to a consumer.
+- Whether `RunReliantInductionTour` can be skipped/aborted entirely
+  (vs. just changing which stage you exit from) -- the early-exit key
+  check (`CheckKeyEdgeState(1,...)`, likely Escape) breaks the loop
+  immediately at whatever `iVar7` stage was reached, but this wasn't
+  cross-checked against actual keybinding docs.
+- The per-stage transition-clip selection in `WinMain` after the tour
+  returns (the `ESI*4+0x4aa8c8` jump table) -- addresses only
+  partially read (`0x506bf0`, `0x4e8d08`="rel_pod2itac.bik"), not
+  fully mapped case-by-case.
