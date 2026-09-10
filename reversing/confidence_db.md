@@ -1810,3 +1810,16 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 
 - No `SetActiveBackgroundCallback` caller located.
 - `rendererState+0x50`'s actual blit target not traced.
+
+## Pass 70 -- The renderer `+0x50` blit target: searched exhaustively, genuinely not found (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `rendererState+0x50`/`+0x40` write sites -- not found anywhere in the binary | 5 (negative finding) | `search_instructions` checked every store to `+0x50`/`+0x40` program-wide and every plausible graphics/device init function individually; all came up empty. `+0x50` is confirmed heavily reused by unrelated structs elsewhere (a genuine DirectX COM vtable call in `DetectDirectXVersion`, gameplay object fields in `FUN_00404040`/`FUN_00412390`) -- not unique to the renderer state. |
+| `SR_init` (0x4c3830, was `FUN_004c3830`) | 5 | Self-named via its own assertion string; zeroes a ~6KB renderer struct and returns it -- `+0x50` is in the zeroed range but never individually set anywhere found. |
+| `InitializeWinVfxLibrary` resolves ~28 `VFX_*` exports into separate named globals, none into `DAT_00588730` | 5 | Rules out the "sequential WinVFX export table" hypothesis for `+0x50`. |
+
+### Open follow-ups
+
+- Live-debugging (hardware write-breakpoint) is the recommended next step; static search is exhausted for this specific field.
+- Check the remaining renderer callback slots (`+0x78`/`+0x7c`/`+0x80`/`+0x88`/`+0x8c`/`+0x90`) the same way to see if they show findable write sites while `+0x40`/`+0x50` don't.

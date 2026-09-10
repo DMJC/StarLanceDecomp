@@ -8626,3 +8626,98 @@ one is ever active).
   `0xff000000/0xff0000/0xff00/0xff` ARGB8888 constants).
 - The renderer-state `+0x50` function pointer itself (the actual
   blit-to-screen call) -- not traced to its target.
+
+## Pass 70 -- The renderer `+0x50` blit target: searched exhaustively, genuinely not found (2026-09-10)
+
+Direct follow-up on Pass 69's open item: find where
+`rendererState+0x50` (the function pointer `DisplayActiveBackgroundImage`
+calls to actually blit a decoded background to the screen) gets its
+value written.
+
+### Method and what was ruled out
+
+Used `search_instructions` (semantic mnemonic/operand search, not raw
+byte patterns) to search for every store to a `+0x50` struct field,
+and every indirect call through one, across the whole binary:
+
+- **Every write to `dword ptr [reg+0x50]` anywhere in the program**
+  was checked. The only two candidates that looked plausible
+  (`FUN_00404040`, `FUN_00412390`) turned out to be completely
+  unrelated structs (gameplay/physics object fields, confirmed by
+  decompiling both) -- neither touches `DAT_00588730`.
+- **Every indirect call through `[reg+0x50]`** (16 total) was
+  checked. Exactly 2 are the already-known `DisplayActiveBackgroundImage`
+  call sites. The rest belong to unrelated structures -- including a
+  genuine DirectX/DirectDraw **COM vtable call** in
+  `DetectDirectXVersion` (`MOV EDX,[EAX]; CALL [EDX+0x50]` -- the
+  classic `object->lpVtbl->Method()` pattern), confirming `+0x50` is
+  just a common, heavily-reused small offset across many unrelated
+  struct layouts in this codebase, not something unique to the
+  renderer state.
+- **Every plausible graphics/device/backend initialization function**
+  was checked directly for a `+0x50` store and came up empty:
+  `InitializeGraphicsDevice`, `SR_init` (was `FUN_004c3830`, confirmed
+  via its own `"SR_init: Attempting to call SR_init..."` assertion
+  string -- it zeroes a ~6KB struct and returns it, `+0x50` included
+  in the zeroed range but never individually set), `FUN_004c9a40`,
+  `FUN_004ab290`, `FUN_004a8600` (the device try/fallback loop),
+  `FUN_004ad2e0`, `FUN_004c22b0`, `FUN_004c3000`, `FUN_004cc5a0`,
+  `InitializeWinVfxLibrary`, and `WinMain` in full.
+- **`InitializeWinVfxLibrary` decoded in full** while checking this --
+  it resolves ~28 `VFX_*` exports from `winvfx8.dll`/`winvfx16.dll` via
+  individually-named `GetProcAddress` calls into ~28 SEPARATE globals
+  (`DAT_005959e4`, `DAT_005957a8`, etc.) -- **none of them write into
+  `DAT_00588730` at all**. This rules out the plausible-looking
+  hypothesis that `+0x50` is one slot in a sequentially-populated
+  WinVFX export table.
+- **`DAT_00588730` itself is assigned exactly once in the whole
+  program** (`InitializeGraphicsDevice`, from `SR_init`'s return
+  value) -- there is no second "reconfigure the renderer" call site
+  that could be reassigning individual vtable-style fields later.
+
+### Honest conclusion
+
+**Not found this pass.** Despite a systematic search covering every
+write to this offset pattern anywhere in the binary and every
+plausible initialization function, no code writes
+`rendererState+0x50`. Two explanations remain open, and neither was
+confirmed:
+
+1. It's populated via a mechanism this kind of literal-offset search
+   can't catch -- e.g. a loop that computes the destination address
+   as `base + i*4` at runtime rather than embedding `+0x50` as a
+   literal in any single instruction (the same class of blind spot
+   flagged for `object+0x670` in the Spectral Shields investigation,
+   Pass 57).
+2. It's set via a bulk structure copy (a `memcpy`/`REP MOVSD`-style
+   block copy from a static template) that this pass didn't locate --
+   one large 1299-dword `MOVSD.REP` copy was found in
+   `InitializeGraphicsDevice` (into `+0x1ac` onward), but it doesn't
+   cover `+0x50`.
+
+Reported as a genuine, thoroughly-searched negative result rather
+than left silently unaddressed, consistent with this project's
+handling of the similar Spectral-Shields dead end.
+
+### `+0x40` checked too -- same result, strengthening the pattern
+
+Checked `rendererState+0x40` (the OTHER confirmed callback slot called
+directly from `InitializeGraphicsDevice` itself, `(**(code
+**)(DAT_00588730+0x40))()`) the same way: no store to it anywhere in
+`InitializeGraphicsDevice`, and no literal `[0x00588730 + 0x40]`
+pattern anywhere in the program. **Two independent renderer callback
+slots now show the identical blind spot**, not just one -- this makes
+explanation 2 below (some kind of bulk/computed population this
+project hasn't located, rather than a one-off oddity specific to
+`+0x50`) the better-supported reading, though still not confirmed.
+
+### Open follow-ups
+
+- A live-debugging pass (set a hardware write-breakpoint on
+  `DAT_00588730+0x50`/`+0x40` while the game runs) would settle this
+  definitively where static search has now been exhausted.
+- Check the remaining renderer callback slots referenced elsewhere in
+  this project (`+0x78`, `+0x7c`, `+0x80`, `+0x88`, `+0x8c`, `+0x90`)
+  the same way -- if they show findable write sites while `+0x40`/
+  `+0x50` don't, that would narrow down what's special about this
+  particular pair.

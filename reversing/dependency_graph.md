@@ -1766,3 +1766,26 @@ SetActiveBackgroundCallback (0x494bb0, was FUN_00494bb0) -- sibling to
   SetActiveBackgroundImage: installs DAT_00588740 (dynamic/non-image background), clears
   the active filename. No caller located yet.
 ```
+
+## The renderer +0x50/+0x40 blit-target write sites: searched exhaustively, not found (2026-09-10, Pass 70)
+
+```
+DAT_00588730+0x50 (DisplayActiveBackgroundImage's blit call) and +0x40 (called directly
+  from InitializeGraphicsDevice) -- NO write site found anywhere in the program despite:
+    - search_instructions checked every store to +0x50/+0x40 program-wide
+    - every plausible graphics/device/backend init function checked individually:
+      InitializeGraphicsDevice, SR_init (was FUN_004c3830), FUN_004c9a40, FUN_004ab290,
+      FUN_004a8600, FUN_004ad2e0, FUN_004c22b0, FUN_004c3000, FUN_004cc5a0,
+      InitializeWinVfxLibrary, WinMain (full)
+    - InitializeWinVfxLibrary decoded in full: resolves ~28 VFX_* exports into SEPARATE
+      named globals (DAT_005959e4 etc.), none into DAT_00588730 -- rules out a sequential
+      WinVFX-export-table hypothesis
+    - DAT_00588730 itself is assigned exactly once in the whole program (from SR_init's
+      return value) -- no second "reconfigure" call site exists
+  -> +0x50 confirmed heavily reused by UNRELATED structs elsewhere (a real DirectX COM
+     vtable call in DetectDirectXVersion, gameplay object fields in FUN_00404040/
+     FUN_00412390) -- not unique to the renderer state
+  -> honest negative finding, consistent with the earlier Spectral Shields (+0x670) dead
+     end (Pass 57): likely populated via a computed/loop offset or an unlocated bulk copy,
+     not a literal per-field store. Live-debugging recommended as the next step.
+```
