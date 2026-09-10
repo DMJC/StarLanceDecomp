@@ -9711,3 +9711,63 @@ reset.
   returns (the `ESI*4+0x4aa8c8` jump table) -- addresses only
   partially read (`0x506bf0`, `0x4e8d08`="rel_pod2itac.bik"), not
   fully mapped case-by-case.
+
+## Pass 80 -- The post-tour transition-clip jump table, fully mapped (2026-09-10)
+
+Direct follow-up closing Pass 79's last open item. Read the jump
+table at `0x4aa8c8` (6 dwords, indexed by `ESI` =
+`RunReliantInductionTour`'s return value, 0-5) and disassembled every
+case target (`0x4aa26e`-`0x4aa2b0`).
+
+### How the dispatcher works
+
+Each case sets `ECX` to a `VRRoomNode` pointer (occasionally after
+first playing 0-2 extra transition clips via
+`PlayBinkMovieFromArchiveByName`) and falls into a shared tail at
+`0x4aa2b0`: `CALL RunShipInteriorVRLoop(ECX)`. Because
+`RunShipInteriorVRLoop` itself always plays its target node's own
+`pMoviePath` on entry (confirmed Pass 73), any clips this dispatcher
+plays explicitly are *supplementary*, stacked in front of that node's
+built-in arrival clip.
+
+### The full case table
+
+| `ESI` (tour exit stage) | Extra clip(s) played | Landing `VRRoomNode` | That node's own arrival clip |
+|---:|---|---|---|
+| 0 (quit during stage 0, locker room) | `rel_l2t.bik` -> `rel_t2itac.bik` | `0x506cb0` | `rel_itac2pod.bik` |
+| 1 (quit during stage 1, sim pod) | `rel_lock2c.bik` -> `rel_t2itac.bik` | `0x506cb0` | `rel_itac2pod.bik` |
+| 2 (quit during stage 2, cargo deck) | `rel_pod2itac.bik` | `0x506cb0` | `rel_itac2pod.bik` |
+| 3 (quit during stage 3, ITAC) | *(none)* | `0x506bf0` | `rel_cd2pod.bik` |
+| 4 (quit during stage 4, outro) | *(none)* | `0x506cb0` | `rel_itac2pod.bik` |
+| 5 (completed the full tour) | `rel_l2t.bik` -> `rel_t2itac.bik` | `0x506cb0` | `rel_itac2pod.bik` (identical to case 0) |
+
+`0x506bf0` and `0x506cb0` share the same 3 outgoing targets
+(`0x506d40`/`0x506c20`/`0x506ce0`) and the same `pMoviePathAlt`
+(`0x507000`) -- the same "one physical room, two arrival-direction
+node copies" pattern documented for the corridor junction in Pass 73:
+both represent the **pod bay**, just entered via a different clip
+(`rel_itac2pod.bik` vs. `rel_cd2pod.bik`) depending on where the
+player is coming from.
+
+**Confidence 5** on every clip name, jump-table target address, and
+destination-node address (all directly read). **Confidence 2** on
+the semantic mapping implied by some clip names (e.g. case 2 plays
+`rel_pod2itac.bik` -- literally "pod to ITAC," despite the player
+being routed *to* the pod bay -- and case 1's "locker to corridor"
+clip plays even though the player was on the sim-pod stage, not the
+locker stage, when they quit). The likely explanation is that the
+game reuses a small set of generic hallway-walk clips for "return to
+the pod bay from partway through the tour" rather than rendering a
+bespoke walk-back clip from every possible stage -- economical asset
+reuse rather than each clip's name being literally accurate to the
+player's in-fiction path, but this reading isn't independently
+confirmed.
+
+### Open follow-ups
+
+- What `0x506d40`/`0x506c20`/`0x506ce0` (the pod bay's 3 shared
+  outgoing targets) lead to -- not traced.
+- Whether the apparent clip-name/stage mismatches (case 1, case 2)
+  reflect deliberate asset reuse or a mistaken assumption about which
+  stage index corresponds to which room -- not independently
+  resolved.

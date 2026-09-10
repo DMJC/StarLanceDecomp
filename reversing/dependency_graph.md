@@ -2301,3 +2301,40 @@ RunReliantInductionTour -- 5-stage new-pilot orientation walkthrough, narrated b
   <- open: whether the tour can be aborted entirely vs. exited early at a stage
   <- open: the post-tour transition-clip jump table not fully mapped
 ```
+
+## Post-tour transition-clip jump table, fully mapped (2026-09-10, Pass 80)
+
+```
+WinMain's post-RunReliantInductionTour dispatcher: jump table @ 0x4aa8c8,
+  6 dwords indexed by ESI (the tour's return value, 0-5 = exit stage).
+  Each case sets ECX = a VRRoomNode pointer, optionally after playing 0-2
+  supplementary clips via PlayBinkMovieFromArchiveByName, then falls into
+  the shared tail @ 0x4aa2b0: CALL RunShipInteriorVRLoop(ECX).
+  [RunShipInteriorVRLoop always plays its target node's own pMoviePath on
+   entry (Pass 73) -- so any clips played here stack IN FRONT of that]
+
+  ESI=0 (quit during stage 0, locker):    rel_l2t.bik -> rel_t2itac.bik
+                                           -> land 0x506cb0 (own clip: rel_itac2pod.bik)
+  ESI=1 (quit during stage 1, sim pod):   rel_lock2c.bik -> rel_t2itac.bik
+                                           -> land 0x506cb0 (own clip: rel_itac2pod.bik)
+  ESI=2 (quit during stage 2, cargo deck): rel_pod2itac.bik
+                                           -> land 0x506cb0 (own clip: rel_itac2pod.bik)
+  ESI=3 (quit during stage 3, ITAC):      (no extra clip)
+                                           -> land 0x506bf0 (own clip: rel_cd2pod.bik)
+  ESI=4 (quit during stage 4, outro):     (no extra clip)
+                                           -> land 0x506cb0 (own clip: rel_itac2pod.bik)
+  ESI=5 (completed the full tour):        rel_l2t.bik -> rel_t2itac.bik
+                                           -> land 0x506cb0 (own clip: rel_itac2pod.bik)
+                                           [identical to ESI=0]
+
+  0x506bf0 and 0x506cb0: SAME physical room (pod bay) -- identical 3
+  outgoing targets (0x506d40/0x506c20/0x506ce0) and identical pMoviePathAlt
+  (0x507000), differing only in hotspot rect + arrival clip. Same
+  "one room, two arrival-direction node copies" pattern as Pass 73's
+  corridor junction (0x506b30/0x506e60).
+
+  <- open: what 0x506d40/0x506c20/0x506ce0 lead to
+  <- open: whether the clip-name/stage mismatches (case 1, case 2 use
+     clips whose names don't literally match the exit stage) reflect
+     deliberate generic-clip reuse or a wrong stage-index assumption
+```

@@ -1965,3 +1965,16 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - `FUN_0049cd20`'s 260-byte array/struct -- role not traced to a consumer.
 - Whether `RunReliantInductionTour` can be aborted entirely vs. just exited early at a given stage.
 - The post-tour per-stage transition-clip jump table in `WinMain` -- only partially read.
+
+## Pass 80 -- The post-tour transition-clip jump table, fully mapped (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| Post-`RunReliantInductionTour` jump table (`0x4aa8c8`, 6 entries indexed by exit stage 0-5) fully decoded | 5 | Every case sets a `VRRoomNode` pointer (after 0-2 supplementary `PlayBinkMovieFromArchiveByName` clips) and falls into a shared `RunShipInteriorVRLoop(ECX)` tail at `0x4aa2b0`. All 6 cases traced: stages 0/1/5 play 2 clips then land at the pod bay (`0x506cb0`); stage 2 plays 1 clip then lands at the pod bay; stages 3/4 play no extra clip and land at `0x506bf0`/`0x506cb0` directly (relying on the target node's own built-in arrival clip). |
+| `0x506bf0`/`0x506cb0` are the same physical room (pod bay), two arrival-direction node copies | 5 | Identical 3 outgoing targets and `pMoviePathAlt`; differ only in hotspot rect and arrival clip (`rel_cd2pod.bik` vs `rel_itac2pod.bik`) -- same pattern as Pass 73's corridor-junction node pair. |
+| Some clip names don't literally match the exit stage that selects them (case 1's "locker to corridor" clip plays for a sim-pod-stage exit; case 2's "pod to ITAC" clip routes the player *to* the pod bay) | 2 | Plausible economical reuse of a small set of generic hallway-walk clips rather than one bespoke clip per exit stage -- not independently confirmed. |
+
+### Open follow-ups
+
+- What the pod bay's 3 shared outgoing targets (`0x506d40`/`0x506c20`/`0x506ce0`) lead to -- not traced.
+- Whether the clip-name/stage mismatches reflect deliberate asset reuse or a wrong stage-index assumption -- not resolved.
