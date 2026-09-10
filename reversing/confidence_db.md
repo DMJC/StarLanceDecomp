@@ -1930,7 +1930,23 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 
 ### Open follow-ups
 
-- Which hull class or faction each tint group represents (needs `capships.spr` icon art, not decoded).
+- `UpdateHoverAnimationWidget`'s other call site (`0x42a4f2`, outside ITAC) not traced.
+- The per-mode-value driver DLL name passed to `LoadRendererBackendDriver` not traced.
+- `rel_cap2itac.bik`/`itac2pod_hud.bik`/`itac2dor.bik` fully placed structurally but not connected to a specific gameplay trigger.
+
+## Pass 78 -- `capships.spr` decoded: tint groups are per-class-pair palettes (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `shapeCount==57` explains Pass 77's "default slot never used" pattern: 19 groups x (1 palette + 2 ships) | 5 | Decoded the real `CAPSHIPS.SPR` (RefPack-compressed). Shape indices 0,3,6,...,54 (exactly the never-assigned "default" classIDs) are each a dedicated 768-byte palette block sitting immediately before that group's 2 ship images -- not unused/reserved ship slots. `19*3=57`. |
+| **Bug fix**: `decode_spr.py` only used the first palette block for every shape | 5 | Correct for single-palette files (medal-case sprites -- re-verified unaffected), wrong for multi-palette files like `CAPSHIPS.SPR` (produced color-scrambled but geometrically-correct "static" images for every shape after the first pair). Fixed to track the nearest-preceding palette block per shape. |
+| Tint groups = per-group faction/national color schemes, not "2 marks of one hull" | 4 | Visual comparison after the fix: group 1's 2 ships are entirely different hull designs (not variants); group 6 shows a US-style star-and-stripes roundel, group 18 shows a Soviet-style red star -- opposing national insignia between groups, confirming the palette encodes a faction color scheme. |
+| `GetShapeRecordPointer`/`ActivateShapePalette` (0x480c40/0x428410, was `FUN_00480c40`/`FUN_00428410`) decoded | 5 | `GetShapeRecordPointer` = `ShapeSet.shapes[i].recordOffset` lookup (matches `decode_spr.py`'s own Pass 39/41 documented format, now confirmed against the game's own code). `ActivateShapePalette` converts a 6-bit-VGA palette block to native pixel format (via `ComputePixelFormatFromMasks`-style shift/mask fields) and uploads it, with a brightness scalar for fades. Together they explain `ItacCapShipsRenderPreview`'s `group*3` computation: it's the palette block's shape index, selected and activated before the icon draw. |
+
+### Open follow-ups
+
+- The real-world label for each of the 19 groups (which hull class/faction) -- needs matching against official reference art.
+- Whether the other ITAC `.spr` files use the same multi-palette-per-group layout -- not checked.
 - `UpdateHoverAnimationWidget`'s other call site (`0x42a4f2`, outside ITAC) not traced.
 - The per-mode-value driver DLL name passed to `LoadRendererBackendDriver` not traced.
 - `rel_cap2itac.bik`/`itac2pod_hud.bik`/`itac2dor.bik` fully placed structurally but not connected to a specific gameplay trigger.

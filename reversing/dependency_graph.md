@@ -2204,3 +2204,56 @@ Tint groups (Pass 75's 56-byte lookup @ 0x423c74) -- RESOLVED pairing pattern:
      need capships.spr's icon art decoded and compared (not attempted; the
      record text is person-names, not a self-describing class label)
 ```
+
+## capships.spr decoded: tint groups are per-class-pair palettes (2026-09-10, Pass 78)
+
+```
+CAPSHIPS.SPR (RefPack-compressed, gamedata/StarLancer/RESOURCE/): shapeCount=57
+  = 19 groups x {1 palette block, 2 ship images} -- EXACTLY explains Pass 77's
+  "default classID slot never assigned to a real record" pattern: those aren't
+  missing/reserved ships, they're each group's own dedicated palette block.
+
+  shape indices 0,3,6,9,...,54 (19 total) -- 768-byte palette blocks, each
+    immediately preceding its group's 2 real ship-image shapes
+  shape indices 1,2 / 4,5 / 7,8 / .../ 55,56 -- the 2 ship images per group
+
+BUG FOUND + FIXED in decode_spr.py: only ever used the FIRST palette block
+  in a file for every shape (fine for single-palette files like the medal-
+  case sprites -- re-verified unaffected by the fix). CAPSHIPS.SPR has 19
+  separate palette blocks; using only the first produced geometrically-
+  correct but color-scrambled "TV static" ship images for every group past
+  the first. Fixed to track the nearest-preceding palette block per shape.
+
+Visual confirmation after the fix: groups pair 2 GENUINELY DIFFERENT hull
+  designs (not marks/variants of one ship) sharing one palette:
+    group 1 (shapes 4,5): boxy dual-runway platform + separate sleek cruiser
+    group 6 (shape 20): white-star-on-blue + red/white stripes (Alliance/US-
+      style insignia)
+    group 18 (shape 55): red Soviet-style star (Coalition-style insignia)
+  -> CONFIRMS: each palette group = a faction/national color scheme shared
+     by 2 distinct ships, not "2 marks of one class"
+
+GetShapeRecordPointer (0x480c40, was FUN_00480c40):
+  return spriteSetBase + shapes[index].recordOffset
+  -- matches decode_spr.py's own documented ShapeSet.shapes[i].recordOffset
+     format (Pass 39/41), now independently confirmed against game code
+
+ActivateShapePalette (0x428410, was FUN_00428410):
+  takes (paletteBlockPtr, brightness) -> converts 6-bit-VGA {R,G,B} triplets
+  to native pixel format (shift/mask fields matching ComputePixelFormatFromMasks,
+  Pass 69) -> uploads via WinVFX lock/unlock pair (DAT_005957c0/DAT_005957d0)
+  brightness=1.0 -> full; other values -> dimmed (fade support)
+
+  => ItacCapShipsRenderPreview's full sequence now understood end to end:
+     GetShapeRecordPointer(capships.spr, group*3) -> ActivateShapePalette(_, 1.0)
+     -> draw icon by raw classID
+     [group*3 = the shape index of that group's palette block, NOT an
+      arbitrary tint constant -- retroactively explains the unexplained
+      "color-setting calls" preceding every icon draw across Pass 74's
+      RenderPreview functions]
+
+  <- open: real-world label per group (hull class/faction name) -- needs
+     matching against official reference art
+  <- open: whether Fighters/Squadrons/Personnel/Kills/News/VideoReports'
+     .spr files use the same multi-palette-per-group layout -- not checked
+```

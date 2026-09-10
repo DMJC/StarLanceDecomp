@@ -9504,3 +9504,101 @@ is person-names rather than a self-describing class label.
   ITAC) not traced.
 - The per-mode-value driver DLL name passed to
   `LoadRendererBackendDriver` not traced.
+
+## Pass 78 -- `capships.spr` decoded: the tint groups are per-class-pair palettes (2026-09-10)
+
+User request: "Work on capships.spr" -- continuing straight from Pass
+77's open follow-up (decode the icon art to check what the ~19 tint
+groups actually represent).
+
+### `shapeCount == 57` was the missing piece: 19 groups x (1 palette + 2 ships)
+
+Confidence 5. Ran `decode_spr.py` against the real
+`gamedata/StarLancer/RESOURCE/CAPSHIPS.SPR` (RefPack-compressed,
+confirmed via its `0x10 0xFB` magic). It reported `shapeCount=57`,
+with shape indices 3, 6, 9, 12, ..., 54 -- **exactly** the "default"
+slots Pass 77 found were never assigned to any real capital-ship
+record -- failing `decode_spr.py`'s `looks_like_shape_record` check.
+Checking the gap to the next shape confirmed each of those 19
+indices (0, 3, 6, ..., 54) sits exactly 768 bytes (256 x 3) before the
+next shape, exactly like the single embedded palette `decode_spr.py`
+already knew how to find at shape 0. **`.spr` files can carry
+multiple embedded palettes, one per group, not just one at shape 0.**
+This is the complete explanation for Pass 77's "default slot never
+used" pattern: those aren't unused/reserved ship slots at all --
+they're the group's own dedicated 256-color palette block. `19 x 3 =
+57` exactly matches `shapeCount`.
+
+### `decode_spr.py` had a real bug -- fixed
+
+Confidence 5. The original script only ever located the *first*
+768-byte palette block in a file and used it for every shape --
+correct for single-palette files (medal-case sprites, verified
+unaffected by the fix), but wrong for `CAPSHIPS.SPR`: shapes 4/5, 7/8,
+10/11, etc. decoded as visible-but-color-scrambled "TV static" ship
+silhouettes (correct RLE geometry, wrong palette). Fixed
+`decode_spr.py` to track the *nearest preceding* palette block per
+shape instead of a single global one (still defaults to the first
+block if a file has only one, so single-palette files decode
+byte-for-byte identically). Re-decoding with the fix produced clean,
+fully-colored ship art for every shape.
+
+### Visual confirmation: groups are faction/national color schemes, not "2 marks of one hull"
+
+Confidence 4. Compared several groups' ship pairs directly:
+- **Group 1** (shapes 4/5): a boxy dual-runway carrier/platform and a
+  separate sleek green-engine-glow cruiser -- visibly different hull
+  designs, not two views/marks of the same ship.
+- **Group 6** (shape 20): shows a **white-star-on-blue roundel with
+  red/white stripes** -- an Alliance/US-styled insignia.
+- **Group 18** (shape 55): shows a **red Soviet-style star** --
+  a Coalition-styled insignia.
+
+So each group's 2 ships are genuinely different hulls that happen to
+share one dedicated palette -- consistent with the palette encoding a
+**faction/national color scheme** (confirmed via the visible opposing
+national insignia between groups 6 and 18) rather than "2 marks of
+one class." This directly explains why `ItacCapShipsRenderPreview`'s
+switch (Pass 74/75) computes `group*3` from the raw class ID: that's
+the **shape index of the group's palette block**, not an arbitrary
+tint constant.
+
+### `GetShapeRecordPointer`/`ActivateShapePalette` decoded -- explains the switch's real purpose
+
+Confidence 5, both fully decompiled:
+- `GetShapeRecordPointer` (0x480c40, was `FUN_00480c40`) --
+  `spriteSetBase + shapes[index].recordOffset`, i.e. exactly the
+  `ShapeSet.shapes[i].recordOffset` lookup `decode_spr.py`'s own
+  docstring already described (Pass 39/41) -- confirms the file
+  format understanding independently from the game's own code.
+- `ActivateShapePalette` (0x428410, was `FUN_00428410`) -- takes a
+  palette-block pointer and a brightness scalar (`1.0` = full,
+  otherwise dims via float multiply), converts the 6-bit-VGA `{R,G,B}`
+  triplets into the renderer's native pixel format using the same
+  shift/mask fields `ComputePixelFormatFromMasks` (Pass 69) computes,
+  and uploads the result into a WinVFX-provided palette buffer
+  (`(*DAT_005957c0)()`/`(*DAT_005957d0)()` lock/unlock pair).
+
+So `ItacCapShipsRenderPreview`'s sequence
+`GetShapeRecordPointer(capships.spr, group*3)` ->
+`ActivateShapePalette(result, 1.0)` -> draw icon by raw class ID is
+now fully understood end to end: **select the class's group palette
+block by index, upload/activate it as the current render palette,
+then draw the ship icon** (whose own pixel indices are meaningless
+without that specific palette active). This pattern is used
+throughout ITAC's render-preview functions (Pass 74), so this finding
+retroactively clarifies the "color-setting calls" noted but not
+explained in every one of them.
+
+### Open follow-ups
+
+- The precise real-world label for each of the 19 groups (which
+  in-game hull class/faction) -- would need matching `capships.spr`'s
+  art against official ship-class reference art, not attempted.
+- Whether Fighters/Squadrons/Personnel/Kills/News/Video Reports'
+  `.spr` files use the same multi-palette-per-group layout -- not
+  checked.
+- `UpdateHoverAnimationWidget`'s other call site (`0x42a4f2`, outside
+  ITAC) not traced.
+- The per-mode-value driver DLL name passed to
+  `LoadRendererBackendDriver` not traced.

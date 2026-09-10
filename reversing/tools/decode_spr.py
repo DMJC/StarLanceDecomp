@@ -27,11 +27,17 @@ Per-row RLE opcode stream (newly decoded this pass):
                                         nothing written).
 
 Usage: python3 decode_spr.py <file.spr> <outdir> [--palette N]
-  Decodes every shape in the file to a PNG. If shape 0 is exactly
-  768 bytes (256 * 3) and doesn't parse as a plausible ShapeRecord, it's
-  treated as an embedded 6-bit-VGA-precision {R,G,B} palette (index 0
-  = transparent by convention) and used for every other shape unless
-  --palette overrides which shape index to use as the source palette.
+  Decodes every shape in the file to a PNG. Any shape entry that is
+  exactly 768 bytes (256 * 3) away from the next shape and doesn't parse
+  as a plausible ShapeRecord is treated as an embedded 6-bit-VGA-precision
+  {R,G,B} palette block (index 0 = transparent by convention). Multiple
+  such blocks can appear through one file (confirmed in CAPSHIPS.SPR,
+  Pass 78: shapeCount 57 = 19 groups of {1 palette, 2 ships}, each group
+  with its own dedicated palette so its 2 ships share a consistent
+  faction/national color scheme) -- each real shape uses whichever
+  palette block most recently preceded it, not always shape 0.
+  --palette forces every shape to use one specific palette-block shape
+  index instead of the nearest-preceding one.
 """
 import struct, sys, os
 
@@ -107,6 +113,9 @@ def load_palette(out, palRecOff):
 def main():
     path = sys.argv[1]
     outdir = sys.argv[2] if len(sys.argv) > 2 else '.'
+    force_palette_idx = None
+    if '--palette' in sys.argv:
+        force_palette_idx = int(sys.argv[sys.argv.index('--palette') + 1])
     os.makedirs(outdir, exist_ok=True)
     data = open(path, 'rb').read()
     out = maybe_decompress(data)
@@ -117,29 +126,32 @@ def main():
         recOff, palOff = struct.unpack_from('<II', out, 8 + i * 8)
         shapes.append((recOff, palOff))
 
-    # find an embedded whole-file palette: a shape entry that does NOT
-    # parse as a plausible ShapeRecord, sitting in a 768-byte gap before
-    # the next real shape.
-    palette = None
-    palette_shape_idx = None
+    # Find every embedded palette block: a shape entry that does NOT parse
+    # as a plausible ShapeRecord, sitting in a 768-byte gap before the next
+    # shape. A file can have several (one per group) -- each real shape
+    # uses whichever palette block most recently preceded it.
+    palette_blocks = {}  # shape index -> palette
     for i, (recOff, palOff) in enumerate(shapes):
         if not looks_like_shape_record(out, recOff):
-            # does it span exactly 768 bytes to the next shape (or EOF)?
             nxt = shapes[i + 1][0] if i + 1 < len(shapes) else len(out)
             if nxt - recOff == 768:
-                palette = load_palette(out, recOff)
-                palette_shape_idx = i
-                break
+                palette_blocks[i] = load_palette(out, recOff)
 
-    if palette is None:
-        # fallback: greyscale ramp so output is still viewable
-        palette = [(i, i, i) for i in range(256)]
+    grey_fallback = [(i, i, i) for i in range(256)]
+    if force_palette_idx is not None:
+        default_palette = palette_blocks.get(force_palette_idx, grey_fallback)
+    else:
+        default_palette = next(iter(palette_blocks.values()), grey_fallback)
 
-    print(f"{path}: shapeCount={shapeCount}, palette from shape {palette_shape_idx}")
+    print(f"{path}: shapeCount={shapeCount}, {len(palette_blocks)} palette block(s) at shapes {sorted(palette_blocks)}")
 
     from PIL import Image
+    current_palette = default_palette
     for i, (recOff, palOff) in enumerate(shapes):
-        if i == palette_shape_idx:
+        if i in palette_blocks:
+            if force_palette_idx is None:
+                current_palette = palette_blocks[i]
+            print(f"  shape {i}: palette block, now active for subsequent shapes")
             continue
         if not looks_like_shape_record(out, recOff):
             print(f"  shape {i}: does not look like a valid ShapeRecord, skipping")
@@ -151,7 +163,7 @@ def main():
         for yy in range(h):
             for xx in range(w):
                 idx = pixels[yy * w + xx]
-                r, g, b = palette[idx]
+                r, g, b = current_palette[idx]
                 a = 0 if idx == 0 else 255
                 px[xx, yy] = (r, g, b, a)
         base = os.path.splitext(os.path.basename(path))[0]
