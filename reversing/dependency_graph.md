@@ -2411,3 +2411,38 @@ Ties to Pass 59 (much earlier, pre-ITAC session work): the .spr RLE format
   <- open: which VR room node(s) carry nRoomType==6
   <- open: 6-vs-11 hotspot layout not mapped slot-by-slot
 ```
+
+## nRoomType==6 room nodes traced: the locker room (2026-09-10, Pass 83)
+
+```
+Locker room (Reliant) -- TWO VRRoomNode entry points, BOTH nRoomType==6
+  directly (unlike the CD room, no separate trigger sub-node needed --
+  RunMedalCaseScreen itself owns the locker-open/close bink playback):
+
+  0x506e90 -- corridor-walk-in entry
+    arrival: rel_c2lock.bik, alt: single_rel_c2lock.bik
+              [alt matches RunReliantInductionTour's stage-0 ambient loop]
+    targets: 0x506f20, 0x506ec0
+    <- reachable from the CD room (0x506d70's targets, Pass 81's untraced one)
+
+  0x506ec0 -- "lock lid up" animation entry
+    arrival: rel_locklup.bik, alt: single_rel_locklup.bik
+              [rel_locklup.bik matches RunMedalCaseScreen's own hardcoded
+               opening-animation clip exactly]
+    targets: 0x506ef0 (not read)
+    <- predecessor not traced
+
+RunShipInteriorVRLoop's nRoomType==6 branch (0x43ac8a), confirmed via
+  disassembly: after RunMedalCaseScreen() returns,
+    DAT_0051d478 = &VRRoomNode_0x506f20   if DAT_00562dc8 <= 0x12 (Reliant)
+    DAT_0051d478 = &VRRoomNode_0x50b3a8   otherwise (Yamato)
+  [matches Pass 73's earlier note for this exact branch]
+
+  0x506f20 -- arrival: rel_lock2c.bik ("locker to corridor")
+    targets: 0x506b30, 0x506b60, 0x506b00  <- 4TH confirmed bunkroom
+    arrival-variant copy (same 3 targets as Pass 73/81's other 3 copies)
+
+  <- open: 0x506ec0's predecessor room/hotspot
+  <- open: 0x506ef0 not read
+  <- open: Yamato's 0x50b3a8 locker-room equivalent not read
+```

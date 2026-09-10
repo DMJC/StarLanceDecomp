@@ -2008,3 +2008,17 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - Which VR room node(s) have `nRoomType==6` -- not traced from the room-graph side.
 - The 6-vs-11-hotspot Reliant/Yamato medal-case layout difference -- not mapped slot-by-slot.
 - `nRoomType` 1/3's exact semantics -- still open.
+
+## Pass 83 -- The `nRoomType == 6` (locker/medal case) room nodes traced (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| Two Reliant `VRRoomNode`s carry `nRoomType==6` directly: `0x506e90` (corridor entry) and `0x506ec0` (lock-lid-up entry) | 5 | Unlike the CD room (Pass 81), the locker room node itself IS the trigger -- no separate sub-node needed. Found via `search_byte_patterns` on the arrival clip's string address. |
+| `0x506e90` sits between the CD room and the bunkroom in the Reliant graph | 5 | Confirmed reachable from `0x506d70`'s (CD room) own targets, one of which (`0x506e90`) was left untraced in Pass 81. |
+| Post-medal-case hardcoded destination confirmed via disassembly | 5 | `RunShipInteriorVRLoop`'s `nRoomType==6` branch (`0x43ac8a`) hardcodes `0x506f20` (Reliant) / `0x50b3a8` (Yamato), matching Pass 73's earlier note. `0x506f20` is a 4th confirmed bunkroom arrival-variant copy. |
+
+### Open follow-ups
+
+- `0x506ec0`'s predecessor (which hotspot leads to the lock-lid-up entry variant) -- not traced.
+- `0x506ef0` (target of the lock-lid-up entry copy) -- not read.
+- The Yamato's `0x50b3a8` locker-room equivalent -- not read.

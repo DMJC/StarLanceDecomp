@@ -9925,3 +9925,52 @@ done many passes later.
   Yamato medal cases -- read as a fact (different rect-array sizes)
   but not mapped slot-by-slot.
 - Types 1/3's exact semantics -- still open.
+
+## Pass 83 -- The `nRoomType == 6` (locker/medal case) room nodes traced (2026-09-10)
+
+Direct follow-up closing Pass 82's open item. Found the locker room's
+own arrival clip name (`rel_c2lock.bik`, "corridor to locker") by
+matching it against `RunReliantInductionTour`'s stage-0 ambient loop
+(`single_rel_c2lock.bik`, used as this node's `pMoviePathAlt`), then
+located its `VRRoomNode` via `search_byte_patterns` on the string's
+address (same technique as Passes 73/74/80/81).
+
+### Two confirmed Reliant `VRRoomNode`s carry `nRoomType == 6` directly
+
+Unlike the CD room (Pass 81, where a *separate* trigger node handled
+`nRoomType==9`), **the locker room node itself is the `nRoomType==6`
+trigger** -- entering it launches `RunMedalCaseScreen` immediately, no
+intermediate node needed (consistent with `RunMedalCaseScreen` itself
+owning the locker-open/close bink playback, Pass 82).
+
+| Node | Arrival clip | Alt clip | Targets | Role |
+|---|---|---|---|---|
+| `0x506e90` | `rel_c2lock.bik` | `single_rel_c2lock.bik` | `0x506f20`, `0x506ec0` | Locker room, reached by walking in from the corridor |
+| `0x506ec0` | `rel_locklup.bik` | `single_rel_locklup.bik` | `0x506ef0` | Locker room, reached via the "lock lid up" opening animation directly (`rel_locklup.bik` matches `RunMedalCaseScreen`'s own hardcoded opening-animation clip exactly) -- a 2nd copy for a different arrival context |
+
+Confirmed `0x506e90` is itself reachable from the CD room's own
+4-way branching (Pass 81's untraced `0x506e90` target) -- so the
+locker room sits between the CD room and the bunkroom in the Reliant's
+interior graph.
+
+### The hardcoded post-medal-case destination, confirmed via disassembly
+
+`RunShipInteriorVRLoop`'s `nRoomType==6` branch (`0x43ac8a`), read
+directly: after `RunMedalCaseScreen()` returns, it hardcodes
+`DAT_0051d478 = &VRRoomNode_0x506f20` for the Reliant
+(`DAT_00562dc8 <= 0x12`) or `&VRRoomNode_0x50b3a8` for the Yamato --
+matching Pass 73's already-recorded note for this exact branch.
+`0x506f20` (arrival clip `rel_lock2c.bik`, "locker to corridor") is a
+**4th confirmed arrival-variant copy of the bunkroom** (same 3
+targets, `0x506b30`/`0x506b60`/`0x506b00`, as the other 3 copies found
+in Passes 73/81).
+
+### Open follow-ups
+
+- `0x506ec0`'s specific predecessor (which room's hotspot leads to
+  the "lock lid up" entry variant instead of the plain corridor
+  entry) -- not traced.
+- `0x506ef0` (target of the `locklup`-entry copy) -- not read.
+- The Yamato's `0x50b3a8` locker-room-equivalent node -- not read
+  (only confirmed as the hardcoded post-medal-case destination via
+  Pass 73's earlier note).
