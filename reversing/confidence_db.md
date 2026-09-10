@@ -2203,3 +2203,17 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - Run-constant `MissionTriggerInstance` fields' real meaning (owner-back-reference ruled out).
 - `ObjectTriggerIndexEntry+0x00`'s 1-vs-2 "unused slot" distinction -- possibly meaningless.
 - `DAT_0052952c`'s remaining fields/bounds (open since Pass 93).
+
+## Pass 96 -- Player-creation UI button layouts (2026-09-11)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `RunDifficultySelectDialog` (`0x430300`): all 4 hotspot rects | 5 | First-time coordinate recovery, zero decompiler ambiguity. Confirm `(276,269,25,16)`, Cancel `(338,269,25,16)`, decrease `(253,222,16,26)`, increase `(270,222,16,26)`. |
+| `RunNewGameSetupScreen`'s 8-entry button row: true array base = `entryESP-0x9c` | 5 | Corroborated two independent ways: matches Ghidra's own current (re-analyzed) decompiler output, AND sits exactly 64 bytes before the already-confirmed 10-entry name-list array with zero gap. |
+| ...cases 1(w/h)-7(full): 26 of 32 words recovered | 4 (values/addresses), 3 (x/y/w/h field alignment) | Direct disassembly read, cross-checked against the adjacent confirmed table. 2 of 7 rects have y+h exceeding the ~480px norm other screens hold to -- flagged, not resolved. |
+| **CORRECTION** to Pass 50: "no writes in stack offsets -164..-102" was too strong | -- | Real writes exist in a large sub-range of it (-144..-94). Only the narrower -156..-145 band (case 0's rect + case 1's x/y) has genuinely no discoverable write -- that part of Pass 50's finding survives. |
+
+### Open follow-ups
+
+- Case 0 (Male)'s full rect and case 1 (Female)'s x/y -- statically unrecoverable, needs live debugging.
+- The y+h-exceeds-480px sanity-check flag on cases 3 and 7.

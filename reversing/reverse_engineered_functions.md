@@ -11071,3 +11071,108 @@ though which exact argument each slot holds is still not identified.
 - Why exactly 2 distinct "unused slot" values (`1` vs `2`) exist for
   `ObjectTriggerIndexEntry+0x00` -- possibly meaningless editor noise.
 - `DAT_0052952c`'s remaining fields/bounds (open since Pass 93).
+
+## Pass 96 -- Player-creation UI: `RunDifficultySelectDialog` fully mapped, `RunNewGameSetupScreen`'s 8-entry button row partially recovered (2026-09-11)
+
+Direct request: document player creation/campaign start with more UI
+detail. The end-to-end flow was already fully documented (Pass
+79-81); the concrete gap was two screens' exact button-hotspot
+coordinates, one never attempted and one twice attempted and
+declared genuinely unresolved (Pass 49/50).
+
+### `RunDifficultySelectDialog` (`0x430300`) -- fully resolved, confidence 5
+
+This screen's coordinates had never been pulled before. Full
+decompile resolves cleanly with zero ambiguity (all 16 words named
+as `local_20`..`local_2`, no unresolved offsets at all -- unlike its
+sibling screen below):
+
+| Case | Action | x | y | w | h |
+|---|---|---:|---:|---:|---:|
+| 0 | Confirm | 276 | 269 | 25 | 16 |
+| 1 | Cancel / Escape | 338 | 269 | 25 | 16 |
+| 2 | Decrease difficulty | 253 | 222 | 16 | 26 |
+| 3 | Increase difficulty | 270 | 222 | 16 | 26 |
+
+`g_wCampaignDifficulty` (Pass 62) cycles 0-2 via cases 2/3 and is
+committed via case 0 -- this table is the full, final button layout
+for the campaign's Easy/Normal/Hard picker.
+
+### `RunNewGameSetupScreen` (`0x430490`)'s 8-entry button row -- partially recovered
+
+**Method**: `HitTestRectArray` (`0x43eb30`) was independently
+re-decompiled to confirm, directly from its own body, that it always
+reads exactly `rectCount` consecutive `{x:i16, y:i16, w:i16, h:i16}`
+(8-byte) records -- removing any doubt about the array's true shape
+for what follows. Re-decompiling `RunNewGameSetupScreen` today (the
+same function Pass 49/50 examined) shows the SAME unresolved
+reference for the 8-entry array's base, but as a *concrete* value
+this time: `HitTestRectArray(&stack0xffffff64, 8, ...)`, i.e. base =
+`entryESP - 0x9c`. (Pass 50 saw `-0xa4` from raw P-code on an earlier
+analysis pass; Ghidra's own re-analysis since then shifted this to
+`-0x9c` -- a reminder that a decompiler's unresolved `PTRSUB` constant
+can drift between analysis runs and should never be trusted without
+independent corroboration, exactly the caution Pass 50 already
+recommended.)
+
+**Corroboration, this pass's real contribution**: `entryESP-0x9c` is
+*exactly* 64 bytes (8 records x 8 bytes) before `entryESP-0x5c`, the
+base of the **already-confirmed** (Pass 48) 10-entry name-list array
+-- with zero gap between the two arrays. This is a strong
+independent cross-check the earlier passes didn't have (their
+10-entry anchor was confirmed, but nobody had directly connected the
+8-entry array's uncertain base to it via exact byte adjacency).
+
+Directly reading every `MOV word ptr [ESP+N],<value>` instruction in
+the function's setup block and resolving each one's true runtime
+address (tracking the 4 callee-saved-register pushes precisely, then
+matching every resolved address against the confirmed 10-entry
+table's own known-correct addresses as a running correctness check)
+recovers **26 of the array's 32 words** -- offsets 12-63 relative to
+the array base, i.e. case 1's `w`/`h` plus cases 2-7's full rects:
+
+| Case | Action | x | y | w | h |
+|---|---|---:|---:|---:|---:|
+| 0 | Male | ? | ? | ? | ? |
+| 1 | Female | ? | ? | 62 | 145 |
+| 2 | Load Existing Pilot | 111 | 228 | 239 | 151 |
+| 3 | Confirm New Pilot | 102 | 275 | 397 | 295 |
+| 4 | Exit to Main Menu | 133 | 20 | 397 | 249 |
+| 5 | Cancel callsign edit | 145 | 20 | 292 | 441 |
+| 6 | Options | 25 | 16 | 397 | 177 |
+| 7 | Toggle recent-name list | 138 | 45 | 324 | 441 |
+
+**Correction to Pass 50**: Pass 50's P-code sweep claimed "no
+instruction anywhere writes to stack offsets -164..-102." That claim
+is **too strong** -- real, literal writes exist covering a large
+sub-range of it (the 26 words above, offsets -144..-94 in decimal).
+Only a much narrower band -- the first 12 bytes of the true array
+(-156..-145, case 0's whole rect plus case 1's x/y) -- genuinely has
+no discoverable write anywhere in the function, which is the part of
+Pass 50's finding that survives.
+
+**Confidence 4** on the raw recovered values and their address
+provenance (directly read, cross-checked against the independently-
+confirmed adjacent table). **Confidence 3**, not 5, on the exact
+x/y/w/h field alignment shown above: two of the seven recovered
+rects (`case 3`: y+h=570; `case 7`: y+h=486) exceed the ~480px
+canvas height every other confirmed screen's hotspots stay within
+(e.g. Pass 51's main-menu buttons all resolve under y+h=460). This
+could mean the alignment above is subtly off by a field, or that
+these two hit-zones are genuinely oversized/overlapping click regions
+on this particular (less-polished) screen -- not resolved either way,
+flagged rather than silently accepted.
+
+Case 0 (Male)'s full rect and case 1's x/y remain **unresolved** --
+no write exists for that specific 12-byte sub-range anywhere in the
+function, matching (a narrower version of) Pass 50's original
+diagnosis. Closing this last gap would require live-debugger memory
+inspection, not further static reading.
+
+### Open follow-ups
+
+- Case 0's full rect and case 1's x/y -- genuinely unrecoverable
+  statically; needs a live debugger.
+- The field-alignment sanity-check flag on cases 3 and 7 (y+h
+  exceeding ~480px) -- not resolved.
+- `profile.bin`'s remaining ~190 unmapped bytes (open since Pass 62).

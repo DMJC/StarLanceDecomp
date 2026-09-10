@@ -3000,3 +3000,42 @@ CONFIRMED (Pass 94 -> Pass 95, strengthened):
   <- open: ObjectTriggerIndexEntry+0x00's 1-vs-2 unused-slot split
   <- open: DAT_0052952c's remaining fields/bounds (Pass 93)
 ```
+
+## Player-creation UI button layouts (2026-09-11, Pass 96)
+
+```
+RunDifficultySelectDialog (0x430300) -- 4-hotspot rect array, fully
+  resolved, confidence 5 (zero decompiler ambiguity):
+    case0 Confirm            {276,269,25,16}
+    case1 Cancel/Escape      {338,269,25,16}
+    case2 Decrease difficulty{253,222,16,26}
+    case3 Increase difficulty{270,222,16,26}
+  g_wCampaignDifficulty (0-2) -> ScaleDamageForDifficulty
+
+RunNewGameSetupScreen (0x430490) 8-entry button row -- Pass 49/50
+  left this fully unresolved (decompiler LEA lands on an invalid
+  offset). Pass 96 partial resolution:
+    true base = entryESP-0x9c, corroborated by exact 64-byte
+    (8 record) adjacency to the CONFIRMED (Pass 48) 10-entry
+    name-list array at entryESP-0x5c (zero gap between them)
+    -> recovers 26/32 words (case1.w/h + case2-7 full rects):
+       case1 Female            {?,?,62,145}
+       case2 Load Existing     {111,228,239,151}
+       case3 Confirm New Pilot {102,275,397,295}
+       case4 Exit Main Menu    {133,20,397,249}
+       case5 Cancel edit       {145,20,292,441}
+       case6 Options           {25,16,397,177}
+       case7 Toggle name list  {138,45,324,441}
+    confidence 4 (values), confidence 3 (field alignment -- case3/
+    case7's y+h exceed the ~480px norm, unexplained)
+    case0 (Male) full rect + case1's x/y: NO write found anywhere in
+    the function -- genuinely unrecoverable without a live debugger
+
+  CORRECTED (Pass 50 -> Pass 96): "-164..-102 zero writes" was too
+  strong; real writes exist across most of that range. Only
+  -156..-145 (12 bytes) has none -- narrower version of the same
+  finding survives.
+
+  <- open: case0's rect / case1's x,y (needs live debugger)
+  <- open: case3/case7's out-of-range y+h
+```
