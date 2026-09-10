@@ -2497,3 +2497,52 @@ ATTEMPTED (not resolved): re-opening the .dte script-interpreter /
      renderer +0x50 mystery) -- no further static-analysis avenue
      identified.
 ```
+
+## Real .dte mission files decoded against ground truth (2026-09-10, Pass 85)
+
+```
+reversing/tools/decode_dte.py (new tool) -- decompresses a .dte (RefPack)
+  and parses its 27-entry directory table, per LoadMissionFile/
+  ReadMissionDirectoryEntry (Pass 7, validated this pass).
+
+set_function_prototype applied to ReadMissionDirectoryEntry (0x452a20):
+  void __fastcall(int *cursorPtr, ushort *typeOut, int base, int *absOffOut)
+  -> LoadMissionFile's 27 call sites now show all 4 args: base (param_3)
+     is the SAME LoadResourceFileBuffer return value for every call,
+     cursor auto-advances +8/call -- fully validates the Pass-7 format.
+
+Read directory entries [0,1,2,3,5,6,16,24] across 4 REAL mission files
+  (mission1/2/5/30.dte):
+    - decompressed size: 850919 bytes, IDENTICAL across all 4
+    - every entry's resolved absolute offset: IDENTICAL across all 4
+      (entry0 always @0x400, entry1 @0x103ff, entry2 @0x303f7, ...,
+       entry16 @0x70ff7, entry24 @0xaf7ef)
+    -> .dte is a FIXED-SIZE-PER-TABLE TEMPLATE, not densely packed
+       variable-length data (NEW structural finding)
+
+  CORRECTION: the header's low-16-bit field ("type/ID" per Pass 7) is
+    NOT a stable type tag -- varies per file for the same table slot:
+      entry0 tag: mission1=0x2380 mission2=0x3d50 mission5=0x3666 mission30=0x14d6
+    A real record-type tag would stay constant across missions for the
+    same table. Real role (checksum? version stamp?) not resolved.
+    Exception: entry24 stayed 0x5f in all 4 -- not investigated.
+
+Entry 0 (DAT_00525fa8) = the mission's OBJECT/NAME STRING TABLE, confirmed
+  via real content, cross-checked across 3 missions as genuinely
+  per-mission (not shared/constant):
+    mission1: us_prowler, ger_lueneburg1/2, us_nanny (ship classes);
+      ussr_sabre1-4 + ussr_kamov (enemy squadron); Proximity/ShipReached/
+      Launched Trigger (named trigger instances); mammoth (ANS Guliver)
+      (named capital ship); Player_Ship; pilots\russian.fm8 (AI behavior
+      file); ms_speech\ms_nam1103.ut etc (speech cue files)
+    mission2: 45th, navpoints, pumagroup, nav_point1/3, patrol routes,
+      badguys, ussr_kamov1, Extras
+    mission5: nav_point1/2/3, ussr_corpse001-033 (wreckage markers, in
+      groups of 3)
+
+  <- open: other 26 tables' record layouts not decoded (only locations
+     confirmed); entry3 looks float-heavy (spawn positions?), entry16
+     has a repeating small-int pattern -- neither confirmed
+  <- open: whether entry0's strings are indexed by the other 26 tables
+  <- open: header low-16-bit field's real meaning
+```

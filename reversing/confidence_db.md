@@ -2035,3 +2035,19 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 
 - Whether `_frm.shp` files share the exact tagged-chunk format with regular mesh `.shp` files (Pass 55/56) -- not compared.
 - The `.dte` interpreter/named-command relationship -- still open, likely needs live debugging.
+
+## Pass 85 -- Real `.dte` mission files decoded against ground truth (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| `LoadMissionFile`'s directory format fully validated against 4 real mission files | 5 | Applied `set_function_prototype` to `ReadMissionDirectoryEntry` to expose all 4 hidden args at its call sites -- confirms constant buffer base across all 27 calls, matching the Pass 7 format exactly. |
+| **CORRECTION**: the directory entry's low-16-bit field is NOT a stable type/record-ID | 4 | Varies unpredictably per file for the same table slot across 4 real missions (entry 0: `0x2380`/`0x3d50`/`0x3666`/`0x14d6`) -- a real type tag would stay constant. More likely a per-file checksum/version stamp; not resolved. |
+| **New structural finding**: `.dte` is a fixed-size-per-table template, not densely packed | 5 | Every directory entry's resolved offset and the total decompressed size (850919 bytes) are byte-identical across all 4 real mission files checked. |
+| Entry 0 (`DAT_00525fa8`) identified: the mission's object/name string table | 5 | Real content verified across 3 mission files: ship classes, named capital ships, named trigger instances, patrol routes, navpoints, wreckage markers, AI pilot-behavior file refs, speech-cue file refs. |
+
+### Open follow-ups
+
+- The other 26 tables' internal record layouts -- only locations confirmed, contents not decoded.
+- Whether entry 0's strings are indexed by the other 26 tables -- not cross-referenced.
+- The directory header's low-16-bit field's real meaning -- not resolved.
+- Whether the 4 per-entry flag bits ever vary (all observed as `0xf` so far) -- not checked widely.

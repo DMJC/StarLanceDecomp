@@ -10065,3 +10065,95 @@ independently cross-checked against other confirmed squadron names.
   attempts. Live debugging is likely the only remaining avenue, per
   the same conclusion reached for the renderer `+0x50` mystery
   (Pass 70).
+
+## Pass 85 -- Real `.dte` mission files decoded against ground truth; `LoadMissionFile`'s directory format corrected (2026-09-10)
+
+User request: work on mission decoding. Real `.dte` mission files ship
+in `gamedata/StarLancer/RESOURCE/` (`mission1.dte` .. `mission32.dte`
+and others) -- applied the already-documented `LoadMissionFile`/
+`ReadMissionDirectoryEntry` format (Pass 7) against 4 of them
+(`mission1`, `mission2`, `mission5`, `mission30`) as ground truth, the
+same methodology used for `profile.bin` (Pass 63) and `capships.spr`
+(Pass 78). New tool: `reversing/tools/decode_dte.py`.
+
+### `ReadMissionDirectoryEntry`'s hidden arguments exposed
+
+`set_function_prototype` was applied to `ReadMissionDirectoryEntry`
+(`0x452a20`, signature already fully known from its own decompile:
+`void __fastcall(int *cursorPtr, ushort *typeOut, int base, int *absOffOut)`)
+to force `LoadMissionFile`'s call sites to show all 4 arguments instead
+of the 2 the decompiler was previously collapsing -- the same technique
+Pass 34/84 used elsewhere. Confirms `param_3` (buffer base) is the
+literal same `LoadResourceFileBuffer` return value for **all 27**
+calls, and the cursor advances automatically by 8 bytes/call --
+directly validating the previously-documented "27 fixed 8-byte
+directory entries, offsets relative to the whole-buffer base" format
+with no remaining ambiguity.
+
+### CORRECTION: the directory entry's low-16-bit field is NOT a stable type/record-ID
+
+Read the same 8 directory-entry indices across 4 different real
+mission files. **Every entry's resolved absolute offset is
+byte-identical across all 4 files** (e.g. entry 0 is always at
+`0x400`, entry 16 always at `0x70ff7`), and **all 4 files decompress
+to the exact same total size, 850919 bytes** -- confirming the `.dte`
+format allocates a fixed-size region per table regardless of how much
+of it a given mission actually uses, rather than densely packing
+variable-length tables. But the low-16-bit header field the original
+Pass-7 writeup called "type/ID" **varies unpredictably per file for
+the same table slot** (entry 0: `0x2380`/`0x3d50`/`0x3666`/`0x14d6`
+across the 4 missions) -- ruling out "stable record-type tag" as its
+role (a real type tag would stay constant for the same table across
+every mission). More likely a per-file checksum, edit/version stamp,
+or similar -- not resolved this pass, but the "type/ID" label is now
+flagged as wrong rather than left uncorrected. (One exception: entry
+24 stayed exactly `0x5f` across all 4 files -- possibly coincidental,
+not investigated further.)
+
+### Entry 0 (`DAT_00525fa8`) identified: the mission's object/name string table
+
+Confidence 5 -- directly read, rich and immediately legible. A
+null-terminated ASCII string blob naming every notable object the
+mission places. Real content pulled from `mission1.dte`:
+
+```
+us_prowler, ger_lueneburg1, ger_lueneburg2, us_nanny      <- ship classes
+ussr_sabre1..4, ussr_kamov                                 <- an enemy fighter squadron + gunship
+Proximity Trigger, ShipReached Trigger (x3), Launched Trigger  <- named trigger instances
+mammoth (ANS Guliver)                                       <- a named capital ship
+Player_Ship                                                  <- the player's own ship object
+pilots\russian.fm8                                           <- an AI pilot-behavior file reference
+ms_speech\ms_nam1103.ut, ms_nam1104.ut, ms_win1111.u        <- mission speech/subtitle cue files
+```
+
+Cross-checked against 2 more missions to confirm this is genuinely
+per-mission content, not a shared constant table:
+- `mission2.dte`: `45th`, `navpoints`, `pumagroup`, `nav_point1/3`,
+  `nav4patrol_route`, `patrol_routemam1/2`, `badguys`, `ussr_kamov1`,
+  `patrol_routebadguys`, `Extras`.
+- `mission5.dte`: `nav_point1/2/3`, `ussr_corpse001/002/003/021/022/023
+  /031/032/033` (destroyed-ship wreckage markers, in groups of 3).
+
+This directly extends the trigger-type catalog (Pass 31) and mission
+scripting work (Passes 25-32) with concrete, real evidence of what a
+mission's design actually looks like: named ship groups, patrol
+routes, proximity/arrival triggers tied to specific ships, and voice
+lines cued to specific mission events.
+
+### Open follow-ups
+
+- The other 26 tables' internal record layouts -- only their fixed
+  directory-entry locations are confirmed; contents not decoded
+  (entry 3's data looks float-heavy, plausibly spawn positions/orientations;
+  entry 16 has a repeating small-int pattern; neither confirmed).
+- What entry 0's strings are actually INDEXED BY from the other 26
+  tables (e.g. does entry 3's spawn-position table reference entry 0's
+  strings by array index?) -- not cross-referenced.
+- The directory header's low-16-bit field's real meaning (checksum?
+  version stamp?) -- not resolved, only shown not to be a stable type
+  tag.
+- The 4 header flag bits (`DAT_00525f9a`/`DAT_00525fa4`/`DAT_005267c6`/
+  `DAT_005294e8`) were all `0xf` (all 4 set) across every entry in
+  every file checked -- if this holds universally, these flags may not
+  vary per-entry in practice despite the per-entry storage, worth a
+  wider check.
