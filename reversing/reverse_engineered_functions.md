@@ -8373,3 +8373,44 @@ the direction of the first comparison didn't cleanly fit either
   flags (Pass 64) against this AI system -- unrelated systems as far
   as traced, but both live in similarly-shaped per-object structures,
   worth a sanity check if confusion arises later.
+
+## Pass 67 -- Mapping 14 specific `.tga` images to their exact call sites (2026-09-10)
+
+Direct request: map out where a specific list of `.tga` files is used.
+Method: located each literal string, then resolved every
+cross-reference to its containing function via `get_bulk_xrefs` +
+`get_function_by_address`. One naming note up front: the requested
+`igoptfade.tga` doesn't exist under that exact spelling -- the real
+file (confirmed in Pass 58/61) is `igoptfad.tga` (no final "e"),
+mapped below under its real name.
+
+| File | Loaded from | Notes |
+|---|---|---|
+| `splash.tga` | `LoadGenericSplashBackdrop` (`0x4ab3f0`, was `FUN_004ab3f0`) -- called by `ShowMissionLoadingScreen` (`0x4ad0a0`, was `FUN_004ad0a0`), itself called from `WinMain` (3 sites), `RunMissionSelectMapScreen`, and `RunMainMenuScreen` | The generic "loading, please wait" backdrop shown while a mission/screen transition is in flight -- not resolution-specific, used from many different top-level transition points. |
+| `sl_splash.tga` / `sl_splash800.tga` / `sl_splash1024.tga` | `LoadStartupSplashBackdrop` (`0x4ab4b0`, was `FUN_004ab4b0`), called exactly once, from `InitializeGraphicsDevice` at startup | All 3 filenames are loaded via a jump table Ghidra couldn't fully recover (`"Could not recover jumptable"` warning) -- read as a resolution-tiered choice (default/800-wide/1024-wide) based on the filename pattern, not independently confirmed per-branch this pass. |
+| `sl_splash2.tga` | Directly inside `RunMainMenuScreen` (`0x428ba7`) | A second, separate splash image shown from the main menu itself, NOT part of the startup selection above. |
+| `sinfade.tga` | `RunNewGameSetupScreen` (`0x430a61`) | The static poster-frame counterpart to `sinfade.bik` (Pass 60's transition-video catalog) -- same screen, same transition. |
+| `main2opt.tga` | `RunOptionsMenuScreen` (`0x42a6e1`) | Loaded by the ARRIVING screen (Options), not the departing one -- `main2opt.bik` plays from `RunMainMenuScreen` (Pass 60) as you leave, while this `.tga` is shown by Options as you land, plausibly as an instant placeholder while the room's own content loads. |
+| `main2sin.tga` | `RunNewGameSetupScreen` (`0x4306cc`) | Same arriving-screen pattern as `main2opt.tga` above. |
+| `mulfade.tga` | `RunSaveLoadScreen` (3 sites: `0x43cf03`, `0x43d5be`, `0x43d5f9`) and `RunMultiplayerLobbyScreen` (`0x44c0f1`) | Shared across two different screens -- both reachable from/adjacent to multiplayer flows. |
+| `optfade.tga` | `RunOptionsMenuScreen` (3 sites: `0x42a7a2`, `0x42a7d3`, `0x42a800`) | All 3 sites are within the Options screen's own sub-screen-transition paths (mirrors `optfade.bik`'s 3 call sites documented in Pass 60). |
+| `igofade.tga` | `RunInGameOptionsScreen` (`0x43977a`) | Poster-frame sibling of `igofade.bik` (Pass 60). |
+| `igoptfad.tga` (not `igoptfade.tga`) | `RunMultiplayerDebriefScreen` (`0x429c56`) and `RunInGameOptionsScreen` (4 sites: `0x43969f`, `0x4396fa`, `0x439744`, `0x439795`) | Shared background texture between the two screens -- matches Pass 60's finding that both reuse the same "in-game overlay" dimming backdrop. |
+| `ingameop.tga` | `RunInGameOptionsScreen` (5 sites: `0x439610`, `0x4396d5`, `0x43972b`, `0x439761`, `0x4397b2`) | This screen's own primary backdrop -- loaded far more times than any other single screen in this list, consistent with it being the base background redrawn behind every one of `RunInGameOptionsScreen`'s own sub-transitions. |
+| `briefdoor` (no literal `.tga` suffix in the string itself -- likely appended by the loader) | `RunMissionBriefingScreen` (`0x437129`), with a SECOND, ship-specific variant at a sibling string address (`0x4e8a28`) | Selected by `DAT_00562dc8 > 0x12` (mission 19+) -- **the exact ANS Reliant/ANS Yamato transfer threshold confirmed in Pass 65.** The briefing-room door texture differs depending on which carrier the player is currently aboard, same as the hub-room hotspot tables and cutscene selection already documented for that boundary. |
+
+### Open follow-ups
+
+- The `sl_splash*.tga` jump table's exact resolution-to-file mapping --
+  Ghidra couldn't recover it; would need manual disassembly of the
+  jump dispatch at `LoadStartupSplashBackdrop` to pin down which
+  filename goes with which detected resolution.
+- `FUN_0043eaf0` (the shared loader both `briefdoor` variants call
+  through) -- not decompiled; would confirm whether `.tga` is really
+  appended there or the string is used as-is for some other resource
+  type.
+- The exact relationship between an "arriving screen loads X.tga" and
+  "departing screen plays X.bik" pattern seen for `main2opt`/
+  `main2sin` -- observed consistently but the actual display timing
+  (does the `.tga` show instantly before the video starts, or after
+  it ends?) wasn't traced at the instruction level.

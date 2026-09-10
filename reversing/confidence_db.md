@@ -1766,3 +1766,18 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 - `FUN_0040ca00`'s exact semantics.
 - `FUN_0040ce70`/`FUN_0040c520` not decompiled.
 - The generation-ID mechanism (`DAT_005185a8`/`DAT_005185b1`) -- purpose not traced.
+
+## Pass 67 -- 14 specific `.tga` images mapped to their exact call sites (2026-09-10)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| All 14 requested `.tga` files' calling function(s) | 5 | Every mapping is a direct `get_bulk_xrefs` result resolved to its containing function, not inferred from filenames. |
+| `briefdoor` texture selected by the exact Reliant/Yamato mission-19 threshold | 5 | `DAT_00562dc8 > 0x12`, the same boundary confirmed in Pass 65 via 2 independent sites; this is now a third. |
+| `LoadGenericSplashBackdrop`/`LoadStartupSplashBackdrop`/`ShowMissionLoadingScreen` (0x4ab3f0/0x4ab4b0/0x4ad0a0, were `FUN_004ab3f0`/`FUN_004ab4b0`/`FUN_004ad0a0`) | 4 | Directly read; the startup one's resolution-tiered `sl_splash*` selection sits behind a jump table Ghidra couldn't recover, so the exact resolution-to-file mapping is not confirmed. |
+| Requested `igoptfade.tga` doesn't exist under that spelling -- real file is `igoptfad.tga` | 5 | Confirmed absent via string search; mapped under its real name instead. |
+
+### Open follow-ups
+
+- The `sl_splash*.tga` jump table's resolution-to-file mapping -- not recovered.
+- `FUN_0043eaf0` (shared `briefdoor` loader) not decompiled.
+- Exact display timing of the "arriving screen's .tga vs departing screen's .bik" pattern -- not traced at instruction level.

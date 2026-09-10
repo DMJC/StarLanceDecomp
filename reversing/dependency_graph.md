@@ -1695,3 +1695,26 @@ PushAiState (0x40cc10, was FUN_0040cc10) -- CORRECTS Pass 17's "AI command struc
   <- depended on by: UpdateShipAiTick, SetShipDestroyedState (Pass 17)
   -> first gate: FUN_0040ca00 (semantics not confidently determined, confidence 1)
 ```
+
+## 14 specific `.tga` images mapped to their call sites (2026-09-10, Pass 67)
+
+```
+LoadGenericSplashBackdrop (0x4ab3f0, was FUN_004ab3f0) -- loads splash.tga
+  <- called by: ShowMissionLoadingScreen (0x4ad0a0, was FUN_004ad0a0)
+       <- called by: WinMain (3x), RunMissionSelectMapScreen, RunMainMenuScreen
+
+LoadStartupSplashBackdrop (0x4ab4b0, was FUN_004ab4b0) -- loads sl_splash.tga /
+  sl_splash800.tga / sl_splash1024.tga via an unrecovered jump table
+  <- called once, from InitializeGraphicsDevice (startup)
+
+RunMainMenuScreen -> sl_splash2.tga (separate from the startup selection above)
+RunNewGameSetupScreen -> sinfade.tga, main2sin.tga
+RunOptionsMenuScreen -> main2opt.tga, optfade.tga (3 sites)
+RunSaveLoadScreen (3 sites) + RunMultiplayerLobbyScreen (1 site) -> mulfade.tga
+RunInGameOptionsScreen -> igofade.tga, ingameop.tga (5 sites), igoptfad.tga (4 sites)
+RunMultiplayerDebriefScreen -> igoptfad.tga (shared with RunInGameOptionsScreen, Pass 60)
+
+RunMissionBriefingScreen (0x437129) -- "briefdoor" texture, TWO variants selected by
+  DAT_00562dc8 > 0x12 -- the same ANS Reliant/ANS Yamato mission-19 transfer threshold
+  confirmed in Pass 65 (now a third independent site using it)
+```
