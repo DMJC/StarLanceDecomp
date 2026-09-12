@@ -11176,3 +11176,111 @@ inspection, not further static reading.
 - The field-alignment sanity-check flag on cases 3 and 7 (y+h
   exceeding ~480px) -- not resolved.
 - `profile.bin`'s remaining ~190 unmapped bytes (open since Pass 62).
+
+## Pass 97 -- `RunReliantInductionTour` fully re-verified: "timeout" corrected to audio-completion, a hidden 6th preamble segment found, abort condition includes right-click (2026-09-12)
+
+Direct request: work on the induction tour. Pass 79 documented this
+function's 5-stage structure at confidence 5 but left 3 things
+unresolved/imprecise: whether the tour is skippable, the exact
+mechanics of "a timeout via `FUN_004620a0`," and (implicitly) whether
+anything happens before the 5-stage loop. All three are now resolved
+by tracing `FUN_004620a0` and its sibling functions to their real
+subsystem.
+
+### Correction: it's not a timeout, it's an audio-completion poll
+
+`FUN_004620a0` (renamed `IsSoundSampleSlotPlaying`), `FUN_00461d80`
+(renamed `PlaySoundSampleAnySlot`), `FUN_00462070`/`FUN_004620d0`
+(renamed `StopSoundSampleSlot`/`StopAllSoundSampleSlots`), and
+`FUN_00462110` (renamed `InitSoundSampleSlotSystem`) are a small,
+self-contained **8-slot Miles/AIL sound-sample playback subsystem**
+(`_AIL_init_sample_4`, `_AIL_set_sample_*`, `_AIL_start_sample_4`,
+`_AIL_stop_sample_4` -- the same Miles Sound System Bink itself uses
+for its own audio, per Pass 79's `_BinkOpenMiles_4` reference, but
+this is a wholly separate slot table at `DAT_00539aec`/stride `0x359`
+ints per slot) -- **not** a video-frame timer as Pass 79 speculated.
+
+Applying `set_function_prototype`/re-disassembling the exact call
+site (`0x439019`-`0x43901b`) shows the induction tour always passes
+slot `0` (`XOR ECX,ECX; CALL IsSoundSampleSlotPlaying`), and always
+loads its narration data via `HOG_BigRead("<name>.box")` immediately
+before registering it with `PlaySoundSampleAnySlot(dataPtr, 0, 0,
+127)` (127 = 0x7f = max volume, confirmed via the `0.007874016 =
+1/127` scaling constant inside `PlaySoundSampleAnySlot` -- **not** a
+duration, closing the door on the "timeout" reading entirely).
+
+**Corrected advance condition** (confidence 5): a stage advances when
+`DAT_0051d9e4==1` (current clip's arrival state has settled) **and**
+(SPACE is pressed [scancode `0x39`, confirmed via disassembly] **or**
+`IsSoundSampleSlotPlaying(0)` returns false, i.e. **the current
+stage's narration audio sample -- `"<name>.box"`, loaded straight
+from the archive and played through the Miles slot system -- has
+finished playing on its own**). There is no frame-count/clock timer
+anywhere in this path.
+
+### New finding: a 6th, previously undocumented "welcome" preamble
+
+Before the 5-stage loop (Pass 79's table) even starts, the function
+opens a **fixed, non-parameterized** video (`rel_tv_enriq.bik`) and
+loads/plays a **fixed** narration sample, `enr_intro.box` (confirmed
+directly: `inspect_memory_content` on the format-string operand shows
+the literal string `"enr_intro.box"`, distinct from the per-stage
+`"%s.box"` pattern used inside the loop). This preamble is driven by
+the exact same interactive loop as every other stage (Space/audio-
+completion to advance, Escape/right-click to abort) -- it's not a
+non-interactive splash, it's a genuine 6th segment, just one that
+happens to share the SAME physical clip (`rel_tv_enriq.bik`) that
+stage 4 later reuses as its own ambient loop (with different
+narration, `enr_outro.box`) -- a deliberate "Enriq appears on a video
+monitor" bookend, not a bug or a duplicate entry.
+
+**Consequence for Pass 80's jump table**: since this preamble also
+leaves `iVar7==0` if the player exits during it (identical to
+actually reaching and quitting during stage 0, the locker room),
+**Pass 80's case-0 row ("quit during stage 0, locker room") is
+ambiguous** -- it covers both "quit during the Enriq-welcome preamble"
+and "quit during the locker-room stage proper." Not a wrong finding,
+just an unresolved-until-now ambiguity in what "stage 0" covers.
+
+### Correction: the tour can be aborted by right-click, not just Escape
+
+Decompiling `FUN_004360d0` (the ubiquitous per-frame input-service
+function, called from nearly every screen in the project) shows it
+writes `DAT_0051da0c = local_8 & 0x80` and `DAT_0051d9d4 = local_7 &
+0x80` from the same raw button-poll call, back to back -- the exact
+same "high bit of a button-state byte" shape as the already-
+established left-mouse-button flag `DAT_0051da0c`. This makes
+`DAT_0051d9d4` (renamed `g_bRightMouseButtonHeld`) the **right mouse
+button held** flag. The induction tour's exit check is `CheckKeyEdgeState(1,0,1) != 0
+|| DAT_0051d9d4 != 0` -- **holding the right mouse button aborts the
+entire tour exactly like Escape does**, closing Pass 79's open
+"whether it can be skipped/aborted entirely" question at confidence 5.
+This is a general finding, not induction-tour-specific: the same
+right-click-to-skip pattern is available to every other reader of
+`g_bRightMouseButtonHeld` (`RunMissionBriefingScreen`,
+`RunMedalCaseScreen`, all 3 `PlayBinkMovie*` functions).
+
+### `ResetNewPilotSessionState` (was `FUN_0049cd20`), refined
+
+Confidence 4 (up from Pass 79's 3). Re-read at the byte level: the
+260-byte pilot-roster reset (`&PTR_DAT_005047d2`..`0x5048d6`) is a
+**raw byte-for-byte fill of value `2`**, not a per-record status-field
+write -- since it starts 2 bytes into record 0 (i.e. record 0's
+`status` byte) and advances one byte at a time for the full 260
+bytes, it also overwrites records 1-64's `nameValue` field with the
+byte pattern `0x0202` as a side effect (only record 0's own
+`nameValue` survives untouched). Whether this side effect matters
+(i.e. whether `nameValue` gets regenerated before it's next read) is
+not traced. The 6-field struct at `0x58a958` (Pass 89's savegame
+5th-chunk source) is confirmed to be six `int16` fields, reset to the
+concrete sentinel/default values `{0xffff, 0x55, 0x6c, 0x56, 0xac,
+7}` for a fresh pilot.
+
+### Open follow-ups
+
+- Whether records 1-64's clobbered `nameValue` (`0x0202`) is ever
+  read before being legitimately reassigned -- not traced.
+- The exact consumer/meaning of the 6 sentinel values at `0x58a958`.
+- Pass 80's jump-table case 0 ambiguity (preamble vs. locker-room
+  stage) -- not otherwise resolvable without further context on how
+  the caller distinguishes them (it may simply not need to).

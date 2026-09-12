@@ -3039,3 +3039,49 @@ RunNewGameSetupScreen (0x430490) 8-entry button row -- Pass 49/50
   <- open: case0's rect / case1's x,y (needs live debugger)
   <- open: case3/case7's out-of-range y+h
 ```
+
+## `RunReliantInductionTour` re-verified (2026-09-12, Pass 97)
+
+```
+IsSoundSampleSlotPlaying/PlaySoundSampleAnySlot/StopSoundSampleSlot/
+StopAllSoundSampleSlots/InitSoundSampleSlotSystem (were FUN_004620a0/
+FUN_00461d80/FUN_00462070/FUN_004620d0/FUN_00462110) -- 8-slot Miles/
+AIL sound-sample subsystem (DAT_00539aec, stride 0x359 ints/slot),
+independent of Bink's own audio path. RunReliantInductionTour always
+uses slot 0.
+
+RunReliantInductionTour's advance condition, CORRECTED (Pass 79 ->
+Pass 97):
+  WRONG (Pass 79): "player input (advance key) or a timeout via
+    FUN_004620a0"
+  RIGHT (Pass 97): DAT_0051d9e4==1 AND (SPACE [0x39] pressed OR
+    IsSoundSampleSlotPlaying(0)==0, i.e. the current stage's
+    HOG_BigRead-loaded "<name>.box" narration sample finished
+    playing). No timer/clock involved anywhere.
+
+NEW: undocumented 6th "welcome" preamble, before Pass 79's 5-stage
+loop: fixed video rel_tv_enriq.bik + fixed narration enr_intro.box
+(confirmed via direct string read of the format-string operand).
+Reuses stage 4's own ambient-loop clip; shares iVar7==0 with stage 0
+-> Pass 80's jump-table case 0 ("quit during stage 0") is ambiguous
+between this preamble and the real locker-room stage.
+
+CORRECTED (Pass 79 -> Pass 97): abort is Escape (scancode 1) OR
+g_bRightMouseButtonHeld (was DAT_0051d9d4, confirmed via
+FUN_004360d0's button-poll writes mirroring the established left-
+button flag DAT_0051da0c) -- right-click also fully exits. Same flag
+gates RunMissionBriefingScreen, RunMedalCaseScreen, all 3
+PlayBinkMovie* functions -- a general finding, not induction-tour-
+specific.
+
+ResetNewPilotSessionState (was FUN_0049cd20), refined: the 260-byte
+pilot-roster reset is a raw byte fill (value 2), which also clobbers
+records 1-64's nameValue field to 0x0202 as a side effect (only
+record 0 keeps its real nameValue). The 6-field struct at 0x58a958
+(Pass 89's savegame 5th-chunk source) resets to {0xffff,0x55,0x6c,
+0x56,0xac,7}.
+
+  <- open: is the clobbered nameValue (0x0202) read before reassignment?
+  <- open: 0x58a958's 6 sentinel values' exact meaning
+  <- open: Pass 80 case-0 ambiguity (preamble vs. locker-room stage)
+```

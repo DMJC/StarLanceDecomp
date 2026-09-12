@@ -2217,3 +2217,18 @@ All twelve menu screens' hotspot layouts are now at confidence 5 except: `RunNew
 
 - Case 0 (Male)'s full rect and case 1 (Female)'s x/y -- statically unrecoverable, needs live debugging.
 - The y+h-exceeds-480px sanity-check flag on cases 3 and 7.
+
+## Pass 97 -- `RunReliantInductionTour` re-verified (2026-09-12)
+
+| Name | Confidence | Notes |
+|---|---:|---|
+| **CORRECTION**: `IsSoundSampleSlotPlaying`/`PlaySoundSampleAnySlot` (was `FUN_004620a0`/`FUN_00461d80`) are an 8-slot Miles/AIL sound-sample subsystem, not a video timer | 5 | Pass 79's "timeout via FUN_004620a0" retracted -- the advance gate is literally "has the current stage's narration `.box` audio sample finished playing." |
+| New: a 6th, previously undocumented preamble segment (`rel_tv_enriq.bik` + `enr_intro.box`) plays before the 5-stage loop | 5 | Fixed filenames, confirmed via direct string read; reuses stage 4's own ambient-loop clip with different narration. |
+| **CORRECTION**: the tour can be aborted by right-click (`g_bRightMouseButtonHeld`, was `DAT_0051d9d4`), not just Escape | 5 | Confirmed via `FUN_004360d0`'s button-poll writes, mirroring the established left-button flag `DAT_0051da0c`. General finding -- same flag gates `RunMissionBriefingScreen`, `RunMedalCaseScreen`, all 3 `PlayBinkMovie*` functions. |
+| `ResetNewPilotSessionState` (was `FUN_0049cd20`)'s 260-byte reset also clobbers records 1-64's `nameValue` to `0x0202` | 4 (up from 3) | Byte-level re-read: it's a raw fill, not a per-field write; the 6-field struct at `0x58a958` now has concrete reset values `{0xffff,0x55,0x6c,0x56,0xac,7}`. |
+
+### Open follow-ups
+
+- Whether the clobbered `nameValue` (`0x0202`) on records 1-64 is read before reassignment.
+- The 6 sentinel values at `0x58a958`'s exact meaning/consumer.
+- Pass 80's jump-table case 0 ambiguity (preamble vs. locker-room stage).
